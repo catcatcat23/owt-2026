@@ -22,6 +22,10 @@ from torch.utils.tensorboard import SummaryWriter
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 
+from torch.utils.data import DataLoader
+from datasets.dataset import dataset_reader, RandomGenerator
+import random
+
 import timm
 
 assert timm.__version__ == "0.3.2"  # version check
@@ -31,6 +35,7 @@ import util.misc as misc
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
 import models_mae
+import models_mae_token
 
 from engine_pretrain import train_one_epoch
 
@@ -101,6 +106,11 @@ def get_args_parser():
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
 
+    ## new
+    # parser.add_argument('--img_size', type=int, default=256, help='input patch size of network input')
+    parser.add_argument('--num_classes', type=int, default=1, help='output channel of network')
+
+
     return parser
 
 
@@ -119,14 +129,19 @@ def main(args):
 
     cudnn.benchmark = True
 
-    # simple augmentation
-    transform_train = transforms.Compose([
-            transforms.RandomResizedCrop(args.input_size, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-    dataset_train = datasets.ImageFolder(os.path.join(args.data_path, 'train'), transform=transform_train)
-    print(dataset_train)
+    if args.num_classes == 1:
+        # simple augmentation
+        transform_train = transforms.Compose([
+                transforms.RandomResizedCrop(args.input_size, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+        dataset_train = datasets.ImageFolder(os.path.join(args.data_path, 'train'), transform=transform_train)
+        print(dataset_train)
+    else:
+        dataset_train = dataset_reader(base_dir=args.data_path, split="train", num_classes=args.num_classes, 
+                                    transform=transforms.Compose([RandomGenerator(output_size=[args.input_size, args.input_size], low_res=[128, 128])]))
+        print("The length of train set is: {}".format(len(dataset_train)))
 
     if True:  # args.distributed:
         num_tasks = misc.get_world_size()
@@ -144,16 +159,25 @@ def main(args):
     else:
         log_writer = None
 
-    data_loader_train = torch.utils.data.DataLoader(
-        dataset_train, sampler=sampler_train,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        pin_memory=args.pin_mem,
-        drop_last=True,
-    )
+    if args.num_classes == 1:
+        data_loader_train = torch.utils.data.DataLoader(
+            dataset_train, sampler=sampler_train,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            pin_memory=args.pin_mem,
+            drop_last=True,
+        )
+    else:
+        def worker_init_fn(worker_id):
+            random.seed(args.seed + worker_id)
+        data_loader_train = DataLoader(dataset_train, batch_size=args.batch_size, sampler=sampler_train, num_workers=args.num_workers, pin_memory=args.pin_mem,drop_last=True,
+                             worker_init_fn=worker_init_fn)
     
     # define the model
-    model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
+    if args.num_classes == 1:
+        model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
+    else:
+        model = models_mae_token.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
 
     model.to(device)
 

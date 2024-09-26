@@ -370,8 +370,13 @@ class dataset_reader(Dataset):
     def __getitem__(self, idx):
         if self.split == "train":
 
-            data = read_image(self.sample_list[idx])
-            # print("self.sample_list[idx]", self.sample_list[idx]) # /mnt/weka/wekafs/rad-megtron/cchen/prostateD/2D_all_5slice//0027/images/2Dimage_0015.pkl
+            if self.sample_list[idx].endswith(".pkl"):
+                data = read_image(self.sample_list[idx])
+                # print("self.sample_list[idx]", self.sample_list[idx]) # /mnt/weka/wekafs/rad-megtron/cchen/prostateD/2D_all_5slice//0027/images/2Dimage_0015.pkl
+            elif self.sample_list[idx].endswith(".png") or self.sample_list[idx].endswith(".jpg"):
+                data = cv2.imread(self.sample_list[idx], cv2.IMREAD_UNCHANGED)
+                data = cv2.cvtColor(data, cv2.COLOR_BGR2RGB)
+                
             # if 'synapseCT' in self.sample_list[idx]:
             if self.num_classes==12:
                 HU_min, HU_max = -200, 250
@@ -384,6 +389,8 @@ class dataset_reader(Dataset):
                 # elif 'prostate' in self.sample_list[idx]: 
             elif self.num_classes==1: ## only prostate not pancreas 
                 data = np.float32(data)
+            elif self.num_classes==9: ## only abaltas 
+                data = np.float32(data)
             elif self.num_classes==56 or self.num_classes==78 or self.num_classes==131:
                 data = np.float32(data)
             else:
@@ -391,18 +398,23 @@ class dataset_reader(Dataset):
             data = (data-data.min())/(data.max()-data.min()+0.00000001)
             h, w, d = data.shape
 
-            data = np.float32(data)
             ## 2d mae
-            data = data[:,:,2]
-            data = np.expand_dims(data, axis=2)
-            data = np.repeat(data, 3, axis=2)
+            if self.sample_list[idx].endswith(".pkl"): ## only pkl 5 slices needs
+                data = data[:,:,2]
+                data = np.expand_dims(data, axis=2)
+                data = np.repeat(data, 3, axis=2)
+            elif self.sample_list[idx].endswith(".png") or self.sample_list[idx].endswith(".jpg"):
+                pass
             
-            mask = read_image(self.masks_list[idx])
-            mask = np.float32(mask)
-            ## 2d mae
-            mask = mask[:,:,2]
-            mask = np.expand_dims(mask, axis=2)
-            mask = np.repeat(mask, 3, axis=2)
+            if self.sample_list[idx].endswith(".pkl"):
+                mask = read_image(self.masks_list[idx])
+                ## 2d mae
+                mask = mask[:,:,2]
+                mask = np.expand_dims(mask, axis=2)
+                mask = np.repeat(mask, 3, axis=2)
+            elif self.sample_list[idx].endswith(".png") or self.sample_list[idx].endswith(".jpg"):
+                mask = cv2.imread(self.masks_list[idx], cv2.IMREAD_UNCHANGED)
+                mask = cv2.cvtColor(mask, cv2.COLOR_BGR2RGB)
             
             if self.num_classes==12:
                 mask[mask==13] = 12
@@ -411,6 +423,7 @@ class dataset_reader(Dataset):
             label = np.float32(mask)
 
         sample = {'image': image, 'label': label}
+        
         if self.transform:
             sample = self.transform(sample)
 

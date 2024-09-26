@@ -34,8 +34,8 @@ import timm.optim.optim_factory as optim_factory
 import util.misc as misc
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
-import models_mae
-import models_mae_token
+# import models_mae
+# import models_mae_token
 
 from engine_pretrain import train_one_epoch
 
@@ -109,12 +109,16 @@ def get_args_parser():
     ## new
     # parser.add_argument('--img_size', type=int, default=256, help='input patch size of network input')
     parser.add_argument('--num_classes', type=int, default=1, help='output channel of network')
+    parser.add_argument('--arch_version', type=str, default='v0', help='v0, v1...')
+    parser.add_argument('--token_factor', type=int, default=1, help='how many tokens to generate a class')
 
 
     return parser
 
 
 def main(args):
+    args.num_classes_with_bg = args.num_classes + 1
+
     misc.init_distributed_mode(args)
 
     print('job dir: {}'.format(os.path.dirname(os.path.realpath(__file__))))
@@ -175,9 +179,15 @@ def main(args):
     
     # define the model
     if args.num_classes == 1:
+        import models_mae
         model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
     else:
-        model = models_mae_token.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
+        if args.arch_version == 'v0':
+            import models_mae_token
+            model = models_mae_token.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
+        elif args.arch_version == 'v1':
+            import models_mae_token2
+            model = models_mae_token2.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
 
     model.to(device)
 

@@ -37,10 +37,10 @@ class MaskedAutoencoderViT(nn.Module):
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim), requires_grad=False)  # fixed sin-cos embedding
 
         self.model_args = model_args
-        # print("self.model_args", self.model_args)
-        ### self.blocks = nn.ModuleList([
-        ###     Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
-        ###     for i in range(depth)])
+        print("self.model_args", self.model_args)
+        # self.blocks = nn.ModuleList([
+        #     Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
+        #     for i in range(depth)])
         self.blocks1 = nn.ModuleList([
             Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
             for i in range(int(depth/2))])
@@ -56,14 +56,14 @@ class MaskedAutoencoderViT(nn.Module):
 
         # --------------------------------------------------------------------------
         # MAE decoder specifics
-        ###  self.decoder_embed = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
+        # self.decoder_embed = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
         self.decoder_embed = SpatialRestore(embed_dim, decoder_embed_dim, self.model_args.organ_token_total, img_size//patch_size)
 
-        ###  self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
+        # self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
         self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        # print("self.mask_token init", self.mask_token)
+        print("self.mask_token init", self.mask_token)
 
-        ###  self.decoder_pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, decoder_embed_dim), requires_grad=False)  # fixed sin-cos embedding
+        # self.decoder_pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, decoder_embed_dim), requires_grad=False)  # fixed sin-cos embedding
 
         self.decoder_blocks = nn.ModuleList([
             Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
@@ -83,8 +83,8 @@ class MaskedAutoencoderViT(nn.Module):
         pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
         self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
-        ### decoder_pos_embed = get_2d_sincos_pos_embed(self.decoder_pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
-        ### self.decoder_pos_embed.data.copy_(torch.from_numpy(decoder_pos_embed).float().unsqueeze(0))
+        # decoder_pos_embed = get_2d_sincos_pos_embed(self.decoder_pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
+        # self.decoder_pos_embed.data.copy_(torch.from_numpy(decoder_pos_embed).float().unsqueeze(0))
 
         # initialize patch_embed like nn.Linear (instead of nn.Conv2d)
         w = self.patch_embed.proj.weight.data
@@ -154,57 +154,58 @@ class MaskedAutoencoderViT(nn.Module):
         # Only save tokens that mask is not 0
         x_masked = x[mask == 1].reshape(B, -1, C)
 
-        # print("x_masked.shape", x_masked.shape, x_masked) # torch.Size([64, 100, 768])
-        # print("mask.shape", mask.shape, mask) # torch.Size([64, 200])
+        print("x_masked.shape", x_masked.shape, x_masked) # torch.Size([64, 100, 768])
+
+        print("mask.shape", mask.shape, mask) # torch.Size([64, 200])
 
         return x_masked, mask
 
     def token_restore(self, x_masked, mask):
-        # print("x_masked.shape before restore", x_masked.shape, x_masked) # torch.Size([64, 100, 768])
+        print("x_masked.shape before restore", x_masked.shape, x_masked) # torch.Size([64, 100, 768])
         B, L, C = x_masked.shape
         x_restored = torch.zeros((B, self.model_args.organ_token_total, C), device=x_masked.device, dtype=x_masked.dtype)
-        # print("self.mask_token 2", self.mask_token, self.mask_token.shape) # torch.Size([1, 1, 768])
+        print("self.mask_token 2", self.mask_token, self.mask_token.shape) # torch.Size([1, 1, 768])
 
         masked_indices = torch.nonzero(mask == 0, as_tuple=False)[:, 1].reshape(B, -1)
         mask_tokens = self.mask_token.repeat(x_restored.shape[0], x_restored.shape[1] - x_masked.shape[1], 1)
         x_restored = x_restored.scatter(1, masked_indices.unsqueeze(-1).expand(-1, -1, C), mask_tokens.to(x_restored.dtype))
 
-        # print("mask_tokens", mask_tokens, mask_tokens.shape) # torch.Size([64, 100, 768])
-        # print("x_restored.shape1", x_restored.shape, x_restored) # torch.Size([64, 200, 768])
+        print("mask_tokens", mask_tokens, mask_tokens.shape) # torch.Size([64, 100, 768])
+        print("x_restored.shape1", x_restored.shape, x_restored) # torch.Size([64, 200, 768])
 
         unmasked_indices = torch.nonzero(mask == 1, as_tuple=False)[:, 1].reshape(B, -1)
         x_restored = x_restored.scatter(1, unmasked_indices.unsqueeze(-1).expand(-1, -1, C), x_masked)
 
-        # print("x_restored.shape2", x_restored.shape, x_restored) # torch.Size([64, 200, 768])
+        print("x_restored.shape2", x_restored.shape, x_restored) # torch.Size([64, 200, 768])
 
         return x_restored
 
     def forward_encoder(self, x, mask_ratio, middle = None):
         image_target, random_selected_class = middle["image_target"], middle["random_selected_class"]
 
-        # print("encoder, x.shape", x.shape) # torch.Size([64, 3, 224, 224])
+        print("encoder, x.shape", x.shape) # torch.Size([64, 3, 224, 224])
         # embed patches
         x = self.patch_embed(x)
-        # print("encoder, x.shape2", x.shape) # torch.Size([64, 196, 768])
+        print("encoder, x.shape2", x.shape) # torch.Size([64, 196, 768])
 
         # add pos embed w/o cls token
         x = x + self.pos_embed[:, 1:, :]
-        # print("encoder, x.shape3", x.shape) # torch.Size([64, 196, 768])
+        print("encoder, x.shape3", x.shape) # torch.Size([64, 196, 768])
 
         # masking: length -> length * mask_ratio
-        ### x, mask, ids_restore = self.random_masking(x, mask_ratio)
+        # x, mask, ids_restore = self.random_masking(x, mask_ratio)
 
         # append cls token ## token2: save slice info here
         cls_token = self.cls_token + self.pos_embed[:, :1, :]
-        # print("cls_token.shape1", cls_token.shape) # torch.Size([1, 1, 768])
+        print("cls_token.shape1", cls_token.shape) # torch.Size([1, 1, 768])
         cls_tokens = cls_token.expand(x.shape[0], -1, -1)
-        # print("cls_tokens.shape2", cls_tokens.shape) # torch.Size([64, 1, 768])
+        print("cls_tokens.shape2", cls_tokens.shape) # torch.Size([64, 1, 768])
         x = torch.cat((cls_tokens, x), dim=1)
-        # print("x.shape4", x.shape) # torch.Size([64, 50, 768]) ## token2 torch.Size([64, 197, 768])
+        print("x.shape4", x.shape) # torch.Size([64, 50, 768]) ## token2 torch.Size([64, 197, 768])
 
         # apply Transformer blocks
         for bi, blk in enumerate(self.blocks1):
-            # print("bi", bi)
+            print("bi", bi)
             x = blk(x) ## token2 torch.Size([64, 197, 768])
         x = self.norm(x)
 
@@ -212,65 +213,65 @@ class MaskedAutoencoderViT(nn.Module):
         x = x[:,1:,:]
         x, _ = self.organ_embed(x) ## torch.Size([64, 200, 768])
 
-        # print("x.shape before random", x.shape, x) # torch.Size([64, 200, 768])
+        print("x.shape before random", x.shape, x) # torch.Size([64, 200, 768])
         ## random mask organ tokens
         x_masked, mask = self.random_masking(x, random_selected_class) ## torch.Size([64, 100, 768])
         x_masked_ = torch.cat((cls_tokens, x_masked), dim=1) ## torch.Size([64, 101, 768])
-        # print("x_masked_.shape after cls token", x_masked_.shape, x_masked_) # torch.Size([64, 101, 768])
+        print("x_masked_.shape after cls token", x_masked_.shape, x_masked_) # torch.Size([64, 101, 768])
 
         ## encoder2 (forward middle)
         for bi, blk in enumerate(self.blocks2):
-            # print("bi", bi)
+            print("bi", bi)
             x_masked_ = blk(x_masked_) ## token2 torch.Size([64, 101, 768])
         x_masked_ = self.norm(x_masked_)
-        # print("x_masked_.shape after encoder2", x_masked_.shape) # torch.Size([64, 101, 768])
+        print("x_masked_.shape after encoder2", x_masked_.shape) # torch.Size([64, 101, 768])
 
         cls_tokens = x_masked_[:,:1,:]
         x_masked = x_masked_[:,1:,:]
 
         x_restored = self.token_restore(x_masked, mask) ## torch.Size([64, 200, 768])
-        ### x_restored = torch.cat((cls_tokens, x_restored), dim=1) ## torch.Size([64, 201, 768])
+        # x_restored = torch.cat((cls_tokens, x_restored), dim=1) ## torch.Size([64, 201, 768])
         # print("x_restored.shape final", x_restored.shape)
 
         return x_restored, cls_tokens
-        ### return x, mask, ids_restore
+        # return x, mask, ids_restore
 
     def forward_decoder(self, x_restored, cls_tokens = None):
         # embed tokens # torch.Size([64, 200, 768])
         x, _ = self.decoder_embed(x_restored)
-        # print("decoder, x.shape", x.shape) # torch.Size([64, 196, 512])
+        print("decoder, x.shape", x.shape) # torch.Size([64, 196, 512])
 
-        ### append mask tokens to sequence
-        ### mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1)
-        ### print("decoder, mask_tokens.shape", mask_tokens.shape) # torch.Size([64, 147, 512])
-        ### x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
-        ### print("decoder, x_.shape1", x_.shape) # torch.Size([64, 196, 512])
-        ### x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle
-        ### print("decoder, x_.shape2", x_.shape) # torch.Size([64, 196, 512])
-        ### x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
-        ### print("decoder, x.shape3", x.shape) # torch.Size([64, 197, 512])
+        # append mask tokens to sequence
+        # mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1)
+        # print("decoder, mask_tokens.shape", mask_tokens.shape) # torch.Size([64, 147, 512])
+        # x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
+        # print("decoder, x_.shape1", x_.shape) # torch.Size([64, 196, 512])
+        # x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle
+        # print("decoder, x_.shape2", x_.shape) # torch.Size([64, 196, 512])
+        # x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
+        # print("decoder, x.shape3", x.shape) # torch.Size([64, 197, 512])
 
-        ### add pos embed
-        ### x = x + self.decoder_pos_embed
-        ### print("decoder, x.shape4", x.shape) # torch.Size([64, 197, 512])
+        # add pos embed
+        # x = x + self.decoder_pos_embed
+        # print("decoder, x.shape4", x.shape) # torch.Size([64, 197, 512])
 
         ## shouldn't have class tokens for generation
-        ### x = torch.cat((cls_tokens, x), dim=1) # torch.Size([64, 197, 512])
+        # x = torch.cat((cls_tokens, x), dim=1) # torch.Size([64, 197, 512])
 
         # apply Transformer blocks
         ## v2 for vqgan decoder, for better generation results (maybe VQ tokens?)
         for blk in self.decoder_blocks:
             x = blk(x)
         x = self.decoder_norm(x)
-        # print("decoder, x.shape5", x.shape) # torch.Size([64, 197, 512])
+        print("decoder, x.shape5", x.shape) # torch.Size([64, 197, 512])
 
         # predictor projection
         x = self.decoder_pred(x)
-        # print("decoder, x.shape6", x.shape) # torch.Size([64, 197, 768])
+        print("decoder, x.shape6", x.shape) # torch.Size([64, 197, 768])
 
-        ### remove cls token
-        ### x = x[:, 1:, :]
-        ### print("decoder, x.shape7", x.shape) # torch.Size([64, 196, 768])
+        # remove cls token
+        # x = x[:, 1:, :]
+        # print("decoder, x.shape7", x.shape) # torch.Size([64, 196, 768])
 
         return x
 
@@ -282,22 +283,22 @@ class MaskedAutoencoderViT(nn.Module):
         """
         # print("loss, imgs.shape", imgs.shape) # torch.Size([64, 3, 224, 224])
         target = self.patchify(image_target)
-        # print("loss, target.shape", target.shape) # torch.Size([64, 196, 768])
+        print("loss, target.shape", target.shape) # torch.Size([64, 196, 768])
         if self.norm_pix_loss:
             mean = target.mean(dim=-1, keepdim=True)
             var = target.var(dim=-1, keepdim=True)
             target = (target - mean) / (var + 1.e-6)**.5
 
-        # print("loss, pred.shape, target.shape", pred.shape, target.shape) # torch.Size([64, 196, 768]) torch.Size([64, 196, 768])
+        print("loss, pred.shape, target.shape", pred.shape, target.shape) # torch.Size([64, 196, 768]) torch.Size([64, 196, 768])
         target = self.unpatchify(target)
         pred = self.unpatchify(pred)
         loss = (pred - target) ** 2
-        ### loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
+        # loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
         loss = loss.mean()
 
-        # print("loss", loss)
+        print("loss", loss)
 
-        ### loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
+        # loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
         return loss
 
     def forward(self, imgs, mask_ratio=0.75, middle=None): ## imgs == combined latent, when args.decoder_only
@@ -305,14 +306,14 @@ class MaskedAutoencoderViT(nn.Module):
         # middle["organ_token_total"] = 1*args.token_factor*1 + args.token_factor*args.num_classes ## 20+180 = 200
         # middle["organ_token_selet"] = args.token_factor*len(random_selected_class) ## 100
         # print('middle["organ_token_total"], middle["organ_token_selet"]', middle["organ_token_total"], middle["organ_token_selet"])
-        # print("imgs.shape, mask_ratio", imgs.shape, mask_ratio) ## torch.Size([64, 3, 224, 224]) 0.75
+        print("imgs.shape, mask_ratio", imgs.shape, mask_ratio) ## torch.Size([64, 3, 224, 224]) 0.75
         # if args.decoder_only == False:
-        ### latent, mask, ids_restore = self.forward_encoder(imgs, mask_ratio, middle = middle)
+        # latent, mask, ids_restore = self.forward_encoder(imgs, mask_ratio, middle = middle)
         x_restored, cls_tokens = self.forward_encoder(imgs, mask_ratio, middle = middle)
         # print("latent.shape, mask.shape", latent.shape, mask.shape) # torch.Size([64, 50, 768]) torch.Size([64, 196])
-        ### pred = self.forward_decoder(latent) #, ids_restore)  # [N, L, p*p*3] ## this latent should be 197,768 after OrganFuse (TokenFuse)
+        # pred = self.forward_decoder(latent) #, ids_restore)  # [N, L, p*p*3] ## this latent should be 197,768 after OrganFuse (TokenFuse)
         pred = self.forward_decoder(x_restored) #, cls_tokens)
-        # print("pred.shape", pred.shape) # torch.Size([64, 196, 768])
+        print("pred.shape", pred.shape) # torch.Size([64, 196, 768])
         loss = self.forward_loss(image_target, pred) #, mask)
         return loss, pred, None
 

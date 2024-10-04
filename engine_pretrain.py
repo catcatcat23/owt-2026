@@ -52,25 +52,27 @@ def train_one_epoch(model: torch.nn.Module,
                 # print("samples['case_name']", samples['case_name']) 
             image = samples['image'].to(device, non_blocking=True)
             label = samples['label'].to(device, non_blocking=True)
+            case_name = samples['case_name']
             # print("image.shape, label.shape", image.shape, label.shape)  # torch.Size([64, 3, 224, 224]), torch.Size([64, 3, 224, 224]) 
             samples = image
 
             if args.num_classes > 1:
                 image_target = image.clone()
-                mask_ratio_class = args.mask_ratio
                 class_list = list(range(args.num_classes_with_bg)) ## 0,1,2,3,4,5,6,7,8,9 ## tmp test include 0; or list(range(1, args.num_classes_with_bg))
                 random.shuffle(class_list)
-                random_selected_class = class_list[:int(args.num_classes*mask_ratio_class)]
+                random_selected_class = class_list[:int(args.num_classes_with_bg*args.mask_ratio)]
+                # print("random_selected_class", random_selected_class)
 
                 for ms in random_selected_class:
                     image_target[label==ms] = 0
+                # print("image.shape, image_target.shape", image.shape, image_target.shape)
 
         with torch.cuda.amp.autocast():
             if args.arch_version == 'v0':
                 loss, _, _ = model(samples, mask_ratio=args.mask_ratio)
-            else:
+            elif args.arch_version == 'v1':
                 middle = {"image_target": image_target, "random_selected_class": random_selected_class}
-                loss, _, _ = model(samples, mask_ratio=args.mask_ratio, middle=middle, args=args)#, mask_ratio=args.mask_ratio)
+                loss, _, _ = model(samples, mask_ratio=args.mask_ratio, middle=middle)#, mask_ratio=args.mask_ratio)
 
         loss_value = loss.item()
 

@@ -118,6 +118,8 @@ def get_args_parser():
 
 def main(args):
     args.num_classes_with_bg = args.num_classes + 1
+    args.organ_token_total = 1*args.token_factor*1 + args.token_factor*args.num_classes ## 20+180 = 200
+    args.organ_token_selet = args.token_factor*int(args.num_classes_with_bg*args.mask_ratio) #len(random_selected_class) ## 100
 
     misc.init_distributed_mode(args)
 
@@ -187,7 +189,7 @@ def main(args):
             model = models_mae_token.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
         elif args.arch_version == 'v1':
             import models_mae_token2
-            model = models_mae_token2.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
+            model = models_mae_token2.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
 
     model.to(device)
 

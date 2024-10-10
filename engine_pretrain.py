@@ -18,6 +18,10 @@ import random
 import util.misc as misc
 import util.lr_sched as lr_sched
 
+import os
+from PIL import Image
+import numpy as np
+
 
 def train_one_epoch(model: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
@@ -58,22 +62,73 @@ def train_one_epoch(model: torch.nn.Module,
 
             if args.num_classes > 1:
                 image_target = image.clone()
-                class_list = list(range(args.num_classes_with_bg)) ## 0,1,2,3,4,5,6,7,8,9 ## tmp test include 0; or list(range(1, args.num_classes_with_bg))
+                # class_list = list(range(args.num_classes_with_bg)) ## 0,1,2,3,4,5,6,7,8,9 ## tmp test include 0; or list(range(1, args.num_classes_with_bg))
+                if args.training_version.startswith('v0'):
+                    class_list = list(range(args.num_classes_with_bg))
+                elif args.training_version.startswith('v1'):
+                    class_list = list(range(1, args.num_classes_with_bg))
                 random.shuffle(class_list)
-                random_selected_class = class_list[:int(args.num_classes_with_bg*args.mask_ratio)]
-                # print("random_selected_class", random_selected_class)
+                # random_selected_class = class_list[:int(args.num_classes_with_bg*args.mask_ratio)]
+                mask_ratio = random.random() * args.mask_ratio
+                random_selected_class = class_list[:int(len(class_list)*mask_ratio)]
 
                 for ms in random_selected_class:
                     image_target[label==ms] = 0
                 # print("image.shape, image_target.shape", image.shape, image_target.shape)
 
         with torch.cuda.amp.autocast():
-            if args.arch_version == 'v0':
+            if args.arch_version.startswith('v0'):
                 loss, _, _ = model(samples, mask_ratio=args.mask_ratio)
-            elif args.arch_version == 'v1':
-                middle = {"image_target": image_target, "random_selected_class": random_selected_class}
-                loss, _, _ = model(samples, mask_ratio=args.mask_ratio, middle=middle)#, mask_ratio=args.mask_ratio)
+            elif args.arch_version.startswith('v1') or args.arch_version.startswith('v2'):
+                if args.training_version.startswith('v0'):
+                    middle = {"image_target": image_target, "random_selected_class": random_selected_class}
+                    loss, pred, _ = model(samples, mask_ratio=mask_ratio, middle=middle)#, mask_ratio=args.mask_ratio)
+                elif args.training_version.startswith('v1'):
+                    middle = {"image_target": samples, "random_selected_class": random_selected_class}
+                    loss, pred, _ = model(image_target, mask_ratio=mask_ratio, middle=middle)#, mask_ratio=args.mask_ratio)
 
+        if data_iter_step == 0:
+            # print("random_selected_class", random_selected_class)
+            # print("case_name", case_name[10])
+            # Convert the first prediction to a numpy array and save as PNG
+            pred_image = pred[10].detach().cpu().numpy()
+            pred_image = (pred_image * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
+            pred_image = np.transpose(pred_image, (1, 2, 0))  # Convert from CHW to HWC format
+            # Save the image
+            pred_image_pil = Image.fromarray(pred_image)
+            pred_image_pil.save(args.output_dir+'vis/0_pred.png')
+
+            image_target_image = image_target[10].detach().cpu().numpy()
+            image_target_image = (image_target_image * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
+            image_target_image = np.transpose(image_target_image, (1, 2, 0))  # Convert from CHW to HWC format
+            # Save the image
+            image_target_image_pil = Image.fromarray(image_target_image)
+            image_target_image_pil.save(args.output_dir+'vis/0_image_target.png')
+
+            image_pil = image[10].detach().cpu().numpy()
+            image_pil = (image_pil * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
+            image_pil = np.transpose(image_pil, (1, 2, 0))  # Convert from CHW to HWC format
+            # Save the image
+            image_pil_pil = Image.fromarray(image_pil)
+            image_pil_pil.save(args.output_dir+'vis/0_image.png')
+
+            mask = label[10].detach().cpu().numpy()
+            mask = mask*20/255
+            mask = (mask * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
+            mask = np.transpose(mask, (1, 2, 0))  # Convert from CHW to HWC format
+            # Save the image
+            mask_pil = Image.fromarray(mask)
+            mask_pil.save(args.output_dir+'vis/0_mask_check.png')
+            
+            mask = label[10].detach().cpu().numpy()
+            mask = mask.astype(np.uint8)  # Assuming pred is normalized between 0 and 1
+            mask = np.transpose(mask, (1, 2, 0))  # Convert from CHW to HWC format
+            # Save the image
+            mask_pil = Image.fromarray(mask)
+            mask_pil.save(args.output_dir+'vis/0_mask.png')
+
+            # exit()
+            
         loss_value = loss.item()
 
         if not math.isfinite(loss_value):

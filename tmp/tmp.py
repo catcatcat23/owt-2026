@@ -10,10 +10,10 @@ num_classes = 9
 mask_ratio = 0.5
 
 mask_ratio_class = mask_ratio
-class_list = list(range(num_classes+1))
+class_list = list(range(1, num_classes+1))
 random.shuffle(class_list)
 print(class_list)
-random_selected_class = class_list[:int((num_classes+1)*mask_ratio_class)]
+random_selected_class = class_list[:int(len(class_list)*mask_ratio_class)]
 print(random_selected_class)
 
 # Generate random class index for each sample in the batch

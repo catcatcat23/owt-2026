@@ -60,10 +60,7 @@ class MaskedAutoencoderViT(nn.Module):
         # MAE decoder specifics
         ###  self.decoder_embed = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
         self.decoder_embed = SpatialRestore(embed_dim, decoder_embed_dim, self.model_args.organ_token_total, img_size//patch_size)
-        if self.model_args.arch_version == 'v11':
-            pass
-        else:
-            self.decoder_embed_cls = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
+        self.decoder_embed_cls = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
 
         ###  self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
         self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
@@ -271,11 +268,8 @@ class MaskedAutoencoderViT(nn.Module):
         # print("x.shape token1", x.shape) # torch.Size([64, 196, 512])
         # print("decoder, x.shape", x.shape) # torch.Size([64, 196, 512])
 
-        if self.model_args.arch_version == 'v11':
-            pass
-        else:
-            cls_tokens = self.decoder_embed_cls(cls_tokens)
-            x = torch.cat((cls_tokens, x), dim=1) ## 197
+        cls_tokens = self.decoder_embed_cls(cls_tokens)
+        x = torch.cat((cls_tokens, x), dim=1) ## 197
 
         ### append mask tokens to sequence
         ### mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1)
@@ -306,11 +300,8 @@ class MaskedAutoencoderViT(nn.Module):
         x = self.decoder_pred(x)
         # print("x.shape token3", x.shape)
         # print("decoder, x.shape6", x.shape) # torch.Size([64, 197, 768])
-        if self.model_args.arch_version == 'v11':
-            pass
-        else:
-            #remove cls token
-            x = x[:, 1:, :]
+        #remove cls token
+        x = x[:, 1:, :]
         ### print("decoder, x.shape7", x.shape) # torch.Size([64, 196, 768])
         x = self.sigmoid(x)
         return x

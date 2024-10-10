@@ -107,9 +107,10 @@ def get_args_parser():
                         help='url used to set up distributed training')
 
     ## new
-    # parser.add_argument('--img_size', type=int, default=256, help='input patch size of network input')
+    parser.add_argument('--save_freq', type=int, default=20, help='save_freq')
     parser.add_argument('--num_classes', type=int, default=1, help='output channel of network')
     parser.add_argument('--arch_version', type=str, default='v0', help='v0, v1...')
+    parser.add_argument('--training_version', type=str, default='v0', help='v0, v1...')
     parser.add_argument('--token_factor', type=int, default=1, help='how many tokens to generate a class')
 
 
@@ -128,10 +129,11 @@ def main(args):
 
     device = torch.device(args.device)
 
-    # fix the seed for reproducibility
-    seed = args.seed + misc.get_rank()
-    torch.manual_seed(seed)
-    np.random.seed(seed)
+    # # fix the seed for reproducibility
+    # seed = args.seed #+ misc.get_rank()
+    # torch.manual_seed(seed)
+    # np.random.seed(seed)
+    # random.seed(seed)
 
     cudnn.benchmark = True
 
@@ -174,22 +176,25 @@ def main(args):
             drop_last=True,
         )
     else:
-        def worker_init_fn(worker_id):
-            random.seed(args.seed + worker_id)
-        data_loader_train = DataLoader(dataset_train, batch_size=args.batch_size, sampler=sampler_train, num_workers=args.num_workers, pin_memory=args.pin_mem,drop_last=True,
-                             worker_init_fn=worker_init_fn)
+        # def worker_init_fn(worker_id):
+        #     random.seed(args.seed + worker_id)
+        data_loader_train = DataLoader(dataset_train, batch_size=args.batch_size, sampler=sampler_train, num_workers=args.num_workers, pin_memory=args.pin_mem,drop_last=True,)
+                             #worker_init_fn=worker_init_fn)
     
     # define the model
     if args.num_classes == 1:
         import models_mae
         model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
     else:
-        if args.arch_version == 'v0':
+        if args.arch_version.startswith('v0'):
             import models_mae_token
             model = models_mae_token.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
-        elif args.arch_version == 'v1':
+        elif args.arch_version.startswith('v1'):
             import models_mae_token2
             model = models_mae_token2.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
+        elif args.arch_version.startswith('v2'):
+            import OWC2
+            model = OWC2.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
 
     model.to(device)
 
@@ -230,7 +235,7 @@ def main(args):
             log_writer=log_writer,
             args=args
         )
-        if args.output_dir and (epoch % 20 == 0 or epoch + 1 == args.epochs):
+        if args.output_dir and (epoch % args.save_freq == 0 or epoch + 1 == args.epochs):
             misc.save_model(
                 args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
                 loss_scaler=loss_scaler, epoch=epoch)

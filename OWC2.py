@@ -50,6 +50,8 @@ class MaskedAutoencoderViT(nn.Module):
             Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
             for i in range(int(depth/2))])
 
+        self.embed_dim = embed_dim
+        self.hw_size = img_size//patch_size
         self.organ_embed = OrganEmbed(embed_dim, embed_dim, self.model_args.organ_token_total, img_size//patch_size)
 
         self.norm = norm_layer(embed_dim)
@@ -60,7 +62,7 @@ class MaskedAutoencoderViT(nn.Module):
         # MAE decoder specifics
         ###  self.decoder_embed = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
         self.decoder_embed = SpatialRestore(embed_dim, decoder_embed_dim, self.model_args.organ_token_total, img_size//patch_size)
-        if self.model_args.arch_version == 'v11':
+        if self.model_args.arch_version == 'v11': ## only v11 no decoder cls token
             pass
         else:
             self.decoder_embed_cls = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
@@ -71,12 +73,20 @@ class MaskedAutoencoderViT(nn.Module):
 
         ###  self.decoder_pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, decoder_embed_dim), requires_grad=False)  # fixed sin-cos embedding
 
+        if not self.model_args.arch_version.startswith("v1"): ## v2, v3...
+            decoder_depth = 2
+            from VQ_model import Decoder
+            self.decoder = Decoder(ch=128, out_ch=3, ch_mult=[1,1,2,2,4], num_res_blocks=2, attn_resolutions=[16], dropout=0.0, resamp_with_conv=True, in_channels=3, resolution=224, z_channels=decoder_embed_dim, give_pre_end=False)
+
         self.decoder_blocks = nn.ModuleList([
             Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
             for i in range(decoder_depth)])
 
         self.decoder_norm = norm_layer(decoder_embed_dim)
-        self.decoder_pred = nn.Linear(decoder_embed_dim, patch_size**2 * in_chans, bias=True) # decoder to patch
+        if not self.model_args.arch_version.startswith("v1"): ## v2, v3...
+            pass
+        else:
+            self.decoder_pred = nn.Linear(decoder_embed_dim, patch_size**2 * in_chans, bias=True) # decoder to patch
         # --------------------------------------------------------------------------
 
         self.norm_pix_loss = norm_pix_loss
@@ -271,7 +281,7 @@ class MaskedAutoencoderViT(nn.Module):
         # print("x.shape token1", x.shape) # torch.Size([64, 196, 512])
         # print("decoder, x.shape", x.shape) # torch.Size([64, 196, 512])
 
-        if self.model_args.arch_version == 'v11':
+        if self.model_args.arch_version == 'v11': ## only v11
             pass
         else:
             cls_tokens = self.decoder_embed_cls(cls_tokens)
@@ -302,16 +312,29 @@ class MaskedAutoencoderViT(nn.Module):
         # print("x.shape token2", x.shape)
         # print("decoder, x.shape5", x.shape) # torch.Size([64, 197, 512])
 
-        # predictor projection
-        x = self.decoder_pred(x)
+        if self.model_args.arch_version.startswith('v1'): ## only v1
+            # predictor projection
+            x = self.decoder_pred(x)
+        else:                                             ## v2, v3...
+            pass
+
         # print("x.shape token3", x.shape)
         # print("decoder, x.shape6", x.shape) # torch.Size([64, 197, 768])
         if self.model_args.arch_version == 'v11':
             pass
-        else:
+        else:                                             ## v2, v3...
             #remove cls token
             x = x[:, 1:, :]
         ### print("decoder, x.shape7", x.shape) # torch.Size([64, 196, 768])
+
+        if self.model_args.arch_version.startswith('v1'): ## only v1
+            pass
+        else:                                             ## v2, v3...
+            ##VQGAN decoder
+            x = x.permute(0,2,1).contiguous().view(x.shape[0], self.embed_dim, self.hw_size, self.hw_size)
+            # print("before VQ decoder, x.shape", x.shape) # torch.Size([64, 768, 14, 14])
+            x = self.decoder(x)
+
         x = self.sigmoid(x)
         return x
 
@@ -331,7 +354,10 @@ class MaskedAutoencoderViT(nn.Module):
 
         # # print("loss, pred.shape, target.shape", pred.shape, target.shape) # torch.Size([64, 196, 768]) torch.Size([64, 196, 768])
         # target = self.unpatchify(target)
-        pred = self.unpatchify(pred)
+        if self.model_args.arch_version.startswith('v1'): ## only v1
+            pred = self.unpatchify(pred)
+        else:                                             ## v2, v3...
+            pass
         # loss = (pred - target) ** 2
         loss = (pred - image_target) ** 2
         ### loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
@@ -356,7 +382,12 @@ class MaskedAutoencoderViT(nn.Module):
         pred = self.forward_decoder(x_restored, cls_tokens)
         # print("pred.shape", pred.shape) # torch.Size([64, 196, 768])
         loss = self.forward_loss(image_target, pred) #, mask)
-        return loss, self.unpatchify(pred), None
+        
+        if self.model_args.arch_version.startswith('v1'): ## only v1
+            pred = self.unpatchify(pred)
+        else:                                             ## v2, v3...
+            pass
+        return loss, pred, None
 
 
 def mae_vit_base_patch16_dec512d8b(**kwargs):

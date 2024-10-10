@@ -23,8 +23,8 @@ def read_image(path):
 
 def random_rot_flip(image, label):
     k = np.random.randint(0, 4)
-    # image = np.rot90(image, k, axes=(0, 1))
-    # label = np.rot90(label, k, axes=(0, 1))
+    image = np.rot90(image, k, axes=(0, 1))
+    label = np.rot90(label, k, axes=(0, 1))
     axis = np.random.randint(0, 2)
     image = np.flip(image, axis=axis).copy()
     label = np.flip(label, axis=axis).copy()
@@ -293,8 +293,8 @@ class RandomGenerator(object):
 
     def create_ops(self):
         ops = [
-            # (shear_x, self.shear),
-            # (shear_y, self.shear),
+            (shear_x, self.shear),
+            (shear_y, self.shear),
             (scale, self.scale),
             (translate_x, self.translate),
             (translate_y, self.translate),
@@ -316,8 +316,8 @@ class RandomGenerator(object):
             image, label = random_rotate(image, label)
         if random.random() > 0.5:
             image, label = adjust_light(image, label)
-        # if random.random() > 0.5:
-        #     image, label = random_erasing(imgs=image, label=label, rng=self.rng)
+        if random.random() > 0.5:
+            image, label = random_erasing(imgs=image, label=label, rng=self.rng)
         
         inds = self.rng.choice(len(self.ops), size=self.n, replace=False)
         for i in inds:
@@ -333,16 +333,16 @@ class RandomGenerator(object):
             image = zoom(image, (self.output_size[0] / x, self.output_size[1] / y, 1.0), order=3)
             label = zoom(label, (self.output_size[0] / x, self.output_size[1] / y, 1.0), order=0)
         label_h, label_w, label_d = label.shape
-        # low_res_label = zoom(label, (self.low_res[0] / label_h, self.low_res[1] / label_w, 1.0), order=0)
+        low_res_label = zoom(label, (self.low_res[0] / label_h, self.low_res[1] / label_w, 1.0), order=0)
         
         image = torch.from_numpy(image.astype(np.float32))
         label = torch.from_numpy(label.astype(np.float32))
-        # low_res_label = torch.from_numpy(low_res_label.astype(np.float32))
+        low_res_label = torch.from_numpy(low_res_label.astype(np.float32))
         image = image.permute(2, 0, 1)
         label = label.permute(2, 0, 1)
-        # low_res_label = low_res_label.permute(2, 0, 1)
+        low_res_label = low_res_label.permute(2, 0, 1)
         
-        sample = {'image': image, 'label': label.long()}#, 'low_res_label': low_res_label.long()}
+        sample = {'image': image, 'label': label.long(), 'low_res_label': low_res_label.long()}
         return sample
 
 
@@ -427,5 +427,5 @@ class dataset_reader(Dataset):
         if self.transform:
             sample = self.transform(sample)
 
-        sample['case_name'] = [self.sample_list[idx].strip('\n'), self.masks_list[idx].strip('\n')]
+        sample['case_name'] = self.sample_list[idx].strip('\n')
         return sample

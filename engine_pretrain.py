@@ -66,7 +66,8 @@ def train_one_epoch(model: torch.nn.Module,
                 if args.training_version.startswith('v0'):
                     class_list = list(range(args.num_classes_with_bg))
                 elif args.training_version.startswith('v1'):
-                    class_list = list(range(1, args.num_classes_with_bg))
+                    class_list = list(range(1, args.num_classes_with_bg)) ## shouldnt have 0 in v1 training, since unreasonable in the case generating whole slice when input pure 0 image. Meanwhile, using selected_class/masked token for only generating selected organ has already disentangle tokens for specific organs.
+                    # class_list = list(range(args.num_classes_with_bg)) 
                 random.shuffle(class_list)
                 # random_selected_class = class_list[:int(args.num_classes_with_bg*args.mask_ratio)]
                 mask_ratio = random.random() * args.mask_ratio
@@ -82,9 +83,12 @@ def train_one_epoch(model: torch.nn.Module,
             elif args.arch_version.startswith('v1') or args.arch_version.startswith('v2'):
                 if args.training_version.startswith('v0'):
                     middle = {"image_target": image_target, "random_selected_class": random_selected_class}
-                    loss, pred, _ = model(samples, mask_ratio=mask_ratio, middle=middle)#, mask_ratio=args.mask_ratio)
+                    loss, pred, middle_output = model(samples, mask_ratio=mask_ratio, middle=middle)#, mask_ratio=args.mask_ratio)
                 elif args.training_version.startswith('v1'):
-                    middle = {"image_target": samples, "random_selected_class": random_selected_class}
+                    random_selected_class2 = list(range(args.num_classes_with_bg)) ## [0,1,2,3,4,5,6,7,8,9]
+                    for i in random_selected_class:
+                        random_selected_class2.remove(i)
+                    middle = {"image_target": samples-image_target, "random_selected_class": random_selected_class2}
                     loss, pred, _ = model(image_target, mask_ratio=mask_ratio, middle=middle)#, mask_ratio=args.mask_ratio)
 
         if data_iter_step == 0:
@@ -130,10 +134,20 @@ def train_one_epoch(model: torch.nn.Module,
             # exit()
             
         loss_value = loss.item()
+        if args.vq_version != None:
+            loss_value_vq = middle_output["vq_loss"].item()
+            loss = loss + 1.0*middle_output["vq_loss"]
 
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
-            sys.exit(1)
+            continue
+            # sys.exit(1)
+
+        if args.vq_version != None:
+            if not math.isfinite(loss_value_vq):
+                print("Loss VQ is {}, stopping training".format(loss_value_vq))
+                continue
+                # sys.exit(1)
 
         loss /= accum_iter
         loss_scaler(loss, optimizer, parameters=model.parameters(),
@@ -144,6 +158,8 @@ def train_one_epoch(model: torch.nn.Module,
         torch.cuda.synchronize()
 
         metric_logger.update(loss=loss_value)
+        if args.vq_version != None:
+            metric_logger.update(loss_vq=loss_value_vq)
 
         lr = optimizer.param_groups[0]["lr"]
         metric_logger.update(lr=lr)

@@ -74,7 +74,7 @@ class MaskedAutoencoderViT(nn.Module):
         ###  self.decoder_pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, decoder_embed_dim), requires_grad=False)  # fixed sin-cos embedding
 
         if not self.model_args.arch_version.startswith("v1"): ## v2, v3...
-            decoder_depth = 2
+            decoder_depth = int(decoder_depth/2)
             from VQ_model import Decoder
             self.decoder = Decoder(ch=128, out_ch=3, ch_mult=[1,1,2,2,4], num_res_blocks=2, attn_resolutions=[16], dropout=0.0, resamp_with_conv=True, in_channels=3, resolution=224, z_channels=decoder_embed_dim, give_pre_end=False)
 
@@ -88,6 +88,12 @@ class MaskedAutoencoderViT(nn.Module):
         else:
             self.decoder_pred = nn.Linear(decoder_embed_dim, patch_size**2 * in_chans, bias=True) # decoder to patch
         # --------------------------------------------------------------------------
+        if self.model_args.vq_version != None:
+            self.n_embed = self.model_args.vq_n_token ## for each organ
+            from VQ_model import VectorQuantizer2_OWC as VectorQuantizer
+            self.quantize = VectorQuantizer(self.n_embed, decoder_embed_dim, beta=0.25, model_args=self.model_args, legacy=False)
+            self.quant_lin = nn.Linear(decoder_embed_dim, decoder_embed_dim, bias=False)
+            self.post_quant_lin = nn.Linear(decoder_embed_dim, decoder_embed_dim, bias=False)
 
         self.norm_pix_loss = norm_pix_loss
 
@@ -251,8 +257,8 @@ class MaskedAutoencoderViT(nn.Module):
 
         # print("x.shape before random", x.shape, x) # torch.Size([64, 200, 768])
         ## random mask organ tokens
-        x_masked, mask = self.random_masking(x, random_selected_class) ## torch.Size([64, 100, 768])
-        x_masked_ = torch.cat((cls_tokens, x_masked), dim=1) ## torch.Size([64, 101, 768])
+        x_masked_b, mask = self.random_masking(x, random_selected_class) ## torch.Size([64, 100, 768])
+        x_masked_ = torch.cat((cls_tokens, x_masked_b), dim=1) ## torch.Size([64, 101, 768])
         # print("x_masked_.shape after cls token", x_masked_.shape, x_masked_) # torch.Size([64, 101, 768])
 
         ## encoder2 (forward middle)
@@ -265,11 +271,21 @@ class MaskedAutoencoderViT(nn.Module):
         cls_tokens = x_masked_[:,:1,:]
         x_masked = x_masked_[:,1:,:]
 
+        ## VQ here
+        if self.model_args.vq_version != None:
+            x_masked = self.quant_lin(x_masked)
+            x_masked_vq, vq_loss, (_, _, min_encoding_indices) = self.quantize(x_masked, random_selected_class)
+            # print("min_encoding_indices", min_encoding_indices)
+            x_masked = self.post_quant_lin(x_masked_vq)
+
         x_restored = self.token_restore(x_masked, mask) ## torch.Size([64, 200, 768])
         ### x_restored = torch.cat((cls_tokens, x_restored), dim=1) ## torch.Size([64, 201, 768])
         # print("x_restored.shape final", x_restored.shape)
 
-        middle_output = {"x_masked":x_masked, "mask":mask}
+        middle_output = {"x_masked":x_masked, "mask":mask, "x_masked_b":x_masked_b}
+        if self.model_args.vq_version != None:
+            middle_output = {"x_masked":x_masked_vq, "mask":mask, "x_masked_b":x_masked_b}
+            middle_output["vq_loss"] = vq_loss
 
         return x_restored, cls_tokens, middle_output
         ### return x, mask, ids_restore
@@ -358,11 +374,19 @@ class MaskedAutoencoderViT(nn.Module):
             pred = self.unpatchify(pred)
         else:                                             ## v2, v3...
             pass
-        # loss = (pred - target) ** 2
-        loss = (pred - image_target) ** 2
-        ### loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
-        loss = loss.mean()
 
+        if "L2" in self.model_args.loss_version:
+            # loss = (pred - target) ** 2
+            loss = (pred - image_target) ** 2
+            ### loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
+            loss = loss.mean()
+
+        if "L1" in self.model_args.loss_version:
+            loss = torch.abs(pred - image_target)
+            loss = loss.mean()
+
+        if "LPIPS" in self.model_args.loss_version:
+            pass ## loss = loss + xxx
         # print("loss", loss)
 
         ### loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
@@ -376,18 +400,18 @@ class MaskedAutoencoderViT(nn.Module):
         # print("imgs.shape, mask_ratio", imgs.shape, mask_ratio) ## torch.Size([64, 3, 224, 224]) 0.75
         # if args.decoder_only == False:
         ### latent, mask, ids_restore = self.forward_encoder(imgs, mask_ratio, middle = middle)
-        x_restored, cls_tokens, _ = self.forward_encoder(imgs, mask_ratio, middle = middle)
+        x_restored, cls_tokens, middle_output = self.forward_encoder(imgs, mask_ratio, middle = middle)
         # print("latent.shape, mask.shape", latent.shape, mask.shape) # torch.Size([64, 50, 768]) torch.Size([64, 196])
         ### pred = self.forward_decoder(latent) #, ids_restore)  # [N, L, p*p*3] ## this latent should be 197,768 after OrganFuse (TokenFuse)
         pred = self.forward_decoder(x_restored, cls_tokens)
         # print("pred.shape", pred.shape) # torch.Size([64, 196, 768])
         loss = self.forward_loss(image_target, pred) #, mask)
-        
+
         if self.model_args.arch_version.startswith('v1'): ## only v1
             pred = self.unpatchify(pred)
         else:                                             ## v2, v3...
             pass
-        return loss, pred, None
+        return loss, pred, middle_output
 
 
 def mae_vit_base_patch16_dec512d8b(**kwargs):

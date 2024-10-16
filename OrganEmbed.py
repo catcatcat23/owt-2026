@@ -14,10 +14,10 @@ class OrganEmbed(nn.Module):
         # print("self.organ_token_total", self.organ_token_total)
         # print("self.hw_size", self.hw_size)
 
-        self.conv1 = nn.Conv2d(embed_dim,hidden_dim,1,padding=0, groups=4, bias=False)
-        self.conv2 = nn.Conv2d(hidden_dim,token_num,1,padding=0, groups=4, bias=False)
+        self.conv1 = nn.Conv2d(embed_dim,hidden_dim,1,padding=0, bias=False) #groups=4, bias=False)
+        self.conv2 = nn.Conv2d(hidden_dim,token_num,1,padding=0, bias=False) #groups=4, bias=False)
         self.softmax = Softmax(dim=-1)
-        self.conv3 = nn.Conv2d(hidden_dim,hidden_dim,1,padding=0, groups=4, bias=False)
+        self.conv3 = nn.Conv2d(hidden_dim,hidden_dim,1,padding=0, bias=False) #groups=4, bias=False)
 
     def forward(self, input_x):
         x = input_x

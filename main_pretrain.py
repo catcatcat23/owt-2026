@@ -112,16 +112,13 @@ def get_args_parser():
     parser.add_argument('--arch_version', type=str, default='v0', help='v0, v1...')
     parser.add_argument('--training_version', type=str, default='v0', help='v0, v1...')
     parser.add_argument('--token_factor', type=int, default=1, help='how many tokens to generate a class')
+    parser.add_argument('--loss_version', type=str, default='L2', help='L1-LPIPS-GAN')
 
 
     return parser
 
 
 def main(args):
-    args.num_classes_with_bg = args.num_classes + 1
-    args.organ_token_total = 1*args.token_factor*1 + args.token_factor*args.num_classes ## 20+180 = 200
-    args.organ_token_selet = args.token_factor*int(args.num_classes_with_bg*args.mask_ratio) #len(random_selected_class) ## 100
-
     misc.init_distributed_mode(args)
 
     print('job dir: {}'.format(os.path.dirname(os.path.realpath(__file__))))
@@ -189,10 +186,10 @@ def main(args):
         if args.arch_version.startswith('v0'):
             import models_mae_token
             model = models_mae_token.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
-        elif args.arch_version.startswith('v1'):
-            import models_mae_token2
-            model = models_mae_token2.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
-        elif args.arch_version.startswith('v2'):
+        # elif args.arch_version.startswith('v1'):
+        #     import models_mae_token2
+        #     model = models_mae_token2.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
+        elif args.arch_version.startswith('v1') or args.arch_version.startswith('v2'):
             import OWC2
             model = OWC2.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
 
@@ -257,6 +254,28 @@ def main(args):
 if __name__ == '__main__':
     args = get_args_parser()
     args = args.parse_args()
+
+    args.num_classes_with_bg = args.num_classes + 1
+    args.organ_token_total = 1*args.token_factor*1 + args.token_factor*args.num_classes ## 20+180 = 200
+    # args.organ_token_selet = args.token_factor*int(args.num_classes_with_bg*args.mask_ratio) #len(random_selected_class) ## 100
+
+    # args.if_vq = False
+    args.vq_version = None
+    if '-VQ' in args.arch_version:
+        # args.if_vq = True
+        args.vq_version = args.arch_version.split('-VQ')[1].split('_nt')[0].split('-')[0]
+        args.vq_n_token = int(args.arch_version.split('-VQ')[1].split('_nt')[1].split('-')[0])
+
+    # args.if_disetg = False
+    args.disetg_version = None
+    if '-DT' in args.arch_version:
+        # args.if_disetg = True
+        args.disetg_version = args.arch_version.split('-DT')[1].split('-')[0]
+
+    args.arch_version = args.arch_version.split('-')[0]
+
+    args.loss_version = args.loss_version.split('-') ## loss_dict
+
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     main(args)

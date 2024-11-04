@@ -45,7 +45,7 @@ class MaskedAutoencoderViT(nn.Module):
             ###     for i in range(depth)])
             self.blocks1 = nn.ModuleList([
                 Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer) 
-                for i in range(int(depth/2))]) ## delete all qk_scale=None for H100
+                for i in range(int(depth/2))]) ## delete all qk_scale=None, for H100
         elif self.model_args.arch_version.startswith("v3"):
             from VQ.VQ_model import Encoder
             self.encoder = Encoder(ch=128, out_ch=3, ch_mult=[1,1,2,2,4], num_res_blocks=2, attn_resolutions=[16], dropout=0.0, resamp_with_conv=True, in_channels=3, resolution=224, z_channels=embed_dim, double_z=False, give_pre_end=False)
@@ -68,7 +68,7 @@ class MaskedAutoencoderViT(nn.Module):
         # MAE decoder specifics
         ###  self.decoder_embed = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
         self.decoder_embed = SpatialRestore(embed_dim, decoder_embed_dim, self.model_args.organ_token_total, img_size//patch_size)
-        if self.model_args.arch_version == 'v11': ## only v11 no decoder cls token
+        if self.model_args.arch_version == 'v11' or self.model_args.arch_version == 'v21' or self.model_args.arch_version == 'v31': ## only v11 no decoder cls token
             pass
         else:
             self.decoder_embed_cls = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
@@ -96,10 +96,19 @@ class MaskedAutoencoderViT(nn.Module):
         # --------------------------------------------------------------------------
         if self.model_args.vq_version != None:
             self.n_embed = self.model_args.vq_n_token ## for each organ
+
             if self.model_args.vq_version.startswith('v0'):
                 from VQ.VQ_model import VectorQuantizer2_OWC as VectorQuantizer
-                self.n_embed = self.model_args.vq_n_token * self.model_args.num_classes_with_bg
-                self.quantize = VectorQuantizer(self.n_embed, decoder_embed_dim, beta=0.25, model_args=self.model_args, legacy=False)
+
+                if self.model_args.lib_version == None:
+                    self.n_embed = self.model_args.vq_n_token * self.model_args.num_classes_with_bg
+                    self.quantize = VectorQuantizer(self.n_embed, decoder_embed_dim, beta=0.25, model_args=self.model_args, legacy=False)
+                else:
+                    if self.model_args.lib_version == "v0":
+                        self.library = nn.ModuleList([VectorQuantizer(self.n_embed, decoder_embed_dim, beta=0.25, model_args=self.model_args, legacy=False) for _ in range(self.model_args.num_classes_with_bg)])
+                    elif self.model_args.lib_version == "v01":
+                        library_ = [VectorQuantizer(self.n_embed*4, decoder_embed_dim, beta=0.25, model_args=self.model_args, legacy=False)]
+                        self.library = nn.ModuleList(library_ + [VectorQuantizer(self.n_embed, decoder_embed_dim, beta=0.25, model_args=self.model_args, legacy=False) for _ in range(self.model_args.num_classes)])
                 if self.model_args.vq_version == 'v0':
                     self.quant_lin = nn.Linear(decoder_embed_dim, decoder_embed_dim, bias=False)
                     self.post_quant_lin = nn.Linear(decoder_embed_dim, decoder_embed_dim, bias=False)
@@ -121,8 +130,16 @@ class MaskedAutoencoderViT(nn.Module):
                     self.decoder_pred.apply(self._init_weights)
             elif self.model_args.vq_version == 'v1':
                 from VQ.norm_ema_quantizer import NormEMAVectorQuantizer_OWC as VectorQuantizer
-                self.n_embed = self.model_args.vq_n_token * self.model_args.num_classes_with_bg
-                self.quantize = VectorQuantizer(self.n_embed, decoder_embed_dim, beta=1.0, model_args=self.model_args, kmeans_init=True, decay=0.99)
+
+                if self.model_args.lib_version == None:
+                    self.n_embed = self.model_args.vq_n_token * self.model_args.num_classes_with_bg
+                    self.quantize = VectorQuantizer(self.n_embed, decoder_embed_dim, beta=1.0, model_args=self.model_args, kmeans_init=True, decay=0.99)
+                else:
+                    if self.model_args.lib_version == "v0":
+                        self.library = nn.ModuleList([VectorQuantizer(self.n_embed, decoder_embed_dim, beta=1.0, model_args=self.model_args, kmeans_init=True, decay=0.99) for _ in range(self.model_args.num_classes_with_bg)])
+                    elif self.model_args.lib_version == "v01":
+                        library_ = [VectorQuantizer(self.n_embed*4, decoder_embed_dim, beta=1.0, model_args=self.model_args, kmeans_init=True, decay=0.99)]
+                        self.library = nn.ModuleList(library_ + [VectorQuantizer(self.n_embed, decoder_embed_dim, beta=1.0, model_args=self.model_args, kmeans_init=True, decay=0.99) for _ in range(self.model_args.num_classes)])
                 # self.quant_lin = nn.Linear(decoder_embed_dim, decoder_embed_dim, bias=False)
                 # self.post_quant_lin = nn.Linear(decoder_embed_dim, decoder_embed_dim, bias=False)
                 self.quant_lin = nn.Sequential(
@@ -323,18 +340,31 @@ class MaskedAutoencoderViT(nn.Module):
         # print("x.shape before random", x.shape, x) # torch.Size([64, 200, 768])
         ## random mask organ tokens
         x_masked_b, mask = self.random_masking(x, random_selected_class) ## torch.Size([64, 100, 768])
-        x_masked_ = torch.cat((cls_tokens, x_masked_b), dim=1) ## torch.Size([64, 101, 768])
-        # print("x_masked_.shape after cls token", x_masked_.shape) # torch.Size([64, 101, 768])
 
-        ## encoder2 (forward middle)
-        for bi, blk in enumerate(self.blocks2):
-            # print("bi", bi)
-            x_masked_ = blk(x_masked_) ## token2 torch.Size([64, 101, 768])
-        x_masked_ = self.norm(x_masked_)
-        # print("x_masked_.shape after encoder2", x_masked_.shape) # torch.Size([64, 101, 768])
+        if self.model_args.arch_version == 'v11' or self.model_args.arch_version == 'v21' or self.model_args.arch_version == 'v31': ## only v11
+            # x_masked_b = torch.cat((cls_tokens, x_masked_b), dim=1) ## torch.Size([64, 101, 768])
+            # print("x_masked_.shape after cls token", x_masked_.shape) # torch.Size([64, 101, 768])
+            ## encoder2 (forward middle)
+            x_masked_ = self.blocks2[0](x_masked_b)
+            for bi, blk in enumerate(self.blocks2):
+                if bi > 0:
+                    x_masked_ = blk(x_masked_) ## token2 torch.Size([64, 101, 768])
+            x_masked_ = self.norm(x_masked_)
+            x_masked_ = x_masked_b + x_masked_
+            x_masked = x_masked_
+        else:
+            x_masked_ = torch.cat((cls_tokens, x_masked_b), dim=1) ## torch.Size([64, 101, 768])
+            # print("x_masked_.shape after cls token", x_masked_.shape) # torch.Size([64, 101, 768])
+            ## encoder2 (forward middle)
+            for bi, blk in enumerate(self.blocks2):
+                # print("bi", bi)
+                x_masked_ = blk(x_masked_) ## token2 torch.Size([64, 101, 768])
+            x_masked_ = self.norm(x_masked_)
+            # print("x_masked_.shape after encoder2", x_masked_.shape) # torch.Size([64, 101, 768])
 
-        cls_tokens = x_masked_[:,:self.model_args.cls_num,:]
-        x_masked = x_masked_[:,self.model_args.cls_num:,:]
+            cls_tokens = x_masked_[:,:self.model_args.cls_num,:]
+            x_masked = x_masked_[:,self.model_args.cls_num:,:]
+
         # print("cls_tokens.shape after split", cls_tokens.shape)
         # print("x_masked.shape after split", x_masked.shape)
 
@@ -342,27 +372,51 @@ class MaskedAutoencoderViT(nn.Module):
         if self.model_args.vq_version != None:
             if self.model_args.vq_version == 'v0':
                 x_masked = self.quant_lin(x_masked)
-                x_masked_vq, vq_loss, (_, _, min_encoding_indices) = self.quantize(x_masked, random_selected_class)
+                # x_masked_vq, vq_loss, (_, _, min_encoding_indices) = self.quantize(x_masked)
                 # print("min_encoding_indices", min_encoding_indices)
-                x_masked = self.post_quant_lin(x_masked_vq)
+                # x_masked = self.post_quant_lin(x_masked_vq)
             elif self.model_args.vq_version == 'v01':
                 with torch.cuda.amp.autocast(enabled=False):
                     x_masked = self.quant_lin(x_masked.type_as(self.quant_lin[-1].weight))
-                x_masked_vq, vq_loss, (_, _, min_encoding_indices) = self.quantize(x_masked, random_selected_class)
-                x_masked = self.post_quant_lin(x_masked_vq)
+                # x_masked_vq, vq_loss, (_, _, min_encoding_indices) = self.quantize(x_masked)
+                # x_masked = self.post_quant_lin(x_masked_vq)
             elif self.model_args.vq_version == 'v1':
                 with torch.cuda.amp.autocast(enabled=False):
                     x_masked = self.quant_lin(x_masked.type_as(self.quant_lin[-1].weight))
-                x_masked_vq, vq_loss, min_encoding_indices = self.quantize(x_masked, random_selected_class)
-                x_masked = self.post_quant_lin(x_masked_vq)
+                # x_masked_vq, vq_loss, (_, _, min_encoding_indices) = self.quantize(x_masked)
+                # x_masked = self.post_quant_lin(x_masked_vq)
 
-        x_restored = self.token_restore(x_masked, mask) ## torch.Size([64, 200, 768])
+            if self.model_args.lib_version == None:
+                x_masked_vq, vq_loss, (_, _, min_encoding_indices) = self.quantize(x_masked)
+            else:
+                min_encoding_indices = []
+                x_masked_vq_list = []
+                x_masked_split = torch.split(x_masked, self.model_args.token_factor, dim=1) ## tuple of (32, 20, 768)
+                vq_loss = 0
+                loss_count = 0
+                for sp_i, sp_j in enumerate(x_masked_split):
+                    x_masked_vq_i, vq_loss_i, (_, _, min_encoding_indices_i) = self.library[sp_i](sp_j)
+                    x_masked_vq_list.append(x_masked_vq_i)
+                    vq_loss+=vq_loss_i
+                    loss_count+=1
+                    min_encoding_indices.append(min_encoding_indices_i)
+                    # print("loss_count, vq_loss, vq_loss_i", loss_count, vq_loss, vq_loss_i)
+                vq_loss = vq_loss/loss_count
+                x_masked_vq = torch.cat(x_masked_vq_list, dim = 1)
+
+            x_masked = self.post_quant_lin(x_masked_vq)
+
+        if self.model_args.training_version.startswith('v01'):
+            x_restored = x_masked ## torch.Size([64, 200, 768])
+            # print("no token restore", x_restored.shape)
+        else:
+            x_restored = self.token_restore(x_masked, mask) ## torch.Size([64, 200, 768])
         ### x_restored = torch.cat((cls_tokens, x_restored), dim=1) ## torch.Size([64, 201, 768])
         # print("x_restored.shape final", x_restored.shape)
 
         middle_output = {"x_masked":x_masked, "mask":mask, "x_masked_b":x_masked_b}
         if self.model_args.vq_version != None:
-            middle_output = {"x_masked":x_masked_vq, "mask":mask, "x_masked_b":x_masked_b}
+            middle_output = {"x_masked":x_masked_vq, "mask":mask, "x_masked_b":x_masked_b, "min_encoding_indices":min_encoding_indices}
             middle_output["vq_loss"] = vq_loss
 
         return x_restored, cls_tokens, middle_output
@@ -375,7 +429,7 @@ class MaskedAutoencoderViT(nn.Module):
         # print("x.shape token1", x.shape) # torch.Size([64, 196, 512])
         # print("decoder, x.shape", x.shape) # torch.Size([64, 196, 512])
 
-        if self.model_args.arch_version == 'v11': ## only v11
+        if self.model_args.arch_version == 'v11' or self.model_args.arch_version == 'v21' or self.model_args.arch_version == 'v31': ## only v11
             pass
         else:
             cls_tokens = self.decoder_embed_cls(cls_tokens)
@@ -401,9 +455,17 @@ class MaskedAutoencoderViT(nn.Module):
 
         # apply Transformer blocks
         ## v2 for vqgan decoder, for better generation results (maybe VQ tokens?)
-        for blk in self.decoder_blocks:
-            x = blk(x)
-        x = self.decoder_norm(x)
+        if self.model_args.arch_version.startswith("v1"):
+            for blk in self.decoder_blocks:
+                x = blk(x)
+            x = self.decoder_norm(x)
+        elif self.model_args.arch_version.startswith("v2") or self.model_args.arch_version.startswith("v3"):
+            x_ = self.decoder_blocks[0](x)
+            for bi, blk in enumerate(self.decoder_blocks):
+                if bi > 0:
+                    x_ = blk(x_)
+            x_ = self.decoder_norm(x_)
+            x = x_+x
         # print("x.shape token2", x.shape)
         # print("decoder, x.shape5", x.shape) # torch.Size([64, 197, 512])
 
@@ -415,7 +477,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         # print("x.shape token3", x.shape)
         # print("decoder, x.shape6", x.shape) # torch.Size([64, 197, 768])
-        if self.model_args.arch_version == 'v11':
+        if self.model_args.arch_version == 'v11' or self.model_args.arch_version == 'v21' or self.model_args.arch_version == 'v31': ## only v11
             pass
         else:                                             ## v2, v3...
             #remove cls token

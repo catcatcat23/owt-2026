@@ -21,7 +21,7 @@ from scipy.ndimage import zoom
 #     sys.path.append('./mae')
 # else:
 sys.path.append('..')
-import OWC2 #models_mae_token2
+import OWC2_LIB #models_mae_token2
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
@@ -98,13 +98,15 @@ def get_args_parser():
 
     parser.add_argument('--checkpoint', type=str, default=None, help='checkpoint')
     parser.add_argument('--select_cls', type=str, default='1', help='select_cls 1,2,3,4,5...')
+    parser.add_argument('--reverse', type=int, default=0)
+    parser.add_argument('--output_vis', type=str, default=None)
 
 
     return parser
 
 def prepare_model(chkpt_dir, arch='mae_vit_large_patch16', args=None):
     # build model
-    model = OWC2.__dict__[arch](norm_pix_loss=args.norm_pix_loss, model_args=args)
+    model = OWC2_LIB.__dict__[arch](norm_pix_loss=args.norm_pix_loss, model_args=args)
     # load model
     checkpoint = torch.load(chkpt_dir, map_location='cpu')
     msg = model.load_state_dict(checkpoint['model'], strict=True)
@@ -180,13 +182,17 @@ def gen_one_image(input_img, model):
     image_target = filter_class(x, label, random_selected_class)
     image_target2 = filter_class(x2, label2, random_selected_class2)
 
-    save_tensor(x, 'tmp/test1_image.png')
-    save_tensor(label, 'tmp/test1_label.png', mask = True)
-    save_tensor(image_target, 'tmp/test1_image_target.png')
+    class_ = 'cls'
+    for icl in random_selected_class:
+        class_ += str(icl)
+    print("class_", class_)
+    save_tensor(x, args.output_vis+'/test1_image_'+class_+'_'+str(args.reverse)+'.png')
+    save_tensor(label, args.output_vis+'/test1_label_'+class_+'_'+str(args.reverse)+'.png', mask = True)
+    save_tensor(image_target, args.output_vis+'/test1_image_target_'+class_+'_'+str(args.reverse)+'.png')
 
-    save_tensor(x2, 'tmp/test2_image.png')
-    save_tensor(label2, 'tmp/test2_label.png', mask = True)
-    save_tensor(image_target2, 'tmp/test2_image_target.png')
+    save_tensor(x2, args.output_vis+'/test2_image_'+class_+'_'+str(args.reverse)+'.png')
+    save_tensor(label2, args.output_vis+'/test2_label_'+class_+'_'+str(args.reverse)+'.png', mask = True)
+    save_tensor(image_target2, args.output_vis+'/test2_image_target_'+class_+'_'+str(args.reverse)+'.png')
 
     print("x.shape", x.shape)
     print("x2.shape", x2.shape)
@@ -210,29 +216,42 @@ def gen_one_image(input_img, model):
         loss2, pred2, _ = model(image_target2, mask_ratio=args.mask_ratio, middle=middle2)
     print("loss1, loss2", loss1, loss2)
 
-    save_tensor(pred1, 'tmp/test1_pred_image.png')
-    save_tensor(pred2, 'tmp/test2_pred_image.png')
+    save_tensor(pred1, args.output_vis+'/test1_pred_image_'+class_+'_'+str(args.reverse)+'.png')
+    save_tensor(pred2, args.output_vis+'/test2_pred_image_'+class_+'_'+str(args.reverse)+'.png')
 
     ## pred3
     x_restored, cls_tokens, middle_output = model.forward_encoder(x, mask_ratio=args.mask_ratio, middle=middle1)
     # x_masked = middle_output['x_masked']
     # mask = middle_output['mask']
     print("x_restored.shape, cls_tokens.shape, middle_output['x_masked'].shape, middle_output['mask'].shape", x_restored.shape, cls_tokens.shape, middle_output['x_masked'].shape, middle_output['mask'].shape)
-    x_restored_ = model.token_restore(middle_output['x_masked'], middle_output['mask'])
-    print("x_restored_.shape", x_restored_.shape)
+    # x_restored_ = model.token_restore(middle_output['x_masked'], middle_output['mask'])
+    # print("x_restored_.shape", x_restored_.shape)
 
     _, _, middle_output2 = model.forward_encoder(x2, mask_ratio=args.mask_ratio, middle=middle2)
     print("middle_output2['x_masked'].shape", middle_output2['x_masked'].shape)
 
-    x_restored_comb = model.token_restore_sup(middle_output['x_masked'], middle_output['mask'], middle_output2['x_masked'])
+    if not args.vq_version == None:
+        x_masked_post = model.post_quant_lin(middle_output['x_masked'])
+        x_masked_post2 = model.post_quant_lin(middle_output2['x_masked'])
+        x_restored_comb = model.token_restore_sup(x_masked_post, middle_output['mask'], x_masked_post2)
+        min_encoding_indices = middle_output["min_encoding_indices"]
+        min_encoding_indices2 = middle_output2["min_encoding_indices"]
+        print("min_encoding_indices", min_encoding_indices)
+        print("min_encoding_indices2", min_encoding_indices2)
+    else:
+        x_restored_comb = model.token_restore_sup(middle_output['x_masked'], middle_output['mask'], middle_output2['x_masked'])
+
     print("x_restored_comb.shape", x_restored_comb.shape)
 
     if args.training_version == 'v0':
-        pred_comb = model.unpatchify(model.forward_decoder(x_restored_comb, cls_tokens))
-        save_tensor(pred_comb, 'tmp/test_comb_pred_image.png')
+        if args.arch_version.startswith("v1") or args.arch_version.startswith("v2"):
+            pred_comb = model.unpatchify(model.forward_decoder(x_restored_comb, cls_tokens))
+        elif args.arch_version.startswith("v3"):
+            pred_comb = model.forward_decoder(x_restored_comb, cls_tokens)
+        save_tensor(pred_comb, args.output_vis+'/test_comb_pred_image_'+class_+'_'+str(args.reverse)+'.png')
     elif args.training_version == 'v1':
         pred_comb = image_target + pred1
-        save_tensor(pred_comb, 'tmp/test_comb_pred_image.png', norm=True)
+        save_tensor(pred_comb, args.output_vis+'/test_comb_pred_image_'+class_+'_'+str(args.reverse)+'.png', norm=True)
 
     # Create a figure with 2 columns and 4 rows
     fig, axes = plt.subplots(4, 2, figsize=(10, 20))
@@ -246,7 +265,7 @@ def gen_one_image(input_img, model):
     axes[3,0].imshow(pred1.squeeze().permute(1, 2, 0).detach().cpu().numpy())
     axes[3,1].imshow(pred2.squeeze().permute(1, 2, 0).detach().cpu().numpy())
 
-    fig.savefig('tmp/test_combined_image.png', bbox_inches="tight")
+    fig.savefig(args.output_vis+'/test_combined_image_'+class_+'_'+str(args.reverse)+'.png', bbox_inches="tight")
 
 if __name__ == '__main__':
     args = get_args_parser()
@@ -261,10 +280,13 @@ if __name__ == '__main__':
 
     # args.if_vq = False
     args.vq_version = None
+    args.lib_version = None
     if '-VQ' in args.arch_version:
         # args.if_vq = True
         args.vq_version = args.arch_version.split('-VQ')[1].split('_nt')[0].split('-')[0]
         args.vq_n_token = int(args.arch_version.split('-VQ')[1].split('_nt')[1].split('-')[0])
+        if '-LIB' in args.arch_version:
+            args.lib_version = args.arch_version.split('-LIB')[1].split('-')[0]
 
     # args.if_disetg = False
     args.disetg_version = None
@@ -272,9 +294,14 @@ if __name__ == '__main__':
         # args.if_disetg = True
         args.disetg_version = args.arch_version.split('-DT')[1].split('-')[0]
 
+    args.cls_num = 1
+    if '-cls' in args.arch_version:
+        args.cls_num = int(args.arch_version.split('-cls')[1].split('-')[0])
+
     args.arch_version = args.arch_version.split('-')[0]
 
     path = '/mnt/weka/wekafs/rad-megtron/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas_1000_224/'
+    # path = '/raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas_1000_224/'
     # img1 = path+'Training/image/BDMAP_00000001/BDMAP_00000001_194.jpg'
     # label1 = path+'Training/mask/BDMAP_00000001/BDMAP_00000001_194.png'
     img2 = path+'Test/image/BDMAP_00000068/BDMAP_00000068_81.jpg'
@@ -285,6 +312,13 @@ if __name__ == '__main__':
     img1 = path+'Test/image/BDMAP_00000055/BDMAP_00000055_78.jpg'
     label1 = path+'Test/mask/BDMAP_00000055/BDMAP_00000055_78.png'
     
+    if args.reverse == 1:
+        img1 = path+'Test/image/BDMAP_00000068/BDMAP_00000068_81.jpg'
+        label1 = path+'Test/mask/BDMAP_00000068/BDMAP_00000068_81.png'
+
+        img2 = path+'Test/image/BDMAP_00000055/BDMAP_00000055_78.jpg'
+        label2 = path+'Test/mask/BDMAP_00000055/BDMAP_00000055_78.png'
+
     image1 = read_img(img1)
     label1 = read_img(label1, mask = True)
     sample1 = {'image': image1, 'label':label1}

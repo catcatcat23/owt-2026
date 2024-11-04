@@ -29,31 +29,25 @@ class MaskedAutoencoderViT(nn.Module):
                  mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False, model_args=None):
         super().__init__()
 
-        self.model_args = model_args
         # --------------------------------------------------------------------------
         # MAE encoder specifics
-        if self.model_args.arch_version.startswith("v1") or self.model_args.arch_version.startswith("v2"):
-            self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
-            num_patches = self.patch_embed.num_patches
-    
-            self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-            self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim), requires_grad=False)  # fixed sin-cos embedding
-    
-            # print("self.model_args", self.model_args)
-            ### self.blocks = nn.ModuleList([
-            ###     Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
-            ###     for i in range(depth)])
-            self.blocks1 = nn.ModuleList([
-                Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer) 
-                for i in range(int(depth/2))]) ## delete all qk_scale=None for H100
-        elif self.model_args.arch_version.startswith("v3"):
-            from VQ.VQ_model import Encoder
-            self.encoder = Encoder(ch=128, out_ch=3, ch_mult=[1,1,2,2,4], num_res_blocks=2, attn_resolutions=[16], dropout=0.0, resamp_with_conv=True, in_channels=3, resolution=224, z_channels=embed_dim, double_z=False, give_pre_end=False)
-            self.avg_pool = nn.AdaptiveAvgPool2d((int(self.model_args.cls_num**.5),int(self.model_args.cls_num**.5)))
-            self.encoder_embed = nn.Linear(embed_dim, embed_dim, bias=False)
+        self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
+        num_patches = self.patch_embed.num_patches
+
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim), requires_grad=False)  # fixed sin-cos embedding
+
+        self.model_args = model_args
+        # print("self.model_args", self.model_args)
+        ### self.blocks = nn.ModuleList([
+        ###     Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
+        ###     for i in range(depth)])
+        self.blocks1 = nn.ModuleList([
+            Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer) 
+            for i in range(int(depth/2))]) ## delete all qk_scale=None for H100
 
         self.blocks2 = nn.ModuleList([
-            Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer) 
+            Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer) 
             for i in range(int(depth/2))]) ## delete all qk_scale=None for H100
 
         self.embed_dim = embed_dim
@@ -85,7 +79,7 @@ class MaskedAutoencoderViT(nn.Module):
             self.decoder = Decoder(ch=128, out_ch=3, ch_mult=[1,1,2,2,4], num_res_blocks=2, attn_resolutions=[16], dropout=0.0, resamp_with_conv=True, in_channels=3, resolution=224, z_channels=decoder_embed_dim, give_pre_end=False)
 
         self.decoder_blocks = nn.ModuleList([
-            Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
+            Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
             for i in range(decoder_depth)]) ## delete all qk_scale=None for H100
 
         self.decoder_norm = norm_layer(decoder_embed_dim)
@@ -98,7 +92,6 @@ class MaskedAutoencoderViT(nn.Module):
             self.n_embed = self.model_args.vq_n_token ## for each organ
             if self.model_args.vq_version.startswith('v0'):
                 from VQ.VQ_model import VectorQuantizer2_OWC as VectorQuantizer
-                self.n_embed = self.model_args.vq_n_token * self.model_args.num_classes_with_bg
                 self.quantize = VectorQuantizer(self.n_embed, decoder_embed_dim, beta=0.25, model_args=self.model_args, legacy=False)
                 if self.model_args.vq_version == 'v0':
                     self.quant_lin = nn.Linear(decoder_embed_dim, decoder_embed_dim, bias=False)
@@ -121,7 +114,6 @@ class MaskedAutoencoderViT(nn.Module):
                     self.decoder_pred.apply(self._init_weights)
             elif self.model_args.vq_version == 'v1':
                 from VQ.norm_ema_quantizer import NormEMAVectorQuantizer_OWC as VectorQuantizer
-                self.n_embed = self.model_args.vq_n_token * self.model_args.num_classes_with_bg
                 self.quantize = VectorQuantizer(self.n_embed, decoder_embed_dim, beta=1.0, model_args=self.model_args, kmeans_init=True, decay=0.99)
                 # self.quant_lin = nn.Linear(decoder_embed_dim, decoder_embed_dim, bias=False)
                 # self.post_quant_lin = nn.Linear(decoder_embed_dim, decoder_embed_dim, bias=False)
@@ -152,21 +144,19 @@ class MaskedAutoencoderViT(nn.Module):
 
     def initialize_weights(self):
         # initialization
-        if self.model_args.arch_version.startswith("v1") or self.model_args.arch_version.startswith("v2"):
-            # initialize (and freeze) pos_embed by sin-cos embedding
-            pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
-            self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
+        # initialize (and freeze) pos_embed by sin-cos embedding
+        pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
+        self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
-            ### decoder_pos_embed = get_2d_sincos_pos_embed(self.decoder_pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
-            ### self.decoder_pos_embed.data.copy_(torch.from_numpy(decoder_pos_embed).float().unsqueeze(0))
+        ### decoder_pos_embed = get_2d_sincos_pos_embed(self.decoder_pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
+        ### self.decoder_pos_embed.data.copy_(torch.from_numpy(decoder_pos_embed).float().unsqueeze(0))
 
-            # initialize patch_embed like nn.Linear (instead of nn.Conv2d)
-            w = self.patch_embed.proj.weight.data
-            torch.nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
+        # initialize patch_embed like nn.Linear (instead of nn.Conv2d)
+        w = self.patch_embed.proj.weight.data
+        torch.nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
 
-            # timm's trunc_normal_(std=.02) is effectively normal_(std=0.02) as cutoff is too big (2.)
-            torch.nn.init.normal_(self.cls_token, std=.02)
-
+        # timm's trunc_normal_(std=.02) is effectively normal_(std=0.02) as cutoff is too big (2.)
+        torch.nn.init.normal_(self.cls_token, std=.02)
         torch.nn.init.normal_(self.mask_token, std=.02)
 
         # initialize nn.Linear and nn.LayerNorm
@@ -277,54 +267,42 @@ class MaskedAutoencoderViT(nn.Module):
 
     def forward_encoder(self, x, mask_ratio, middle = None):
         image_target, random_selected_class = middle["image_target"], middle["random_selected_class"]
-        if self.model_args.arch_version.startswith("v1") or self.model_args.arch_version.startswith("v2"):
-            # print("encoder, x.shape", x.shape) # torch.Size([64, 3, 224, 224])
-            # embed patches
-            x = self.patch_embed(x)
-            # print("encoder, x.shape2", x.shape) # torch.Size([64, 196, 768])
-    
-            # add pos embed w/o cls token
-            x = x + self.pos_embed[:, 1:, :]
-            # print("encoder, x.shape3", x.shape) # torch.Size([64, 196, 768])
-    
-            # masking: length -> length * mask_ratio
-            ### x, mask, ids_restore = self.random_masking(x, mask_ratio)
-    
-            # append cls token ## token2: save slice info here
-            cls_token = self.cls_token + self.pos_embed[:, :1, :]
-            # print("cls_token.shape1", cls_token.shape) # torch.Size([1, 1, 768])
-            cls_tokens = cls_token.expand(x.shape[0], -1, -1)
-            # print("cls_tokens.shape2", cls_tokens.shape) # torch.Size([64, 1, 768])
-            x = torch.cat((cls_tokens, x), dim=1)
-            # print("x.shape4", x.shape) # torch.Size([64, 50, 768]) ## token2 torch.Size([64, 197, 768])
-    
-            # apply Transformer blocks
-            for bi, blk in enumerate(self.blocks1):
-                # print("bi", bi)
-                x = blk(x) ## token2 torch.Size([64, 197, 768])
-            x = self.norm(x)
-    
-            cls_tokens = x[:,:1,:]
-            x = x[:,1:,:] ## torch.Size([64, 196, 768])
-        elif self.model_args.arch_version.startswith("v3"):
-            x_ = self.encoder(x)
-            # print("v3 encoder final x_.shape", x_.shape) # torch.Size([32, 768, 14, 14])
-            cls_tokens = self.avg_pool(x_)
-            cls_tokens = cls_tokens.flatten(2)
-            cls_tokens = cls_tokens.transpose(-1, -2)
-            # print("cls_tokens.shape", cls_tokens.shape)
-            x_ = x_.flatten(2) # torch.Size([32, 768, 196])
-            x_ = x_.transpose(-1, -2) # torch.Size([32, 196, 768])
-            x = self.encoder_embed(x_)
-            # print("x.shape encoder finalfinal", x.shape) # torch.Size([32, 196, 768])
 
+        # print("encoder, x.shape", x.shape) # torch.Size([64, 3, 224, 224])
+        # embed patches
+        x = self.patch_embed(x)
+        # print("encoder, x.shape2", x.shape) # torch.Size([64, 196, 768])
+
+        # add pos embed w/o cls token
+        x = x + self.pos_embed[:, 1:, :]
+        # print("encoder, x.shape3", x.shape) # torch.Size([64, 196, 768])
+
+        # masking: length -> length * mask_ratio
+        ### x, mask, ids_restore = self.random_masking(x, mask_ratio)
+
+        # append cls token ## token2: save slice info here
+        cls_token = self.cls_token + self.pos_embed[:, :1, :]
+        # print("cls_token.shape1", cls_token.shape) # torch.Size([1, 1, 768])
+        cls_tokens = cls_token.expand(x.shape[0], -1, -1)
+        # print("cls_tokens.shape2", cls_tokens.shape) # torch.Size([64, 1, 768])
+        x = torch.cat((cls_tokens, x), dim=1)
+        # print("x.shape4", x.shape) # torch.Size([64, 50, 768]) ## token2 torch.Size([64, 197, 768])
+
+        # apply Transformer blocks
+        for bi, blk in enumerate(self.blocks1):
+            # print("bi", bi)
+            x = blk(x) ## token2 torch.Size([64, 197, 768])
+        x = self.norm(x)
+
+        cls_tokens = x[:,:1,:]
+        x = x[:,1:,:]
         x, _ = self.organ_embed(x) ## torch.Size([64, 200, 768])
 
         # print("x.shape before random", x.shape, x) # torch.Size([64, 200, 768])
         ## random mask organ tokens
         x_masked_b, mask = self.random_masking(x, random_selected_class) ## torch.Size([64, 100, 768])
         x_masked_ = torch.cat((cls_tokens, x_masked_b), dim=1) ## torch.Size([64, 101, 768])
-        # print("x_masked_.shape after cls token", x_masked_.shape) # torch.Size([64, 101, 768])
+        # print("x_masked_.shape after cls token", x_masked_.shape, x_masked_) # torch.Size([64, 101, 768])
 
         ## encoder2 (forward middle)
         for bi, blk in enumerate(self.blocks2):
@@ -333,10 +311,8 @@ class MaskedAutoencoderViT(nn.Module):
         x_masked_ = self.norm(x_masked_)
         # print("x_masked_.shape after encoder2", x_masked_.shape) # torch.Size([64, 101, 768])
 
-        cls_tokens = x_masked_[:,:self.model_args.cls_num,:]
-        x_masked = x_masked_[:,self.model_args.cls_num:,:]
-        # print("cls_tokens.shape after split", cls_tokens.shape)
-        # print("x_masked.shape after split", x_masked.shape)
+        cls_tokens = x_masked_[:,:1,:]
+        x_masked = x_masked_[:,1:,:]
 
         ## VQ here
         if self.model_args.vq_version != None:
@@ -380,7 +356,6 @@ class MaskedAutoencoderViT(nn.Module):
         else:
             cls_tokens = self.decoder_embed_cls(cls_tokens)
             x = torch.cat((cls_tokens, x), dim=1) ## 197
-            # print("x.shape in decoder 1", x.shape)
 
         ### append mask tokens to sequence
         ### mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1)
@@ -419,8 +394,8 @@ class MaskedAutoencoderViT(nn.Module):
             pass
         else:                                             ## v2, v3...
             #remove cls token
-            x = x[:, self.model_args.cls_num:, :]
-        # print("decoder, x.shape7", x.shape) # torch.Size([64, 196, 768])
+            x = x[:, 1:, :]
+        ### print("decoder, x.shape7", x.shape) # torch.Size([64, 196, 768])
 
         if self.model_args.arch_version.startswith('v1'): ## only v1
             pass
@@ -431,7 +406,6 @@ class MaskedAutoencoderViT(nn.Module):
             x = self.decoder(x)
 
         x = self.sigmoid(x)
-        # print("decoder, x.shape finalfianl", x.shape) # torch.Size([64, 196, 768])
         return x
 
     def forward_loss(self, image_target, pred):

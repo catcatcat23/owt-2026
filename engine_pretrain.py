@@ -80,7 +80,7 @@ def train_one_epoch(model: torch.nn.Module,
         with torch.cuda.amp.autocast():
             if args.arch_version.startswith('v0'):
                 loss, _, _ = model(samples, mask_ratio=args.mask_ratio)
-            elif args.arch_version.startswith('v1') or args.arch_version.startswith('v2'):
+            else: ## v1, v2, v3
                 if args.training_version.startswith('v0'):
                     middle = {"image_target": image_target, "random_selected_class": random_selected_class}
                     loss, pred, middle_output = model(samples, mask_ratio=mask_ratio, middle=middle)#, mask_ratio=args.mask_ratio)
@@ -89,7 +89,7 @@ def train_one_epoch(model: torch.nn.Module,
                     for i in random_selected_class:
                         random_selected_class2.remove(i)
                     middle = {"image_target": samples-image_target, "random_selected_class": random_selected_class2}
-                    loss, pred, _ = model(image_target, mask_ratio=mask_ratio, middle=middle)#, mask_ratio=args.mask_ratio)
+                    loss, pred, middle_output = model(image_target, mask_ratio=mask_ratio, middle=middle)#, mask_ratio=args.mask_ratio)
 
         if data_iter_step == 0:
             # print("random_selected_class", random_selected_class)
@@ -137,6 +137,9 @@ def train_one_epoch(model: torch.nn.Module,
         if args.vq_version != None:
             loss_value_vq = middle_output["vq_loss"].item()
             loss = loss + 1.0*middle_output["vq_loss"]
+        if "LPIPS" in args.loss_version:
+            p_loss_value = middle_output["p_loss"].item()
+            loss = loss + 1.0*middle_output["p_loss"]
 
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
@@ -160,6 +163,8 @@ def train_one_epoch(model: torch.nn.Module,
         metric_logger.update(loss=loss_value)
         if args.vq_version != None:
             metric_logger.update(loss_vq=loss_value_vq)
+        if "LPIPS" in args.loss_version:
+            metric_logger.update(p_loss=p_loss_value)
 
         lr = optimizer.param_groups[0]["lr"]
         metric_logger.update(lr=lr)

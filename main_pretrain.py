@@ -28,7 +28,8 @@ import random
 
 import timm
 
-assert timm.__version__ == "0.3.2"  # version check
+# assert timm.__version__ == "0.3.2"  # version check
+# assert timm.__version__ == "0.3.2"  # version check # comment for H100
 import timm.optim.optim_factory as optim_factory
 
 import util.misc as misc
@@ -189,9 +190,9 @@ def main(args):
         # elif args.arch_version.startswith('v1'):
         #     import models_mae_token2
         #     model = models_mae_token2.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
-        elif args.arch_version.startswith('v1') or args.arch_version.startswith('v2'):
-            import OWC2
-            model = OWC2.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
+        else: ## v1, v2, v3...
+            import OWC2_LIB ## should also include all experiments of OWC2
+            model = OWC2_LIB.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
 
     model.to(device)
 
@@ -261,16 +262,23 @@ if __name__ == '__main__':
 
     # args.if_vq = False
     args.vq_version = None
+    args.lib_version = None
     if '-VQ' in args.arch_version:
         # args.if_vq = True
         args.vq_version = args.arch_version.split('-VQ')[1].split('_nt')[0].split('-')[0]
         args.vq_n_token = int(args.arch_version.split('-VQ')[1].split('_nt')[1].split('-')[0])
+        if '-LIB' in args.arch_version:
+            args.lib_version = args.arch_version.split('-LIB')[1].split('-')[0]
 
     # args.if_disetg = False
     args.disetg_version = None
     if '-DT' in args.arch_version:
         # args.if_disetg = True
         args.disetg_version = args.arch_version.split('-DT')[1].split('-')[0]
+
+    args.cls_num = 1
+    if '-cls' in args.arch_version:
+        args.cls_num = int(args.arch_version.split('-cls')[1].split('-')[0])
 
     args.arch_version = args.arch_version.split('-')[0]
 

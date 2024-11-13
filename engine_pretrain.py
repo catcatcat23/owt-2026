@@ -57,6 +57,8 @@ def train_one_epoch(model: torch.nn.Module,
             image = samples['image'].to(device, non_blocking=True)
             label = samples['label'].to(device, non_blocking=True)
             case_name = samples['case_name']
+            if data_iter_step <= 3:
+                print(case_name)
             # print("image.shape, label.shape", image.shape, label.shape)  # torch.Size([64, 3, 224, 224]), torch.Size([64, 3, 224, 224]) 
             samples = image
 
@@ -92,44 +94,45 @@ def train_one_epoch(model: torch.nn.Module,
                     loss, pred, middle_output = model(image_target, mask_ratio=mask_ratio, middle=middle)#, mask_ratio=args.mask_ratio)
 
         if data_iter_step == 0:
-            # print("random_selected_class", random_selected_class)
-            # print("case_name", case_name[10])
-            # Convert the first prediction to a numpy array and save as PNG
-            pred_image = pred[10].detach().cpu().numpy()
-            pred_image = (pred_image * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
-            pred_image = np.transpose(pred_image, (1, 2, 0))  # Convert from CHW to HWC format
-            # Save the image
-            pred_image_pil = Image.fromarray(pred_image)
-            pred_image_pil.save(args.output_dir+'vis/0_pred.png')
-
-            image_target_image = image_target[10].detach().cpu().numpy()
-            image_target_image = (image_target_image * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
-            image_target_image = np.transpose(image_target_image, (1, 2, 0))  # Convert from CHW to HWC format
-            # Save the image
-            image_target_image_pil = Image.fromarray(image_target_image)
-            image_target_image_pil.save(args.output_dir+'vis/0_image_target.png')
-
-            image_pil = image[10].detach().cpu().numpy()
-            image_pil = (image_pil * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
-            image_pil = np.transpose(image_pil, (1, 2, 0))  # Convert from CHW to HWC format
-            # Save the image
-            image_pil_pil = Image.fromarray(image_pil)
-            image_pil_pil.save(args.output_dir+'vis/0_image.png')
-
-            mask = label[10].detach().cpu().numpy()
-            mask = mask*20/255
-            mask = (mask * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
-            mask = np.transpose(mask, (1, 2, 0))  # Convert from CHW to HWC format
-            # Save the image
-            mask_pil = Image.fromarray(mask)
-            mask_pil.save(args.output_dir+'vis/0_mask_check.png')
-            
-            mask = label[10].detach().cpu().numpy()
-            mask = mask.astype(np.uint8)  # Assuming pred is normalized between 0 and 1
-            mask = np.transpose(mask, (1, 2, 0))  # Convert from CHW to HWC format
-            # Save the image
-            mask_pil = Image.fromarray(mask)
-            mask_pil.save(args.output_dir+'vis/0_mask.png')
+            if args.dataset_type == "2D":
+                # print("random_selected_class", random_selected_class)
+                # print("case_name", case_name[10])
+                # Convert the first prediction to a numpy array and save as PNG
+                pred_image = pred[10].detach().cpu().numpy()
+                pred_image = (pred_image * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
+                pred_image = np.transpose(pred_image, (1, 2, 0))  # Convert from CHW to HWC format
+                # Save the image
+                pred_image_pil = Image.fromarray(pred_image)
+                pred_image_pil.save(args.output_dir+'vis/0_pred.png')
+    
+                image_target_image = image_target[10].detach().cpu().numpy()
+                image_target_image = (image_target_image * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
+                image_target_image = np.transpose(image_target_image, (1, 2, 0))  # Convert from CHW to HWC format
+                # Save the image
+                image_target_image_pil = Image.fromarray(image_target_image)
+                image_target_image_pil.save(args.output_dir+'vis/0_image_target.png')
+    
+                image_pil = image[10].detach().cpu().numpy()
+                image_pil = (image_pil * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
+                image_pil = np.transpose(image_pil, (1, 2, 0))  # Convert from CHW to HWC format
+                # Save the image
+                image_pil_pil = Image.fromarray(image_pil)
+                image_pil_pil.save(args.output_dir+'vis/0_image.png')
+    
+                mask = label[10].detach().cpu().numpy()
+                mask = mask*20/255
+                mask = (mask * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
+                mask = np.transpose(mask, (1, 2, 0))  # Convert from CHW to HWC format
+                # Save the image
+                mask_pil = Image.fromarray(mask)
+                mask_pil.save(args.output_dir+'vis/0_mask_check.png')
+                
+                mask = label[10].detach().cpu().numpy()
+                mask = mask.astype(np.uint8)  # Assuming pred is normalized between 0 and 1
+                mask = np.transpose(mask, (1, 2, 0))  # Convert from CHW to HWC format
+                # Save the image
+                mask_pil = Image.fromarray(mask)
+                mask_pil.save(args.output_dir+'vis/0_mask.png')
 
             # exit()
             

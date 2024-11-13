@@ -23,7 +23,7 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 
 from torch.utils.data import DataLoader
-from datasets.dataset import dataset_reader, RandomGenerator
+from datasets.dataset3D import dataset_reader, RandomGenerator
 import random
 
 import timm
@@ -114,7 +114,8 @@ def get_args_parser():
     parser.add_argument('--training_version', type=str, default='v0', help='v0, v1...')
     parser.add_argument('--token_factor', type=int, default=1, help='how many tokens to generate a class')
     parser.add_argument('--loss_version', type=str, default='L2', help='L1-LPIPS-GAN')
-
+    parser.add_argument('--dataset_type', type=str, default='2D', help='2D, 3D') ## but 3D controlled by training_version -3D
+    parser.add_argument('--LA', type=bool, default=False, help='False, True')
 
     return parser
 
@@ -146,7 +147,7 @@ def main(args):
         print(dataset_train)
     else:
         dataset_train = dataset_reader(base_dir=args.data_path, split="train", num_classes=args.num_classes, 
-                                    transform=transforms.Compose([RandomGenerator(output_size=[args.input_size, args.input_size], low_res=[128, 128])]))
+                                    transform=transforms.Compose([RandomGenerator(output_size=[args.input_size, args.input_size], low_res=[128, 128])]), model_args = args)
         print("The length of train set is: {}".format(len(dataset_train)))
 
     if True:  # args.distributed:
@@ -192,7 +193,7 @@ def main(args):
         #     model = models_mae_token2.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
         else: ## v1, v2, v3...
             import OWC2_LIB ## should also include all experiments of OWC2
-            model = OWC2_LIB.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
+            model = OWC2_LIB.__dict__[args.model](img_size=args.input_size, norm_pix_loss=args.norm_pix_loss, model_args=args)
 
     model.to(device)
 
@@ -283,6 +284,14 @@ if __name__ == '__main__':
     args.arch_version = args.arch_version.split('-')[0]
 
     args.loss_version = args.loss_version.split('-') ## loss_dict
+
+    if '-3D' in args.training_version:
+        args.dataset_type = '3D'
+        args.training_version = args.training_version.split("-3D")[0]
+
+    if '-LA' in args.model:
+        args.LA = True
+        args.model = args.model.split("-LA")[0]
 
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)

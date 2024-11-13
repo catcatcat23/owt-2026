@@ -46,39 +46,39 @@ class OrganEmbed(nn.Module):
 
         return outputs, attention_probs
 
-# class OrganEmbed(nn.Module):
-#     # def __init__(self, config, step_num, vis = None):
-#     def __init__(self, input_dim, output_dim, organ_token_total, hw_size):
-#         super(OrganEmbed, self).__init__()
-#         token_num = organ_token_total
+class OrganEmbed2(nn.Module):
+    # def __init__(self, config, step_num, vis = None):
+    def __init__(self, input_dim, output_dim, organ_token_total, hw_size):
+        super(OrganEmbed2, self).__init__()
+        token_num = organ_token_total
 
-#         self.oe_linear1 = nn.Linear(input_dim, token_num, bias=False)
-#         self.oe_linear2 = nn.Linear(input_dim, output_dim, bias=False)
-#         self.softmax = Softmax(dim=-1)
+        self.oe_linear1 = nn.Linear(input_dim, token_num, bias=False)
+        self.oe_linear2 = nn.Linear(input_dim, output_dim, bias=False)
+        self.softmax = Softmax(dim=-1)
 
-#     def forward(self, input_x):
-#         x = input_x ## 64, 196, 768
+    def forward(self, input_x):
+        x = input_x ## 64, 196, 768
 
-#         attn_ids = self.oe_linear1(x) ## 64, 196, 200
-#         print("attn_ids.shape", attn_ids.shape)
-#         attn_ids = attn_ids.permute(0,2,1) ## 64, 200, 196
-#         print("attn_ids.shape", attn_ids.shape)
-#         attention_probs = self.softmax(attn_ids) ## 2, token_num(64), 128*128 ; 64, 200, 196
+        attn_ids = self.oe_linear1(x) ## 64, 196, 200
+        # print("attn_ids.shape", attn_ids.shape)
+        attn_ids = attn_ids.permute(0,2,1) ## 64, 200, 196
+        # print("attn_ids.shape", attn_ids.shape)
+        attention_probs = self.softmax(attn_ids) ## 2, token_num(64), 128*128 ; 64, 200, 196
 
-#         x = self.oe_linear2(x) ## 64, 196, 768
-#         print("x.shape2", x.shape)
+        x = self.oe_linear2(x) ## 64, 196, 768
+        # print("x.shape2", x.shape)
 
-#         outputs = torch.einsum("...si,...id->...sd", attention_probs, x) ## 2, token_num(64), channel(128)
-#         print("outputs.shape", outputs.shape) ## torch.Size([64, 200, 768])
+        outputs = torch.einsum("...si,...id->...sd", attention_probs, x) ## 2, token_num(64), channel(128)
+        # print("outputs.shape", outputs.shape) ## torch.Size([64, 200, 768])
 
-#         return outputs, attention_probs
+        return outputs, attention_probs
 
 class SpatialRestore(nn.Module):
     # def __init__(self, config, step_num, vis = None):
-    def __init__(self, input_dim, output_dim, organ_token_total, hw_size):
+    def __init__(self, input_dim, output_dim, organ_token_total, output_hw_size):
         super(SpatialRestore, self).__init__()
 
-        self.sp_linear1 = nn.Linear(input_dim, hw_size*hw_size, bias=False)
+        self.sp_linear1 = nn.Linear(input_dim, output_hw_size, bias=False)
         self.sp_linear2 = nn.Linear(input_dim, output_dim, bias=False)
         self.softmax = Softmax(dim=-1)
 

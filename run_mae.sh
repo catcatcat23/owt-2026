@@ -35,15 +35,17 @@ CLASSES=9
 INPUT_SIZE=224
 TOKEN_Fac=20
 ####################################################
-BATCH_SIZE=64 ## 64 for v1 in A100 40G (21401MiB); 16/24? for v2 in A100 40G (24693MiB)
-EPOCH=800 ## v1: 800-40; v2: 400-20
-WARMUP=40 ## v1: 800-40; v2: 400-20
-ARCH_Ver=v11
+BATCH_SIZE=1 ## 64 for v1 in A100 40G (21401MiB); 16/24? for v2 in A100 40G (24693MiB); 1 for 3D (temp)
+EPOCH=8000 ## v1: 800-40; v2: 400-20
+WARMUP=400 ## v1: 800-40; v2: 400-20
+ARCH_Ver=v1
 ####     v1 (Trans Decoder), v2 (VQGAN Decoder), v3 (VQGAN Encoder to 1/16hw before two transformers);
+####         v11; v31: without intermediate cls tokens
 ####         -cls4 (用于skip的 slice/global information) (currently, only for v3)
 ####     -VQv0/v01/v1_nt512; (v01比v0用的non-linear; v1用的NormEMA QT)
 ####         -LIBv0 (是否一个organ一个codebook); -DTv0;
-TRAIN_Ver=v01 ## v0 (generation); v1 (inpainting)
+TRAIN_Ver=v0-3D ## v0 (generation) (v01 generation without mask tokens); v1 (inpainting)
+####     -3D
 LOSS_Ver=L2-LPIPS ## L2; L1; -LPIPS; -LPIPS-GAN
 ####################################################
 TRAIN_CSV_PATH=/mnt/weka/wekafs/rad-megtron/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas_1000_224/Training.csv

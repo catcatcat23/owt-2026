@@ -101,9 +101,9 @@ def get_args_parser():
     parser.add_argument('--num_classes', type=int, default=1, help='output channel of network')
     parser.add_argument('--arch_version', type=str, default='v0', help='v0, v1...')
     parser.add_argument('--training_version', type=str, default='v0', help='v0, v1...')
-    parser.add_argument('--token_factor', type=int, default=20, help='how many tokens to generate a class')
+    parser.add_argument('--token_factor', type=int, default=1, help='how many tokens to generate a class')
     parser.add_argument('--loss_version', type=str, default='L2', help='L1-LPIPS-GAN')
-    parser.add_argument('--dataset_type', type=str, default='3D', help='2D, 3D') ## but 3D controlled by training_version -3D
+    parser.add_argument('--dataset_type', type=str, default='2D', help='2D, 3D') ## but 3D controlled by training_version -3D
     parser.add_argument('--LA', type=bool, default=False, help='False, True')
 
     parser.add_argument('--checkpoint', type=str, default=None, help='checkpoint')
@@ -176,14 +176,27 @@ def gen_one_image(input_img, model, case_id=0):
     device = torch.device(args.device)
     model.to(device)
 
+    # class_list = list(range(1, args.num_classes_with_bg))
+    # random.shuffle(class_list)
+    # print("class_list", class_list)
+    # random_selected_class = class_list[:int(len(class_list)*args.mask_ratio)]
+
+    # random_selected_class = [1]
     random_selected_class = args.select_cls
     print("random_selected_class", random_selected_class)
 
+    # random_selected_class2 = class_list[int(len(class_list)*args.mask_ratio):]
+    random_selected_class2 = [0,1,2,3,4,5,6,7,8,9]
+    for i in random_selected_class:
+        random_selected_class2.remove(i)
+    print("random_selected_class2", random_selected_class2)
+
     assert len(random_selected_class) >= 1
+    assert len(random_selected_class2) <= 9
 
     sample1 = input_img[0]
-    x = sample1['image'].to(device)
-    label = sample1['label'].to(device)
+    x = sample1['image'].to(device, non_blocking=True)
+    label = sample1['label'].to(device, non_blocking=True)
 
     image_target = filter_class(x, label, random_selected_class)
     print("image_target.shape", image_target.shape)
@@ -200,25 +213,29 @@ def gen_one_image(input_img, model, case_id=0):
 
     model.eval()
 
-    preds = torch.zeros(x.shape).to(device)
-    cnts = torch.zeros(x.shape).to(device)
+    preds = torch.zeros(x.shape).to(device, non_blocking=True)
+    cnts = torch.zeros(x.shape).to(device, non_blocking=True)
 
     for fr in range(0, x.shape[2]-args.fix_frame):
         x_ = x[:,:,fr:fr+args.fix_frame,:,:]
-        # print("fr, x_.shape", fr, x_.shape)
+        print("fr, x_.shape", fr, x_.shape)
     
         if args.training_version.startswith('v0'):
             middle1 = {"image_target": image_target[:,:,fr:fr+args.fix_frame,:,:], "random_selected_class": random_selected_class}
-            # loss1, pred1, _ = model(x_, mask_ratio=args.mask_ratio, middle=middle1)
-            x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
-            # print("x_restored.shape, cls_tokens.shape, middle_output['x_masked'].shape, middle_output['mask'].shape", x_restored.shape, cls_tokens.shape, middle_output['x_masked'].shape, middle_output['mask'].shape)
-            # print(middle_output['mask'])
-            pred1 = model.unpatchify3D(model.forward_decoder(x_restored, cls_tokens, middle_output))
+            loss1, pred1, _ = model(x_, mask_ratio=args.mask_ratio, middle=middle1)
             preds[:,:,fr+args.fix_frame,:,:]+=pred1[:,:,-1,:,:]
             cnts[:,:,fr+args.fix_frame,:,:]+=1
-        # break
-
-    # print("loss1", loss1)
+        # elif args.training_version.startswith('v1'): ## currently not v1
+        #     _random_selected_class = list(range(args.num_classes_with_bg)) ## [0,1,2,3,4,5,6,7,8,9]
+        #     for i in random_selected_class:
+        #         _random_selected_class.remove(i)
+        #     _random_selected_class2 = list(range(args.num_classes_with_bg)) ## [0,1,2,3,4,5,6,7,8,9]
+        #     for i in random_selected_class2:
+        #         _random_selected_class2.remove(i)
+        #     middle1 = {"image_target": x-image_target, "random_selected_class": _random_selected_class}
+        #     loss1, pred1, _ = model(image_target, mask_ratio=args.mask_ratio, middle=middle1)
+        
+    print("loss1", loss1)
     preds = preds/cnts
 
     save_tensor_3D(preds, args.output_vis+'/test1_pred_image_'+'case'+str(case_id)+'_'+class_+'_'+str(args.reverse)+'.png')

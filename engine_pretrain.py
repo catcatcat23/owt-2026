@@ -57,8 +57,8 @@ def train_one_epoch(model: torch.nn.Module,
             image = samples['image'].to(device, non_blocking=True)
             label = samples['label'].to(device, non_blocking=True)
             case_name = samples['case_name']
-            if data_iter_step <= 3:
-                print(case_name)
+            # if data_iter_step <= 3:
+            #     print(case_name)
             # print("image.shape, label.shape", image.shape, label.shape)  # torch.Size([64, 3, 224, 224]), torch.Size([64, 3, 224, 224]) 
             samples = image
 
@@ -133,6 +133,46 @@ def train_one_epoch(model: torch.nn.Module,
                 # Save the image
                 mask_pil = Image.fromarray(mask)
                 mask_pil.save(args.output_dir+'vis/0_mask.png')
+            elif args.dataset_type == "3D":
+                pred_images = pred[10].detach().cpu().numpy()
+                pred_images = (pred_images * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
+                for i_im in range(pred_images.shape[1]):
+                    pred_image = np.transpose(pred_images[:,i_im,:,:], (1, 2, 0))  # Convert from CHW to HWC format
+                    # Save the image
+                    pred_image_pil = Image.fromarray(pred_image)
+                    pred_image_pil.save(args.output_dir+'vis/0_pred_'+str(i_im)+'.png')
+    
+                image_target_images = image_target[10].detach().cpu().numpy()
+                image_target_images = (image_target_images * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
+                for i_im in range(image_target_images.shape[1]):
+                    image_target_image = np.transpose(image_target_images[:,i_im,:,:], (1, 2, 0))  # Convert from CHW to HWC format
+                    # Save the image
+                    image_target_image_pil = Image.fromarray(image_target_image)
+                    image_target_image_pil.save(args.output_dir+'vis/0_image_target_'+str(i_im)+'.png')
+    
+                image_pils = image[10].detach().cpu().numpy()
+                image_pils = (image_pils * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
+                for i_im in range(image_pils.shape[1]):
+                    image_pil = np.transpose(image_pils[:,i_im,:,:], (1, 2, 0))  # Convert from CHW to HWC format
+                    # Save the image
+                    image_pil_pil = Image.fromarray(image_pil)
+                    image_pil_pil.save(args.output_dir+'vis/0_image_'+str(i_im)+'.png')
+    
+                masks = label[10].detach().cpu().numpy()
+                masks = masks*20/255
+                masks = (masks * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
+                for i_im in range(masks.shape[1]):
+                    mask = np.transpose(masks[:,i_im,:,:], (1, 2, 0))  # Convert from CHW to HWC format
+                    # Save the image
+                    mask_pil = Image.fromarray(mask)
+                    mask_pil.save(args.output_dir+'vis/0_mask_check_'+str(i_im)+'.png')
+                
+                # mask = label[10].detach().cpu().numpy()
+                # mask = mask.astype(np.uint8)  # Assuming pred is normalized between 0 and 1
+                # mask = np.transpose(mask, (1, 2, 0))  # Convert from CHW to HWC format
+                # # Save the image
+                # mask_pil = Image.fromarray(mask)
+                # mask_pil.save(args.output_dir+'vis/0_mask.png')
 
             # exit()
             

@@ -285,8 +285,11 @@ if __name__ == '__main__':
 
     args.loss_version = args.loss_version.split('-') ## loss_dict
 
+    args.fix_frame = 0
     if '-3D' in args.training_version:
         args.dataset_type = '3D'
+        if '-Fixfr' in args.training_version:
+            args.fix_frame = int(args.training_version.split("-Fixfr")[1])
         args.training_version = args.training_version.split("-3D")[0]
 
     if '-LA' in args.model:

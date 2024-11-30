@@ -103,13 +103,15 @@ def get_args_parser():
     parser.add_argument('--training_version', type=str, default='v0', help='v0, v1...')
     parser.add_argument('--token_factor', type=int, default=20, help='how many tokens to generate a class')
     parser.add_argument('--loss_version', type=str, default='L2', help='L1-LPIPS-GAN')
-    parser.add_argument('--dataset_type', type=str, default='3D', help='2D, 3D') ## but 3D controlled by training_version -3D
+    parser.add_argument('--dataset_type', type=str, default='2D', help='2D, 3D') ## but 3D controlled by training_version -3D
     parser.add_argument('--LA', type=bool, default=False, help='False, True')
 
     parser.add_argument('--checkpoint', type=str, default=None, help='checkpoint')
     parser.add_argument('--select_cls', type=str, default='1', help='select_cls 1,2,3,4,5...')
     parser.add_argument('--reverse', type=int, default=0)
     parser.add_argument('--output_vis', type=str, default=None)
+
+    parser.add_argument('--sim_print', type=str, default=False)
 
 
     return parser
@@ -203,20 +205,71 @@ def gen_one_image(input_img, model, case_id=0):
     preds = torch.zeros(x.shape).to(device)
     cnts = torch.zeros(x.shape).to(device)
 
-    for fr in range(0, x.shape[2]-args.fix_frame):
-        x_ = x[:,:,fr:fr+args.fix_frame,:,:]
-        # print("fr, x_.shape", fr, x_.shape)
-    
-        if args.training_version.startswith('v0'):
-            middle1 = {"image_target": image_target[:,:,fr:fr+args.fix_frame,:,:], "random_selected_class": random_selected_class}
-            # loss1, pred1, _ = model(x_, mask_ratio=args.mask_ratio, middle=middle1)
-            x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
-            # print("x_restored.shape, cls_tokens.shape, middle_output['x_masked'].shape, middle_output['mask'].shape", x_restored.shape, cls_tokens.shape, middle_output['x_masked'].shape, middle_output['mask'].shape)
-            # print(middle_output['mask'])
-            pred1 = model.unpatchify3D(model.forward_decoder(x_restored, cls_tokens, middle_output))
-            preds[:,:,fr+args.fix_frame,:,:]+=pred1[:,:,-1,:,:]
-            cnts[:,:,fr+args.fix_frame,:,:]+=1
-        # break
+    if args.dataset_type == "3D":
+        for fr in range(0, x.shape[2]-args.fix_frame+1, args.fix_frame):
+            x_ = x[:,:,fr:fr+args.fix_frame,:,:]
+            print("fr, x_.shape", fr, x_.shape)
+            
+            with torch.no_grad():
+                if args.training_version.startswith('v0'):
+                    if args.sim_print == False:
+                        middle1 = {"image_target": image_target[:,:,fr:fr+args.fix_frame,:,:], "random_selected_class": random_selected_class}
+                        # loss1, pred1, _ = model(x_, mask_ratio=args.mask_ratio, middle=middle1)
+                        x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
+                        # print("x_restored.shape, cls_tokens.shape, middle_output['x_masked'].shape, middle_output['mask'].shape",     x_restored.shape,   cls_tokens.shape, middle_output['x_masked'].shape,  middle_output['mask'].shape)
+                        # print(middle_output['mask'])
+                        pred1 = model.unpatchify3D(model.forward_decoder(x_restored, cls_tokens, middle_output))
+                        preds[:,:,fr:fr+args.fix_frame,:,:]+=pred1
+                        cnts[:,:,fr:fr+args.fix_frame,:,:]+=1
+                    else:
+                        fr=10
+                        x_ = x[:,:,fr:fr+args.fix_frame,:,:]
+                        middle1 = {"image_target": image_target[:,:,fr:fr+args.fix_frame,:,:], "random_selected_class": random_selected_class}
+                        x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
+                        print("x_restored.shape, cls_tokens.shape, middle_output['x_masked'].shape, middle_output['mask'].shape", x_restored.shape, cls_tokens.shape, middle_output['x_masked'].shape,  middle_output['mask'].shape) ## torch.Size([1, 200, 768]) torch.Size([1, 1, 768]) torch.Size([1, 200, 768]) torch.Size([1, 200])
+
+                        print("labels in this patch", np.unique(label[:,:,fr:fr+args.fix_frame,:,:].detach().cpu().numpy()))
+                        x_restored_ = x_restored.squeeze(0)
+                        # bin_size = 20
+                        # num_bins = x_restored_.size(0) // bin_size
+                        # x_restored_ = x_restored_.view(num_bins, bin_size, -1).mean(dim=1) 
+                        x_restored_ = x_restored_ / x_restored_.norm(dim=1, keepdim=True)
+                        cosine_similarity_matrix = torch.mm(x_restored_, x_restored_.t())
+                        cosine_similarity_matrix_np = cosine_similarity_matrix.cpu().detach().numpy()
+                        plt.figure(figsize=(8, 8))
+                        plt.imshow(cosine_similarity_matrix_np, cmap='viridis')
+                        plt.colorbar(label='Cosine Similarity')
+                        plt.title('Cosine Similarity Matrix')
+                        plt.xlabel('Tokens')
+                        plt.ylabel('Tokens')
+                        plt.savefig('cosine_similarity_matrix.png', dpi=300, bbox_inches='tight') 
+                        plt.show()
+                        pred1 = model.unpatchify3D(model.forward_decoder(x_restored, cls_tokens, middle_output))
+                        loss = ((pred1 - image_target[:,:,fr:fr+args.fix_frame,:,:]) ** 2).mean()
+                        print("loss", loss)
+                        save_tensor_3D(x[:,:,fr:fr+args.fix_frame,:,:], args.output_vis+'/test1_image_'+class_+'_'+str(args.reverse))
+                        save_tensor_3D(label[:,:,fr:fr+args.fix_frame,:,:], args.output_vis+'/test1_label_'+class_+'_'+str(args.reverse), mask = True)
+                        save_tensor_3D(image_target[:,:,fr:fr+args.fix_frame,:,:], args.output_vis+'/test1_image_target_'+class_+'_'+str(args.reverse))
+                        save_tensor_3D(pred1, args.output_vis+'/test1_pred_image_'+'case'+str(case_id)+'_'+class_+'_'+str(args.reverse)+'.png')
+                        exit(0)
+                # break
+
+    elif args.dataset_type == "2D":
+        for fr in range(0, x.shape[2]-args.fix_frame):
+            x_ = x[:,:,fr,:,:]
+            # print("fr, x_.shape", fr, x_.shape)
+            
+            with torch.no_grad():
+                if args.training_version.startswith('v0'):
+                    middle1 = {"image_target": image_target[:,:,fr,:,:], "random_selected_class": random_selected_class}
+                    # loss1, pred1, _ = model(x_, mask_ratio=args.mask_ratio, middle=middle1)
+                    x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
+                    # print("x_restored.shape, cls_tokens.shape, middle_output['x_masked'].shape, middle_output['mask'].shape",     x_restored.shape,   cls_tokens.shape, middle_output['x_masked'].shape, middle_output['mask'].shape)
+                    # print(middle_output['mask'])
+                    pred1 = model.unpatchify(model.forward_decoder(x_restored, cls_tokens, middle_output))
+                    preds[:,:,fr,:,:]+=pred1
+                    cnts[:,:,fr,:,:]+=1
+                # break
 
     # print("loss1", loss1)
     preds = preds/cnts
@@ -258,10 +311,13 @@ if __name__ == '__main__':
     args.arch_version = args.arch_version.split('-')[0]
 
     args.fix_frame = 0
+    args.temp_stride = 0
     if '-3D' in args.training_version:
         args.dataset_type = '3D'
         if '-Fixfr' in args.training_version:
-            args.fix_frame = int(args.training_version.split("-Fixfr")[1])
+            args.fix_frame = int(args.training_version.split("-Fixfr")[1].split("-")[0])
+        if '-TS' in args.training_version:
+            args.temp_stride = int(args.training_version.split("-TS")[1].split("-")[0])
         args.training_version = args.training_version.split("-3D")[0]
 
     if '-LA' in args.model:
@@ -269,17 +325,17 @@ if __name__ == '__main__':
         args.model = args.model.split("-LA")[0]
     print(args.model)
 
-    # path = '/mnt/weka/wekafs/rad-megtron/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas_1000_224/'
-    path = '/raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas_1000_224/'
-    # img1 = path+'Training/image/BDMAP_00000001/BDMAP_00000001_194.jpg'
-    # label1 = path+'Training/mask/BDMAP_00000001/BDMAP_00000001_194.png'
-    img2 = path+'Test/image/BDMAP_00000068/'
-    label2 = path+'Test/mask/BDMAP_00000068/'
+    # path = '/raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas_1000_224/'
+    # img2 = path+'Test/image/BDMAP_00000068/'
+    # label2 = path+'Test/mask/BDMAP_00000068/'
+    # img1 = path+'Test/image/BDMAP_00000055/'
+    # label1 = path+'Test/mask/BDMAP_00000055/'
 
-    # img2 = path+'Test/image/BDMAP_00000031/BDMAP_00000031_309.jpg'
-    # label2 = path+'Test/mask/BDMAP_00000031/BDMAP_00000031_309.png'
-    img1 = path+'Test/image/BDMAP_00000055/'
-    label1 = path+'Test/mask/BDMAP_00000055/'
+    path = '/raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Final/'
+    img2 = path+'Test/image/Case_00011_0000.nii.gz/'
+    label2 = path+'Test/mask/Case_00011_0000.nii.gz/'
+    img1 = path+'Test/image/Case_00011_0000.nii.gz/'
+    label1 = path+'Test/mask/Case_00011_0000.nii.gz/'
     
     if args.reverse == 1:
         img1 = path+'Training/image/BDMAP_00000030/'
@@ -328,8 +384,8 @@ if __name__ == '__main__':
     print("sample['image'].shape 2", sample['image'].shape)
     print("sample['label'].shape 2", sample['label'].shape)
 
-    # if d % 16 != 0:
-    #     pad_size = 16 - (d % 16)
+    # if d % args.fix_frame != 0:
+    #     pad_size = args.fix_frame - (d % args.fix_frame)
     #     print("pad_size", pad_size)
     #     pad_tensor = torch.zeros(pad_size, h, w, 3, dtype=sample['image'].dtype)
     #     pad_tensor2 = torch.zeros(pad_size, h, w, 3, dtype=sample['label'].dtype)

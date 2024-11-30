@@ -19,7 +19,7 @@ from timm.models.vision_transformer import PatchEmbed, Block #, Attention
 from util.patch_embed import PatchEmbed3D, PatchEmbed3Dv2, PatchEmbed3Dfix
 
 from util.pos_embed import get_2d_sincos_pos_embed, get_1d_sincos_pos_embed_from_grid
-from OrganEmbed import OrganEmbed, OrganEmbed2, SpatialRestore #, SpatialRestore2
+from OrganEmbed import OrganEmbed, OrganEmbed2, SpatialRestore, SpatialRestore2
 from einops import rearrange
 
 # from timm.models.layers import DropPath ## for SLURM
@@ -197,9 +197,9 @@ class MaskedAutoencoderViT(nn.Module):
                 self.pos_embed_temporal = nn.Parameter(torch.zeros(1, self.patch_embed.grid_size[0], embed_dim))
     
                 # Separable encoder positional embeddings
-                self.decoder_pos_embed_class = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
-                self.decoder_pos_embed_spatial = nn.Parameter(torch.zeros(1, self.patch_embed.grid_size[1] * self.patch_embed.grid_size[2], decoder_embed_dim))
-                self.decoder_pos_embed_temporal = nn.Parameter(torch.zeros(1, self.patch_embed.grid_size[0], decoder_embed_dim))
+                # self.decoder_pos_embed_class = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
+                # self.decoder_pos_embed_spatial = nn.Parameter(torch.zeros(1, self.patch_embed.grid_size[1] * self.patch_embed.grid_size[2],         decoder_embed_dim))
+                # self.decoder_pos_embed_temporal = nn.Parameter(torch.zeros(1, self.patch_embed.grid_size[0], decoder_embed_dim))
 
             # print("self.model_args", self.model_args)
             ### self.blocks = nn.ModuleList([
@@ -258,8 +258,8 @@ class MaskedAutoencoderViT(nn.Module):
             self.decoder_embed = SpatialRestore(embed_dim, decoder_embed_dim, self.model_args.organ_token_total, (img_size//patch_size)*(img_size//patch_size))
         elif self.model_args.dataset_type == "3D":
             if self.model_args.arch_version.startswith("v1") or self.model_args.arch_version.startswith("v2"):
-                self.decoder_embed = SpatialRestore(embed_dim, decoder_embed_dim, self.model_args.organ_token_total, self.patch_embed.grid_size[0]*self.patch_embed.grid_size[1]*self.patch_embed.grid_size[2])
-                # self.decoder_embed = SpatialRestore2(embed_dim, decoder_embed_dim, self.model_args.organ_token_total, self.patch_embed.grid_size[1]*self.patch_embed.grid_size[2])
+                # self.decoder_embed = SpatialRestore2(embed_dim, decoder_embed_dim, self.model_args.organ_token_total, self.patch_embed.grid_size[0]*self.patch_embed.grid_size[1]*self.patch_embed.grid_size[2])
+                self.decoder_embed = SpatialRestore2(embed_dim, decoder_embed_dim, self.model_args.organ_token_total, self.patch_embed.grid_size[1]*self.patch_embed.grid_size[2])
             elif self.model_args.arch_version.startswith("v3"):
                 self.decoder_embed = SpatialRestore(embed_dim, decoder_embed_dim, self.model_args.organ_token_total, (self.model_args.fix_frame//patch_size)*(img_size//patch_size)*(img_size//patch_size))
 
@@ -313,7 +313,7 @@ class MaskedAutoencoderViT(nn.Module):
                     self.decoder_pred = nn.Sequential(
                             nn.Linear(decoder_embed_dim, patch_size**2 * in_chans, bias=True),
                             nn.Tanh(),
-                            nn.Linear(patch_size**2 * in_chans, patch_size**2 * in_chans * self.temp_stride, bias=True))
+                            nn.Linear(patch_size**2 * in_chans, patch_size**2 * in_chans, bias=True))
                 else:
                     self.decoder_pred = nn.Sequential(
                             nn.Linear(decoder_embed_dim, patch_size**2 * in_chans, bias=True),
@@ -407,17 +407,25 @@ class MaskedAutoencoderViT(nn.Module):
                 self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
             elif self.model_args.dataset_type == "3D":
                 # torch.nn.init.normal_(self.pos_embed_spatial, std=.02)
-                pos_embed_spatial = get_2d_sincos_pos_embed(self.pos_embed_spatial.shape[-1], int(self.patch_embed.grid_size[1]), cls_token=False)
-                self.pos_embed_spatial.data.copy_(torch.from_numpy(pos_embed_spatial).float().unsqueeze(0))
                 torch.nn.init.normal_(self.pos_embed_temporal, std=.02)
 
-                torch.nn.init.normal_(self.decoder_pos_embed_class, std=.02)
-                # torch.nn.init.normal_(self.decoder_pos_embed_spatial, std=.02)
-                decoder_pos_embed_spatial = get_2d_sincos_pos_embed(self.decoder_pos_embed_spatial.shape[-1], int(self.patch_embed.grid_size[1]), cls_token=False)
-                self.decoder_pos_embed_spatial.data.copy_(torch.from_numpy(decoder_pos_embed_spatial).float().unsqueeze(0))
-                torch.nn.init.normal_(self.decoder_pos_embed_temporal, std=.02)
+                # torch.nn.init.normal_(self.decoder_pos_embed_class, std=.02)
+                # # torch.nn.init.normal_(self.decoder_pos_embed_spatial, std=.02)
+                # torch.nn.init.normal_(self.decoder_pos_embed_temporal, std=.02)
+                pos_embed_spatial = get_2d_sincos_pos_embed(self.pos_embed_spatial.shape[-1], int(self.patch_embed.grid_size[1]), cls_token=False)
+                self.pos_embed_spatial.data.copy_(torch.from_numpy(pos_embed_spatial).float().unsqueeze(0))
+                # pos_embed_temporal = get_1d_sincos_pos_embed_from_grid(self.pos_embed_temporal.shape[-1], self.pos_embed_temporal.shape[-2])
+                # self.pos_embed_temporal.data.copy_(torch.from_numpy(pos_embed_temporal).float().unsqueeze(0))
 
-                print("self.pos_embed_spatial.shape, self.pos_embed_temporal.shape, self.decoder_pos_embed_spatial.shape, self.decoder_pos_embed_temporal.shape", self.pos_embed_spatial.shape, self.pos_embed_temporal.shape, self.decoder_pos_embed_spatial.shape, self.decoder_pos_embed_temporal.shape)
+                # decoder_pos_embed_spatial = get_2d_sincos_pos_embed(self.decoder_pos_embed_spatial.shape[-1], int(self.patch_embed.grid_size[1]), cls_token=False)
+                # self.decoder_pos_embed_spatial.data.copy_(torch.from_numpy(decoder_pos_embed_spatial).float().unsqueeze(0))
+                # # decoder_pos_embed_temporal = get_1d_sincos_pos_embed_from_grid(self.decoder_pos_embed_temporal.shape[-1], self.decoder_pos_embed_temporal.shape[-2])
+                # # self.decoder_pos_embed_temporal.data.copy_(torch.from_numpy(decoder_pos_embed_temporal).float().unsqueeze(0))
+
+                # # print("self.pos_embed_spatial.shape, self.pos_embed_temporal.shape, self.decoder_pos_embed_spatial.shape, self.decoder_pos_embed_temporal.shape", self.pos_embed_spatial.shape, self.pos_embed_temporal.shape, self.decoder_pos_embed_spatial.shape, self.decoder_pos_embed_temporal.shape)
+
+            ### decoder_pos_embed = get_2d_sincos_pos_embed(self.decoder_pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
+            ### self.decoder_pos_embed.data.copy_(torch.from_numpy(decoder_pos_embed).float().unsqueeze(0))
 
             # initialize patch_embed like nn.Linear (instead of nn.Conv2d)
             w = self.patch_embed.proj.weight.data
@@ -460,10 +468,7 @@ class MaskedAutoencoderViT(nn.Module):
         x: (N, L, patch_size**2 *3)
         imgs: (N, 3, H, W)
         """
-        if self.model_args.dataset_type == "2D":
-            p = self.patch_embed.patch_size[0]
-        elif self.model_args.dataset_type == "3D":
-            p = self.patch_size
+        p = self.patch_embed.patch_size[0]
         h = w = int(x.shape[1]**.5)
         assert h * w == x.shape[1]
         
@@ -748,16 +753,16 @@ class MaskedAutoencoderViT(nn.Module):
         ## shouldn't have class tokens for generation
         ### x = torch.cat((cls_tokens, x), dim=1) # torch.Size([64, 197, 512])
 
-        if self.model_args.arch_version.startswith("v1") or self.model_args.arch_version.startswith("v2"): ## not for CNN decoder
-            if self.model_args.dataset_type == "3D":
-                # add pos embed
-                pos_embed = self.decoder_pos_embed_spatial.repeat(1, self.patch_embed.grid_size[0], 1) + \
-                            torch.repeat_interleave(self.decoder_pos_embed_temporal, self.patch_embed.grid_size[1] * self.patch_embed.grid_size[2], dim=1)
-                if self.model_args.arch_version == 'v11' or self.model_args.arch_version == 'v21': ##  only v11
-                    x = x + pos_embed
-                else:
-                    pos_embed = torch.cat([self.decoder_pos_embed_class, pos_embed], 1)
-                    x = x + pos_embed
+        # if self.model_args.arch_version.startswith("v1") or self.model_args.arch_version.startswith("v2"): ## not for CNN decoder
+        #     if self.model_args.dataset_type == "3D":
+        #         # add pos embed
+        #         pos_embed = self.decoder_pos_embed_spatial.repeat(1, self.patch_embed.grid_size[0], 1) + \
+        #                     torch.repeat_interleave(self.decoder_pos_embed_temporal, self.patch_embed.grid_size[1] * self.patch_embed.grid_size[2], dim=1)
+        #         if self.model_args.arch_version == 'v11' or self.model_args.arch_version == 'v21': ##  only v11
+        #             x = x + pos_embed
+        #         else:
+        #             pos_embed = torch.cat([self.decoder_pos_embed_class, pos_embed], 1)
+        #             x = x + pos_embed
 
         # apply Transformer blocks
         ## v2 for vqgan decoder, for better generation results (maybe VQ tokens?)
@@ -805,8 +810,8 @@ class MaskedAutoencoderViT(nn.Module):
             x = self.decoder(x)
 
         x = self.sigmoid(x)
-        # print("decoder, x.shape finalfianl", x.shape) # torch.Size([64, 196, 768])
-        # exit(0)
+        print("decoder, x.shape finalfianl", x.shape) # torch.Size([64, 196, 768])
+        exit(0)
         return x
 
     def forward_loss(self, image_target, pred):
@@ -825,12 +830,13 @@ class MaskedAutoencoderViT(nn.Module):
 
         # # print("loss, pred.shape, target.shape", pred.shape, target.shape) # torch.Size([64, 196, 768]) torch.Size([64, 196, 768])
         # target = self.unpatchify(target)
-        # print("pred.shape", pred.shape)
         if self.model_args.arch_version.startswith('v1'): ## only v1
             if self.model_args.dataset_type == "2D":
                 pred = self.unpatchify(pred)
             elif self.model_args.dataset_type == "3D":
+                # print("before unpatch pred.shape", pred.shape)
                 pred = self.unpatchify3D(pred)
+                # print("after unpatch pred.shape", pred.shape)
         else:                                             ## v2, v3...
             pass
 
@@ -853,9 +859,9 @@ class MaskedAutoencoderViT(nn.Module):
                 p_loss = self.perceptual_loss(image_target.contiguous(), pred.contiguous())
                 p_loss = torch.mean(p_loss)
             elif self.model_args.dataset_type == "3D":
-                p_loss = 0
-                loss_count = 0
                 for i_sl in range(image_target.shape[2]):
+                    p_loss = 0
+                    loss_count = 0
                     image_target_i = image_target[:,:,i_sl,:,:]
                     pred_i = pred[:,:,i_sl,:,:]
                     p_loss = p_loss + torch.mean(self.perceptual_loss(image_target_i.contiguous(), pred_i.contiguous()))

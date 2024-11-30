@@ -342,6 +342,7 @@ class RandomGenerator(object):
         if x != self.output_size[0] or y != self.output_size[1]:
             image = zoom(image, (self.output_size[0] / x, self.output_size[1] / y, 1.0), order=3)
             label = zoom(label, (self.output_size[0] / x, self.output_size[1] / y, 1.0), order=0)
+            image = (image-image.min())/(image.max()-image.min()+0.00000001)
         label_h, label_w, label_d = label.shape
         # low_res_label = zoom(label, (self.low_res[0] / label_h, self.low_res[1] / label_w, 1.0), order=0)
         

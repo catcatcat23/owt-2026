@@ -98,28 +98,28 @@ def train_one_epoch(model: torch.nn.Module,
                 # print("random_selected_class", random_selected_class)
                 # print("case_name", case_name[10])
                 # Convert the first prediction to a numpy array and save as PNG
-                pred_image = pred[10].detach().cpu().numpy()
+                pred_image = pred[-1].detach().cpu().numpy()
                 pred_image = (pred_image * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
                 pred_image = np.transpose(pred_image, (1, 2, 0))  # Convert from CHW to HWC format
                 # Save the image
                 pred_image_pil = Image.fromarray(pred_image)
                 pred_image_pil.save(args.output_dir+'vis/0_pred.png')
     
-                image_target_image = image_target[10].detach().cpu().numpy()
+                image_target_image = image_target[-1].detach().cpu().numpy()
                 image_target_image = (image_target_image * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
                 image_target_image = np.transpose(image_target_image, (1, 2, 0))  # Convert from CHW to HWC format
                 # Save the image
                 image_target_image_pil = Image.fromarray(image_target_image)
                 image_target_image_pil.save(args.output_dir+'vis/0_image_target.png')
     
-                image_pil = image[10].detach().cpu().numpy()
+                image_pil = image[-1].detach().cpu().numpy()
                 image_pil = (image_pil * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
                 image_pil = np.transpose(image_pil, (1, 2, 0))  # Convert from CHW to HWC format
                 # Save the image
                 image_pil_pil = Image.fromarray(image_pil)
                 image_pil_pil.save(args.output_dir+'vis/0_image.png')
     
-                mask = label[10].detach().cpu().numpy()
+                mask = label[-1].detach().cpu().numpy()
                 mask = mask*20/255
                 mask = (mask * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
                 mask = np.transpose(mask, (1, 2, 0))  # Convert from CHW to HWC format
@@ -127,14 +127,30 @@ def train_one_epoch(model: torch.nn.Module,
                 mask_pil = Image.fromarray(mask)
                 mask_pil.save(args.output_dir+'vis/0_mask_check.png')
                 
-                mask = label[10].detach().cpu().numpy()
+                mask = label[-1].detach().cpu().numpy()
                 mask = mask.astype(np.uint8)  # Assuming pred is normalized between 0 and 1
                 mask = np.transpose(mask, (1, 2, 0))  # Convert from CHW to HWC format
                 # Save the image
                 mask_pil = Image.fromarray(mask)
                 mask_pil.save(args.output_dir+'vis/0_mask.png')
             elif args.dataset_type == "3D":
-                pred_images = pred[10].detach().cpu().numpy()
+                # if args.arch_version.startswith("v1") or args.arch_version.startswith("v2"):
+                #     pred_images = pred[-1].detach().cpu().numpy()
+                #     pred_images = (pred_images * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
+                #     # if (args.dataset_type == "3D" and args.temp_stride == args.fix_frame):
+                #     # print("pred_images.shape", pred_images.shape)
+                #     pred_image = np.transpose(pred_images, (1, 2, 0))  # Convert from CHW to HWC format
+                #     # Save the image
+                #     pred_image_pil = Image.fromarray(pred_image)
+                #     pred_image_pil.save(args.output_dir+'vis/0_pred_last.png')
+                #     # else:
+                #     #     for i_im in range(pred_images.shape[1]):
+                #     #         pred_image = np.transpose(pred_images[:,i_im,:,:], (1, 2, 0))  # Convert from CHW to HWC format
+                #     #         # Save the image
+                #     #         pred_image_pil = Image.fromarray(pred_image)
+                #     #         pred_image_pil.save(args.output_dir+'vis/0_pred_'+str(i_im)+'.png')
+                # else:
+                pred_images = pred[-1].detach().cpu().numpy()
                 pred_images = (pred_images * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
                 for i_im in range(pred_images.shape[1]):
                     pred_image = np.transpose(pred_images[:,i_im,:,:], (1, 2, 0))  # Convert from CHW to HWC format
@@ -142,7 +158,7 @@ def train_one_epoch(model: torch.nn.Module,
                     pred_image_pil = Image.fromarray(pred_image)
                     pred_image_pil.save(args.output_dir+'vis/0_pred_'+str(i_im)+'.png')
     
-                image_target_images = image_target[10].detach().cpu().numpy()
+                image_target_images = image_target[-1].detach().cpu().numpy()
                 image_target_images = (image_target_images * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
                 for i_im in range(image_target_images.shape[1]):
                     image_target_image = np.transpose(image_target_images[:,i_im,:,:], (1, 2, 0))  # Convert from CHW to HWC format
@@ -150,7 +166,7 @@ def train_one_epoch(model: torch.nn.Module,
                     image_target_image_pil = Image.fromarray(image_target_image)
                     image_target_image_pil.save(args.output_dir+'vis/0_image_target_'+str(i_im)+'.png')
     
-                image_pils = image[10].detach().cpu().numpy()
+                image_pils = image[-1].detach().cpu().numpy()
                 image_pils = (image_pils * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
                 for i_im in range(image_pils.shape[1]):
                     image_pil = np.transpose(image_pils[:,i_im,:,:], (1, 2, 0))  # Convert from CHW to HWC format
@@ -158,7 +174,7 @@ def train_one_epoch(model: torch.nn.Module,
                     image_pil_pil = Image.fromarray(image_pil)
                     image_pil_pil.save(args.output_dir+'vis/0_image_'+str(i_im)+'.png')
     
-                masks = label[10].detach().cpu().numpy()
+                masks = label[-1].detach().cpu().numpy()
                 masks = masks*20/255
                 masks = (masks * 255).astype(np.uint8)  # Assuming pred is normalized between 0 and 1
                 for i_im in range(masks.shape[1]):
@@ -167,7 +183,7 @@ def train_one_epoch(model: torch.nn.Module,
                     mask_pil = Image.fromarray(mask)
                     mask_pil.save(args.output_dir+'vis/0_mask_check_'+str(i_im)+'.png')
                 
-                # mask = label[10].detach().cpu().numpy()
+                # mask = label[-1.detach().cpu().numpy()
                 # mask = mask.astype(np.uint8)  # Assuming pred is normalized between 0 and 1
                 # mask = np.transpose(mask, (1, 2, 0))  # Convert from CHW to HWC format
                 # # Save the image

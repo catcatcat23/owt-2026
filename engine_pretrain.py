@@ -79,7 +79,8 @@ def train_one_epoch(model: torch.nn.Module,
                     image_target[label==ms] = 0
                 # print("image.shape, image_target.shape", image.shape, image_target.shape)
 
-        with torch.cuda.amp.autocast():
+        with torch.amp.autocast('cuda'): ## only for H100
+            # with torch.cuda.amp.autocast(): ## only for SLURM
             if args.arch_version.startswith('v0'):
                 loss, _, _ = model(samples, mask_ratio=args.mask_ratio)
             else: ## v1, v2, v3

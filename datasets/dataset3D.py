@@ -400,23 +400,25 @@ class dataset_reader(Dataset):
                     data = cv2.cvtColor(data, cv2.COLOR_BGR2RGB)
                 
                 # if 'synapseCT' in self.sample_list[idx]:
-                if self.num_classes==12:
-                    HU_min, HU_max = -200, 250
-                    data_mean = 50.21997497685108
-                    data_std = 68.47153712416372
-                    data = np.clip(data, HU_min, HU_max)
-                    data = (data-HU_min)/(HU_max-HU_min)*255.0
-                    data = np.float32(data)
-                    data = (data - data_mean) / data_std
-                    # elif 'prostate' in self.sample_list[idx]: 
-                elif self.num_classes==1: ## only prostate not pancreas 
-                    data = np.float32(data)
-                elif self.num_classes==9: ## only abaltas 
-                    data = np.float32(data)
-                elif self.num_classes==56 or self.num_classes==78 or self.num_classes==131:
-                    data = np.float32(data)
-                else:
-                    exit(1)
+                # if self.num_classes==12:
+                #     HU_min, HU_max = -200, 250
+                #     data_mean = 50.21997497685108
+                #     data_std = 68.47153712416372
+                #     data = np.clip(data, HU_min, HU_max)
+                #     data = (data-HU_min)/(HU_max-HU_min)*255.0
+                #     data = np.float32(data)
+                #     data = (data - data_mean) / data_std
+                #     # elif 'prostate' in self.sample_list[idx]: 
+                # elif self.num_classes==1: ## only prostate not pancreas 
+                #     data = np.float32(data)
+                # elif self.num_classes==9 or self.num_classes==9: ## only abaltas 
+                #     data = np.float32(data)
+                # elif self.num_classes==56 or self.num_classes==78 or self.num_classes==131:
+                #     data = np.float32(data)
+                # else:
+                #     exit(1)
+
+                data = np.float32(data)
                 data = (data-data.min())/(data.max()-data.min()+0.00000001)
                 h, w, d = data.shape
     

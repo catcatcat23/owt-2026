@@ -18,9 +18,9 @@ from pathlib import Path
 
 import torch
 import torch.distributed as dist
-from torch._six import inf
+# from torch._six import inf ## only for SLURM
 # ~~from torch._six import inf~~
-# from torch import inf ## only for H100
+from torch import inf ## only for H100 mae and mae2
 
 
 class SmoothedValue(object):
@@ -254,7 +254,8 @@ class NativeScalerWithGradNormCount:
     state_dict_key = "amp_scaler"
 
     def __init__(self):
-        self._scaler = torch.cuda.amp.GradScaler()
+        self._scaler = torch.cuda.amp.GradScaler() ## only for SLURM and H100 mae2
+        # self._scaler = torch.amp.GradScaler('cuda') ## only for H100 mae, not for mae2
 
     def __call__(self, loss, optimizer, clip_grad=None, parameters=None, create_graph=False, update_grad=True):
         self._scaler.scale(loss).backward(create_graph=create_graph)

@@ -1,39 +1,3 @@
-## python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224/Training_H100_2.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224/Training_Fixfr16_H100_2.csv
-## python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224/Test_H100_2.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224/Test_Fixfr16_H100_2.csv
-## python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas_1000_224/Training_H100_2.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas_1000_224/Training_Fixfr16_H100_2.csv
-## python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas_1000_224/Test_H100_2.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas_1000_224/Test_Fixfr16_H100_2.csv
-
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Final/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Final/Training_Fixfr16_H100_2_Final112.csv
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Final/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Final/Test_Fixfr16_H100_2_Final112.csv
-
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Final/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Final/Training_Fixfr4_H100_2_Final112.csv
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Final/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Final/Test_Fixfr4_H100_2_Final112.csv
-
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Training_Fixfr4_H100_2_Final112.csv 4 
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Test_Fixfr4_H100_2_Final112.csv 4
-
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Training_Fixfr16_H100_2_Final112.csv 16
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Test_Fixfr16_H100_2_Final112.csv 16
-
-# python filter_Fixfr16.py /mnt/weka/wekafs/rad-megtron/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Training/Training_Final112.csv /mnt/weka/wekafs/rad-megtron/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Training/Training_Fixfr16_Final112.csv 16
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Training/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Training/Training_Fixfr16_H100_2_Final112.csv 16
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Test/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Test/Test_Fixfr16_H100_2_Final112.csv 16
-
-# python filter_Fixfr16.py /mnt/weka/wekafs/rad-megtron/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Training/Training_Final112.csv /mnt/weka/wekafs/rad-megtron/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Training/Training_Fixfr4_Final112.csv 4
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Training/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Training/Training_Fixfr4_H100_2_Final112.csv 4
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Test/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Test/Test_Fixfr4_H100_2_Final112.csv 4
-
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Training_H100_2_Final112_4c.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Training_Fixfr16_H100_2_Final112_4c.csv 16
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Test_H100_2_Final112_4c.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Test_Fixfr16_H100_2_Final112_4c.csv 16
-
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Training_H100_2_Final112_4c.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Training_Fixfr4_H100_2_Final112_4c.csv 4
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Test_H100_2_Final112_4c.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Test_Fixfr4_H100_2_Final112_4c.csv 4
-
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Tumor_Final/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Tumor_Final/Training_Fixfr16_H100_2_Final112.csv 16
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Tumor_Final/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Tumor_Final/Test_Fixfr16_H100_2_Final112.csv 16
-
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Tumor_Final/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Tumor_Final/Training_Fixfr4_H100_2_Final112.csv 4
-# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Tumor_Final/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Tumor_Final/Test_Fixfr4_H100_2_Final112.csv 4
 
 import os
 import random
@@ -97,8 +61,51 @@ submit_df = pd.DataFrame.from_dict(filtered_sample_list)
 submit_df.to_csv(output_dir, index=False)
 
 
+## python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224/Training_H100_2.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224/Training_Fixfr16_H100_2.csv
+## python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224/Test_H100_2.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224/Test_Fixfr16_H100_2.csv
+## python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas_1000_224/Training_H100_2.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas_1000_224/Training_Fixfr16_H100_2.csv
+## python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas_1000_224/Test_H100_2.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas_1000_224/Test_Fixfr16_H100_2.csv
 
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Final/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Final/Training_Fixfr16_H100_2_Final112.csv
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Final/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Final/Test_Fixfr16_H100_2_Final112.csv
 
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Final/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Final/Training_Fixfr4_H100_2_Final112.csv
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Final/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Final/Test_Fixfr4_H100_2_Final112.csv
+
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Training_Fixfr4_H100_2_Final112.csv 4 
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Test_Fixfr4_H100_2_Final112.csv 4
+
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Training_Fixfr16_H100_2_Final112.csv 16
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Test_Fixfr16_H100_2_Final112.csv 16
+
+# python filter_Fixfr16.py /mnt/weka/wekafs/rad-megtron/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Training/Training_Final112.csv /mnt/weka/wekafs/rad-megtron/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Training/Training_Fixfr16_Final112.csv 16
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Training/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Training/Training_Fixfr16_H100_2_Final112.csv 16
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Test/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Test/Test_Fixfr16_H100_2_Final112.csv 16
+
+# python filter_Fixfr16.py /mnt/weka/wekafs/rad-megtron/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Training/Training_Final112.csv /mnt/weka/wekafs/rad-megtron/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Training/Training_Fixfr4_Final112.csv 4
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Training/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Training/Training_Fixfr4_H100_2_Final112.csv 4
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Test/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Test/Test_Fixfr4_H100_2_Final112.csv 4
+
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Training_H100_2_Final112_4c.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Training_Fixfr16_H100_2_Final112_4c.csv 16
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Test_H100_2_Final112_4c.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Test_Fixfr16_H100_2_Final112_4c.csv 16
+
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Training_H100_2_Final112_4c.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Training_Fixfr4_H100_2_Final112_4c.csv 4
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Test_H100_2_Final112_4c.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/AbdAtlas/AbdAtlas_1000_224_Final/Test_Fixfr4_H100_2_Final112_4c.csv 4
+
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Tumor_Final/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Tumor_Final/Training_Fixfr16_H100_2_Final112.csv 16
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Tumor_Final/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Tumor_Final/Test_Fixfr16_H100_2_Final112.csv 16
+
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Tumor_Final/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Tumor_Final/Training_Fixfr4_H100_2_Final112.csv 4
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Tumor_Final/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/Abdomen1k/Abdomen1k_224_Tumor_Final/Test_Fixfr4_H100_2_Final112.csv 4
+
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/SyntheticMRI_pre/Delay/Training/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/SyntheticMRI_pre/Delay/Training/Training_Fixfr4_H100_2_Final112.csv 4
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/SyntheticMRI_pre/Delay/Test/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/SyntheticMRI_pre/Delay/Test/Test_Fixfr4_H100_2_Final112.csv 4
+
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/SyntheticMRI_pre/PreArtery/Training/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/SyntheticMRI_pre/PreArtery/Training/Training_Fixfr4_H100_2_Final112.csv 4
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/SyntheticMRI_pre/PreArtery/Test/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/SyntheticMRI_pre/PreArtery/Test/Test_Fixfr4_H100_2_Final112.csv 4
+
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/SyntheticMRI_pre/PV/Training/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/SyntheticMRI_pre/PV/Training/Training_Fixfr4_H100_2_Final112.csv 4
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/SyntheticMRI_pre/PV/Test/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/SyntheticMRI_pre/PV/Test/Test_Fixfr4_H100_2_Final112.csv 4
 
 
 

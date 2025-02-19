@@ -128,26 +128,7 @@ def save_tensor(x, save_name, mask = False, norm=False):
         x_np = (x_np * 20).astype(np.uint8) ## only for 9 labels
     cv2.imwrite(save_name, cv2.cvtColor(x_np, cv2.COLOR_RGB2BGR))
 
-def save_tensor_3D(x, save_name, mask = False, norm=False):
-    x_np = x.squeeze().permute(1, 2, 3, 0).detach().cpu().numpy() ## (fr,w,h,c)
-    if mask == False:
-        if norm == True:
-            x_np = (x_np - x_np.min()) / (x_np.max() - x_np.min() + 1e-8)
-        x_np = (x_np * 255).astype(np.uint8)
-    else:
-        x_np = (x_np * 20).astype(np.uint8) ## only for 9 labels
-    # for i in range(x_np.shape[0]):
-    #     cv2.imwrite(save_name+"_"+str(i)+".png", cv2.cvtColor(x_np[i,:,:,:], cv2.COLOR_RGB2BGR))
-
-    x_np = [x_np[i,:,:,:] for i in range(x_np.shape[0])]
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
-    out = cv2.VideoWriter(save_name+".mp4", fourcc, 20.0, (224, 224))
-    for img in x_np:
-        out.write(img)
-    out.release()
-
 def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
-
     random_selected_class = args.select_cls
     sample1 = input_img[0]
     x = sample1['image'].to(device)
@@ -158,40 +139,30 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
     class_ = 'cls'
     for icl in random_selected_class:
         class_ += str(icl)
-    # print("class_", class_)
+
     if args.save_video == 1:
-        save_tensor_3D(x, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_image_'+class_+'_'+str(args.reverse))
-        save_tensor_3D(label, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_label_'+class_+'_'+str(args.reverse), mask = True)
-        save_tensor_3D(image_target, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_image_target_'+class_+'_'+str(args.reverse))
+        save_tensor(x, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_image_'+class_+'_'+str(args.reverse)+'.png')
+        save_tensor(label, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_label_'+class_+'_'+str(args.reverse)+'.png', mask = True)
+        save_tensor(image_target, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_image_target_'+class_+'_'+str(args.reverse)+'.png')
 
-    preds = torch.zeros(x.shape).to(device)
-    cnts = torch.zeros(x.shape).to(device)
-    inter_feature = torch.zeros((int(112/args.fix_frame), int(args.token_factor*args.num_classes_with_bg), 768)).to(device)
-    inter_feature_2 = torch.zeros((int(112/args.fix_frame), int(args.token_factor*args.num_classes_with_bg), 768)).to(device)
+    inter_feature = torch.zeros((1, int(args.token_factor*args.num_classes_with_bg), 768)).to(device)
+    inter_feature_2 = torch.zeros((1, int(args.token_factor*args.num_classes_with_bg), 768)).to(device)
 
-    n_inter=0
-    for fr in range(0, x.shape[2]-args.fix_frame+1, args.fix_frame):
-        x_ = x[:,:,fr:fr+args.fix_frame,:,:]
-        
-        with torch.no_grad():
-            if args.training_version.startswith('v0'):
-                middle1 = {"image_target": image_target[:,:,fr:fr+args.fix_frame,:,:], "random_selected_class": random_selected_class}
-                x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
-                pred1 = model.forward_decoder(x_restored, cls_tokens, middle_output)
-                if args.arch_version.startswith('v1'):
-                    pred1 = model.unpatchify3D(pred1)
-                preds[:,:,fr:fr+args.fix_frame,:,:]+=pred1
-                cnts[:,:,fr:fr+args.fix_frame,:,:]+=1
+    with torch.no_grad():
+        if args.training_version.startswith('v0'):
+            middle1 = {"image_target": image_target, "random_selected_class": random_selected_class}
+            x_restored, cls_tokens, middle_output = model.forward_encoder(x, mask_ratio=args.mask_ratio, middle=middle1)
+            pred1 = model.forward_decoder(x_restored, cls_tokens, middle_output)
+            if args.arch_version.startswith('v1'):
+                pred1 = model.unpatchify(pred1)
+            preds = pred1
 
-                if args.select_cls == []:
-                    inter_feature[n_inter:n_inter+1,:,:] = middle_output['x_masked_b'] #x_restored
-                    inter_feature_2[n_inter:n_inter+1,:,:] = x_restored #x_restored
-                # print("middle_output['x_masked_b']", middle_output['x_masked_b'].shape)
-                n_inter+=1
+            if args.select_cls == []:
+                inter_feature[0,:,:] = middle_output['x_masked_b'] #x_restored
+                inter_feature_2[0,:,:] = x_restored #x_restored
 
-    preds = preds/cnts
     if args.save_video == 1:
-        save_tensor_3D(preds, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_pred_image_'+class_+'_'+str(args.reverse)+'.png')
+        save_tensor(preds, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_pred_image_'+class_+'_'+str(args.reverse)+'.png')
 
     if args.select_cls == []:
         inter_feature = inter_feature.detach().cpu().numpy()
@@ -207,18 +178,10 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
     loss_l1 = loss_l1.detach().cpu().numpy()
     loss_l1 = np.abs(loss_l1)
 
-    p_loss = 0
-    loss_count = 0
-    for i_sl in range(image_target.shape[2]):
-        image_target_i = image_target[:,:,i_sl,:,:]
-        pred_i = preds[:,:,i_sl,:,:]
-        p_loss = p_loss + torch.mean(perceptual_loss(image_target_i.contiguous(), pred_i.contiguous()))
-        loss_count+=1
-    loss_lpips = p_loss/loss_count
+    loss_lpips = torch.mean(perceptual_loss(image_target.contiguous(), preds.contiguous()))
     loss = (loss_l2 + loss_lpips)
 
     return loss.detach().cpu().numpy(), loss_l1.mean(), loss_l2.detach().cpu().numpy(), loss_lpips.detach().cpu().numpy()
-
 
 if __name__ == '__main__':
     args = get_args_parser()
@@ -287,7 +250,7 @@ if __name__ == '__main__':
     np.random.seed(3)
 
     ## load img
-    img_list = sorted_nicely([i for i in os.listdir(args.load_data_vis_path) if (not i.startswith(".")) and (not len(os.listdir(args.load_data_vis_path+"/"+i))==0)])
+    img_list = sorted_nicely([i for i in os.listdir(args.load_data_vis_path) if not i.startswith(".")])
     # print(img_list)
 
     loss_list = []
@@ -298,21 +261,16 @@ if __name__ == '__main__':
     print("args.save_video", args.save_video)
     print("args.select_cls", args.select_cls)
 
-    for img in img_list: #[0:1]:
-        # print("img", img)
+    for img in img_list:
         data_path = args.load_data_vis_path+'/'+img
-        samp_list = sorted_nicely([i_s for i_s in os.listdir(data_path) if not i_s.startswith(".")])
-        images = [cv2.imread(data_path+"/"+i_i, cv2.IMREAD_GRAYSCALE) for i_i in samp_list]
-        image = np.stack(images)
-        # image = np.transpose(image, (1, 2, 0))
+        image = cv2.imread(data_path)  # Read as BGR
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert to RGB
         image = np.float32(image)
         image = (image-image.min())/(image.max()-image.min()+0.00000001)
-        # image = image[40:40+args.fix_frame]
     
-        mask_path = args.load_label_vis_path+'/'+img
-        mask_list = sorted_nicely([i_s for i_s in os.listdir(mask_path) if not i_s.startswith(".")])
-        masks = [cv2.imread(mask_path+"/"+i_i, cv2.IMREAD_GRAYSCALE) for i_i in mask_list]
-        mask = np.stack(masks)
+        mask_path = args.load_label_vis_path+'/'+img.split(".jpg")[0]+".png"
+        mask = cv2.imread(mask_path)
+        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2RGB)
         label = np.float32(mask)
     
         image = torch.tensor(image)
@@ -320,15 +278,11 @@ if __name__ == '__main__':
     
         sample = {'image': image, 'label': label}
     
-        image = sample['image'].unsqueeze(3)
-        d, h, w, _ = image.shape
-        sample['image'] = image.expand(d, h, w, 3)
+        # label = sample['label'].unsqueeze(2)
+        # sample['label'] = label.expand(label.shape[0], label.shape[1], 3)   
     
-        label = sample['label'].unsqueeze(3)
-        sample['label'] = label.expand(d, h, w, 3)   
-    
-        sample['image'] = sample['image'].permute(3,0,1,2)
-        sample['label'] = sample['label'].permute(3,0,1,2)
+        sample['image'] = sample['image'].permute(2,0,1)
+        sample['label'] = sample['label'].permute(2,0,1)
     
         sample['image'] = sample['image'].unsqueeze(dim=0)
         sample['label'] = sample['label'].unsqueeze(dim=0)
@@ -336,7 +290,7 @@ if __name__ == '__main__':
         input_img=[]
         input_img.append(sample)
     
-        loss, loss_l1, loss_l2, loss_lpips = gen_one_image(input_img, model_mae, case_id=img, perceptual_loss=perceptual_loss)
+        loss, loss_l1, loss_l2, loss_lpips = gen_one_image(input_img, model_mae, case_id=img.split('.')[0], perceptual_loss=perceptual_loss)
         loss_list.append(loss)
         loss_l1_list.append(loss_l1)
         loss_l2_list.append(loss_l2)
@@ -362,10 +316,6 @@ if __name__ == '__main__':
 
 
 
-
-
-
-    
 
 
 

@@ -18,49 +18,6 @@ import OWC2_LIB #models_mae_token2
 import re
 from einops import rearrange
 
-from skimage.metrics import structural_similarity as ssim
-from skimage.metrics import peak_signal_noise_ratio as psnr
-import torch.nn.functional as F
-from scipy import linalg
-from torchvision.models import inception_v3
-from torch.nn.functional import adaptive_avg_pool2d
-
-def calculate_fid(real_features, fake_features):
-    # Calculate mean and covariance statistics
-    mu1, sigma1 = real_features.mean(axis=0), np.cov(real_features, rowvar=False)
-    mu2, sigma2 = fake_features.mean(axis=0), np.cov(fake_features, rowvar=False)
-    
-    # Calculate sum squared difference between means
-    ssdiff = np.sum((mu1 - mu2)**2.0)
-    
-    # Calculate sqrt of product between cov
-    covmean = linalg.sqrtm(sigma1.dot(sigma2))
-    
-    # Check and correct imaginary numbers from sqrt
-    if np.iscomplexobj(covmean):
-        covmean = covmean.real
-        
-    # Calculate score
-    fid = ssdiff + np.trace(sigma1 + sigma2 - 2.0 * covmean)
-    
-    return fid
-
-def calculate_3d_ssim(img1, img2):
-    """Calculate SSIM for 3D volumes"""
-    if not isinstance(img1, np.ndarray):
-        img1 = img1.cpu().numpy()
-    if not isinstance(img2, np.ndarray):
-        img2 = img2.cpu().numpy()
-        
-    window_size = min(33, img1.shape[-1]//2)
-    if window_size % 2 == 0:
-        window_size -= 1
-        
-    return ssim(img1, img2, 
-               data_range=img1.max() - img1.min(),
-               win_size=window_size,
-               channel_axis=0)
-
 def sorted_nicely( l ): 
     """ Sort the given iterable in the way that humans expect.""" 
     convert = lambda text: int(text) if text.isdigit() else text 
@@ -143,7 +100,6 @@ def get_args_parser():
     parser.add_argument('--load_label_vis_path', type=str, default=None)
     parser.add_argument('--load_csv_type', type=str, default='train') ## train, test
     parser.add_argument('--save_video', type=int, default=0, help='0=False, 1=True')
-    parser.add_argument('--thre', type=float, default=0.1, help='0.1')
 
     return parser
 
@@ -213,74 +169,31 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
     # inter_feature = torch.zeros((int(112/16), int(args.token_factor*args.num_classes_with_bg), 768)).to(device)
 
     n_inter=0
-    if args.dataset_type == '3D':
-        for fr in range(0, x.shape[2]-args.fix_frame+1): #, args.fix_frame):
-            x_ = x[:,:,fr:fr+args.fix_frame,:,:]
-            with torch.no_grad():
-                if args.training_version.startswith('v0'):
-                    middle1 = {"image_target": image_target[:,:,fr:fr+args.fix_frame,:,:], "random_selected_class": random_selected_class}
-                    x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
-                    pred1 = model.forward_decoder(x_restored, cls_tokens, middle_output)
-                    if args.arch_version.startswith('v1'):
-                        pred1 = model.unpatchify3D(pred1)
-                    preds[:,:,fr:fr+args.fix_frame,:,:]+=pred1
-                    cnts[:,:,fr:fr+args.fix_frame,:,:]+=1
-    
-                    # if args.select_cls == []:
-                    #     inter_feature[n_inter:n_inter+1,:,:] = middle_output['x_masked_b'] #x_restored
-                    # print("middle_output['x_masked_b']", middle_output['x_masked_b'].shape)
-                    n_inter+=1
-    elif args.dataset_type == '2D': ## only for 2D model in 3D medical images (3D slice dir)
-        for fr in range(0, x.shape[2]): #, args.fix_frame):
-            x_ = x[:,:,fr,:,:]
-            with torch.no_grad():
-                if args.training_version.startswith('v0'):
-                    middle1 = {"image_target": image_target[:,:,fr,:,:], "random_selected_class": random_selected_class}
-                    x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
-                    pred1 = model.forward_decoder(x_restored, cls_tokens, middle_output)
-                    if args.arch_version.startswith('v1'):
-                        pred1 = model.unpatchify(pred1)
-                    preds[:,:,fr,:,:]+=pred1
-                    cnts[:,:,fr,:,:]+=1
-                    n_inter+=1
+    for fr in range(0, x.shape[2]-args.fix_frame+1): #, args.fix_frame):
+        x_ = x[:,:,fr:fr+args.fix_frame,:,:]
+        
+        with torch.no_grad():
+            if args.training_version.startswith('v0'):
+                middle1 = {"image_target": image_target[:,:,fr:fr+args.fix_frame,:,:], "random_selected_class": random_selected_class}
+                x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
+                pred1 = model.unpatchify3D(model.forward_decoder(x_restored, cls_tokens, middle_output))
+                preds[:,:,fr:fr+args.fix_frame,:,:]+=pred1
+                cnts[:,:,fr:fr+args.fix_frame,:,:]+=1
+
+                # if args.select_cls == []:
+                #     inter_feature[n_inter:n_inter+1,:,:] = middle_output['x_masked_b'] #x_restored
+                # print("middle_output['x_masked_b']", middle_output['x_masked_b'].shape)
+                n_inter+=1
 
     preds = preds/cnts
-
-    # if 0 in args.select_cls: ## without background generation
-    #     preds[preds < 0.02] = 0 ## remove noise background by 5 pixel-value
-
-    # # contain [0] is direct gen/seg (eg. 0123 0234 ...)
-    # if 0 in args.select_cls:
-    #     image_target = image_target
-    #     preds = preds
-    # else:
-    #     if args.select_cls == []: ## (only 0)
-    #         image_target = image_target
-    #         preds = preds
-    #     else: ## indirect gen/seg (eg. 1 2 3 4)
-    #         image_target = x-image_target
-    #         preds = x-preds
-    #         preds[preds <= 0] = 0
-
-    preds_thresholded = preds.clone()
-    preds_thresholded[preds_thresholded < args.thre] = 0
-    image_target_thresholded = image_target.clone()
-    image_target_thresholded[image_target_thresholded < args.thre] = 0
-    
     if args.save_video == 1:
         save_tensor_3D(preds, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_pred_image_'+class_+'_'+str(args.reverse)+'.png')
-        save_tensor_3D(preds_thresholded, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_pred_image_thresholded_'+str(args.thre)+'_'+class_+'_'+str(args.reverse)+'.png')
-        save_tensor_3D(image_target_thresholded, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_image_target_thresholded_'+str(args.thre)+'_'+class_+'_'+str(args.reverse)+'.png')
 
     # if args.select_cls == []:
     #     inter_feature = inter_feature.detach().cpu().numpy()
     #     if args.save_video == 1:
     #         np.save(args.output_vis+'/inter_features/'+args.load_csv_type+'/'+case_id+'.npy', inter_feature)
 
-    # Calculate metrics for both original and thresholded predictions
-    metrics = {}
-    
-    # Original predictions metrics
     loss_l2 = (preds - image_target) ** 2
     loss_l2 = loss_l2.mean()
 
@@ -298,79 +211,7 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
     loss_lpips = p_loss/loss_count
     loss = (loss_l2 + loss_lpips)
 
-    # Calculate metrics for original predictions
-    psnr_scores = []
-    ssim_scores = []
-    for i in range(preds.shape[2]):
-        pred_slice = preds[0,:,i,:,:].detach().cpu().numpy()
-        target_slice = image_target[0,:,i,:,:].detach().cpu().numpy()
-        
-        psnr_val = psnr(target_slice, pred_slice, data_range=1.0)
-        psnr_scores.append(psnr_val)
-        
-        ssim_val = ssim(target_slice, pred_slice, data_range=1.0, channel_axis=0)
-        ssim_scores.append(ssim_val)
-
-    ssim_3d = calculate_3d_ssim(preds[0].detach(), image_target[0].detach())
-    preds_np = preds.detach().cpu().numpy()
-    target_np = image_target.detach().cpu().numpy()
-    fid_score = calculate_fid(preds_np.reshape(-1, preds_np.shape[-1]), 
-                            target_np.reshape(-1, target_np.shape[-1]))
-
-    metrics['original'] = {
-        'loss': loss.detach().cpu().numpy(),
-        'loss_l1': loss_l1.mean(),
-        'loss_l2': loss_l2.detach().cpu().numpy(),
-        'loss_lpips': loss_lpips.detach().cpu().numpy(),
-        'psnr_avg': np.mean(psnr_scores),
-        'ssim_avg': np.mean(ssim_scores),
-        'ssim_3d': ssim_3d,
-        'fid': fid_score
-    }
-
-    # Calculate metrics for thresholded predictions if applicable
-    psnr_scores_thresh = []
-    ssim_scores_thresh = []
-    for i in range(preds_thresholded.shape[2]):
-        pred_slice = preds_thresholded[0,:,i,:,:].detach().cpu().numpy()
-        target_slice = image_target_thresholded[0,:,i,:,:].detach().cpu().numpy()
-        
-        psnr_val = psnr(target_slice, pred_slice, data_range=1.0)
-        psnr_scores_thresh.append(psnr_val)
-        
-        ssim_val = ssim(target_slice, pred_slice, data_range=1.0, channel_axis=0)
-        ssim_scores_thresh.append(ssim_val)
-
-    ssim_3d_thresh = calculate_3d_ssim(preds_thresholded[0].detach(), image_target_thresholded[0].detach())
-    preds_thresh_np = preds_thresholded.detach().cpu().numpy()
-    target_thresh_np = image_target_thresholded.detach().cpu().numpy()
-    fid_score_thresh = calculate_fid(preds_thresh_np.reshape(-1, preds_thresh_np.shape[-1]), 
-                                   target_thresh_np.reshape(-1, target_thresh_np.shape[-1]))
-
-    loss_l2_thresh = (preds_thresholded - image_target_thresholded) ** 2
-    loss_l2_thresh = loss_l2_thresh.mean()
-
-    loss_l1_thresh = np.abs((preds_thresholded - image_target_thresholded).detach().cpu().numpy())
-
-    p_loss_thresh = 0
-    for i_sl in range(image_target_thresholded.shape[2]):
-        image_target_i = image_target_thresholded[:,:,i_sl,:,:]
-        pred_i = preds_thresholded[:,:,i_sl,:,:]
-        p_loss_thresh = p_loss_thresh + torch.mean(perceptual_loss(image_target_i.contiguous(), pred_i.contiguous()))
-    loss_lpips_thresh = p_loss_thresh/loss_count
-
-    metrics['thresholded'] = {
-        'loss': (loss_l2_thresh + loss_lpips_thresh).detach().cpu().numpy(),
-        'loss_l1': loss_l1_thresh.mean(),
-        'loss_l2': loss_l2_thresh.detach().cpu().numpy(),
-        'loss_lpips': loss_lpips_thresh.detach().cpu().numpy(),
-        'psnr_avg': np.mean(psnr_scores_thresh),
-        'ssim_avg': np.mean(ssim_scores_thresh),
-        'ssim_3d': ssim_3d_thresh,
-        'fid': fid_score_thresh
-    }
-
-    return metrics
+    return loss.detach().cpu().numpy(), loss_l1.mean(), loss_l2.detach().cpu().numpy(), loss_lpips.detach().cpu().numpy()
 
 
 if __name__ == '__main__':
@@ -443,7 +284,10 @@ if __name__ == '__main__':
     img_list = sorted_nicely([i for i in os.listdir(args.load_data_vis_path) if not i.startswith(".")])
     # print(img_list)
 
-    metrics_list = []
+    loss_list = []
+    loss_l1_list = []
+    loss_l2_list = []
+    loss_lpips_list = []
 
     print("args.save_video", args.save_video)
     print("args.select_cls", args.select_cls)
@@ -485,25 +329,36 @@ if __name__ == '__main__':
         input_img=[]
         input_img.append(sample)
     
-        metrics = gen_one_image(input_img, model_mae, case_id=img, perceptual_loss=perceptual_loss)
-        metrics_list.append(metrics)
+        loss, loss_l1, loss_l2, loss_lpips = gen_one_image(input_img, model_mae, case_id=img, perceptual_loss=perceptual_loss)
+        loss_list.append(loss)
+        loss_l1_list.append(loss_l1)
+        loss_l2_list.append(loss_l2)
+        loss_lpips_list.append(loss_lpips)
 
-    print("\nOriginal Predictions Metrics:")
-    print("Average Loss:", np.mean([m['original']['loss'] for m in metrics_list]))
-    print("Average L1 Loss:", np.mean([m['original']['loss_l1'] for m in metrics_list]))
-    print("Average L2 Loss:", np.mean([m['original']['loss_l2'] for m in metrics_list]))
-    print("Average LPIPS Loss:", np.mean([m['original']['loss_lpips'] for m in metrics_list]))
-    print("Average PSNR:", np.mean([m['original']['psnr_avg'] for m in metrics_list]))
-    print("Average SSIM:", np.mean([m['original']['ssim_avg'] for m in metrics_list]))
-    print("Average 3D SSIM:", np.mean([m['original']['ssim_3d'] for m in metrics_list]))
-    print("Average FID:", np.mean([m['original']['fid'] for m in metrics_list]))
+    print("loss_avg", np.mean(loss_list))
+    print("loss_l1_avg", np.mean(loss_l1_list))
+    print("loss_l2_avg", np.mean(loss_l2_list))
+    print("loss_lpips_avg", np.mean(loss_lpips_list))
 
-    print("\nThresholded Predictions Metrics:")
-    print("Average Loss:", np.mean([m['thresholded']['loss'] for m in metrics_list]))
-    print("Average L1 Loss:", np.mean([m['thresholded']['loss_l1'] for m in metrics_list]))
-    print("Average L2 Loss:", np.mean([m['thresholded']['loss_l2'] for m in metrics_list]))
-    print("Average LPIPS Loss:", np.mean([m['thresholded']['loss_lpips'] for m in metrics_list]))
-    print("Average PSNR:", np.mean([m['thresholded']['psnr_avg'] for m in metrics_list]))
-    print("Average SSIM:", np.mean([m['thresholded']['ssim_avg'] for m in metrics_list]))
-    print("Average 3D SSIM:", np.mean([m['thresholded']['ssim_3d'] for m in metrics_list]))
-    print("Average FID:", np.mean([m['thresholded']['fid'] for m in metrics_list]))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+
+
+

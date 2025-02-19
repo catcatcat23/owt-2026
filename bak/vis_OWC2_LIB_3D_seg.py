@@ -313,9 +313,7 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
                 if args.training_version.startswith('v0'):
                     middle1 = {"image_target": image_target[:,:,fr:fr+args.fix_frame,:,:], "random_selected_class": random_selected_class}
                     x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
-                    pred1 = model.forward_decoder(x_restored, cls_tokens, middle_output)
-                    if args.arch_version.startswith('v1'):
-                        pred1 = model.unpatchify3D(pred1)
+                    pred1 = model.unpatchify3D(model.forward_decoder(x_restored, cls_tokens, middle_output))
                     preds[:,:,fr:fr+args.fix_frame,:,:]+=pred1
                     cnts[:,:,fr:fr+args.fix_frame,:,:]+=1
     
@@ -331,9 +329,7 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
                 if args.training_version.startswith('v0'):
                     middle1 = {"image_target": image_target[:,:,fr,:,:], "random_selected_class": random_selected_class}
                     x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
-                    pred1 = model.forward_decoder(x_restored, cls_tokens, middle_output)
-                    if args.arch_version.startswith('v1'):
-                        pred1 = model.unpatchify(pred1)
+                    pred1 = model.unpatchify(model.forward_decoder(x_restored, cls_tokens, middle_output))
                     preds[:,:,fr,:,:]+=pred1
                     cnts[:,:,fr,:,:]+=1
     

@@ -93,9 +93,9 @@ class ResnetBlock(nn.Module):
         self.norm1 = Normalize(in_channels)
         self.conv1 = torch.nn.Conv3d(in_channels,
                                      out_channels,
-                                     kernel_size=(3,3,3),
+                                     kernel_size=(1,3,3),
                                      stride=(1,1,1),
-                                     padding=(1,1,1))
+                                     padding=(0,1,1))
         if temb_channels > 0:
             self.temb_proj = torch.nn.Linear(temb_channels,
                                              out_channels)
@@ -103,16 +103,16 @@ class ResnetBlock(nn.Module):
         self.dropout = torch.nn.Dropout(dropout)
         self.conv2 = torch.nn.Conv3d(out_channels,
                                      out_channels,
-                                     kernel_size=(3,3,3),
+                                     kernel_size=(1,3,3),
                                      stride=(1,1,1),
-                                     padding=(1,1,1))
+                                     padding=(0,1,1))
         if self.in_channels != self.out_channels:
             if self.use_conv_shortcut:
                 self.conv_shortcut = torch.nn.Conv3d(in_channels,
                                                      out_channels,
-                                                     kernel_size=(3,3,3),
+                                                     kernel_size=(1,3,3),
                                                      stride=(1,1,1),
-                                                     padding=(1,1,1))
+                                                     padding=(0,1,1))
             else:
                 self.nin_shortcut = torch.nn.Conv3d(in_channels,
                                                     out_channels,
@@ -213,9 +213,9 @@ class Encoder3D(nn.Module):
         # downsampling
         self.conv_in = torch.nn.Conv3d(in_channels,
                                        self.ch,
-                                       kernel_size=(3,3,3),
+                                       kernel_size=(1,3,3),
                                        stride=(1,1,1),
-                                       padding=(1,1,1))
+                                       padding=(0,1,1))
 
         curr_res = resolution
         in_ch_mult = (1,)+tuple(ch_mult)
@@ -257,9 +257,9 @@ class Encoder3D(nn.Module):
         self.norm_out = Normalize(block_in)
         self.conv_out = torch.nn.Conv3d(block_in,
                                         2*z_channels if double_z else z_channels,
-                                        kernel_size=(3,3,3),
+                                        kernel_size=(1,3,3),
                                         stride=(1,1,1),
-                                        padding=(1,1,1))
+                                        padding=(0,1,1))
 
 
     def forward(self, x):

@@ -21,7 +21,7 @@ from einops import rearrange
 # from scipy.ndimage import binary_erosion, distance_transform_edt
 # from skimage.filters import threshold_otsu
 from skimage import measure
-from skimage.morphology import remove_small_objects, ball, binary_opening, remove_small_holes, binary_closing
+from skimage.morphology import remove_small_objects, ball, disk, binary_opening, remove_small_holes, binary_closing
 import surface_distance
 # from surface_distance import compute_surface_distances, compute_surface_dice_at_tolerance
 import nibabel as nib
@@ -48,40 +48,6 @@ def dice_score(prediction, ground_truth):
 
     dice = 2.0 * intersection / (size_pred + size_gt)
     return dice
-
-# def surface_voxels(binary_mask):
-#     structure = np.ones((3, 3, 3), dtype=bool)
-#     eroded = binary_erosion(binary_mask, structure=structure, iterations=1)
-#     surface = binary_mask ^ eroded
-#     return surface
-
-# def nsd(prediction, ground_truth, voxel_spacing=(1,1,1), tolerance=1):
-#     assert prediction.shape == ground_truth.shape, "Volumes must have the same shape."
-#     prediction = prediction.astype(bool)
-#     ground_truth = ground_truth.astype(bool)
-
-#     # Extract surfaces
-#     surface_pred = surface_voxels(prediction)
-#     surface_gt = surface_voxels(ground_truth)
-
-#     # Compute distance maps
-#     dt_gt = distance_transform_edt(~ground_truth, sampling=voxel_spacing)
-#     dt_pred = distance_transform_edt(~prediction, sampling=voxel_spacing)
-
-#     # Surface distances
-#     sds_pred = dt_gt[surface_pred]
-#     sds_gt = dt_pred[surface_gt]
-
-#     num_pred_within_tol = np.sum(sds_pred <= tolerance)
-#     num_gt_within_tol = np.sum(sds_gt <= tolerance)
-
-#     num_surface_voxels = surface_pred.sum() + surface_gt.sum()
-
-#     if num_surface_voxels == 0:
-#         return 1.0  # Both surfaces are empty
-
-#     nsd_value = (num_pred_within_tol + num_gt_within_tol) / num_surface_voxels
-#     return nsd_value
 
 def calculate_nsd(pred, gt, spacing=(1.5, 1.5, 1.5), tolerance=1.5):
     """
@@ -304,43 +270,35 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
     # inter_feature = torch.zeros((int(112/16), int(args.token_factor*args.num_classes_with_bg), 768)).to(device)
 
     n_inter=0
-    if args.dataset_type == '3D':
-        # for fr in range(0, x.shape[2]-args.fix_frame+1, args.fix_frame): ## only used for save inter_feature 
-        for fr in range(0, x.shape[2]-args.fix_frame+1): ## only in 3D seg evalutaion 
-            x_ = x[:,:,fr:fr+args.fix_frame,:,:]
+    # if args.dataset_type == '3D':
+    #     # for fr in range(0, x.shape[2]-args.fix_frame+1, args.fix_frame): ## only used for save inter_feature 
+    #     for fr in range(0, x.shape[2]-args.fix_frame+1): ## only in 3D seg evalutaion 
+    #         x_ = x[:,:,fr:fr+args.fix_frame,:,:]
             
-            with torch.no_grad():
-                if args.training_version.startswith('v0'):
-                    middle1 = {"image_target": image_target[:,:,fr:fr+args.fix_frame,:,:], "random_selected_class": random_selected_class}
-                    x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
-                    pred1 = model.forward_decoder(x_restored, cls_tokens, middle_output)
-                    if args.arch_version.startswith('v1'):
-                        pred1 = model.unpatchify3D(pred1)
-                    preds[:,:,fr:fr+args.fix_frame,:,:]+=pred1
-                    cnts[:,:,fr:fr+args.fix_frame,:,:]+=1
+    #         with torch.no_grad():
+    #             if args.training_version.startswith('v0'):
+    #                 middle1 = {"image_target": image_target[:,:,fr:fr+args.fix_frame,:,:], "random_selected_class": random_selected_class}
+    #                 x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
+    #                 pred1 = model.unpatchify3D(model.forward_decoder(x_restored, cls_tokens, middle_output))
+    #                 preds[:,:,fr:fr+args.fix_frame,:,:]+=pred1
+    #                 cnts[:,:,fr:fr+args.fix_frame,:,:]+=1
     
-                    # if args.select_cls == []:
-                    #     inter_feature[n_inter:n_inter+1,:,:] = middle_output['x_masked_b'] #x_restored
-                    # print("middle_output['x_masked_b']", middle_output['x_masked_b'].shape)
-                    n_inter+=1
-    elif args.dataset_type == '2D': ## only for 2D model in 3D medical images (3D slice dir)
-        for fr in range(0, x.shape[2]): ## only in 3D seg evalutaion 
-            x_ = x[:,:,fr,:,:]
-            
-            with torch.no_grad():
-                if args.training_version.startswith('v0'):
-                    middle1 = {"image_target": image_target[:,:,fr,:,:], "random_selected_class": random_selected_class}
-                    x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
-                    pred1 = model.forward_decoder(x_restored, cls_tokens, middle_output)
-                    if args.arch_version.startswith('v1'):
-                        pred1 = model.unpatchify(pred1)
-                    preds[:,:,fr,:,:]+=pred1
-                    cnts[:,:,fr,:,:]+=1
-    
-                    # if args.select_cls == []:
-                    #     inter_feature[n_inter:n_inter+1,:,:] = middle_output['x_masked_b'] #x_restored
-                    # print("middle_output['x_masked_b']", middle_output['x_masked_b'].shape)
-                    n_inter+=1
+    #                 if args.select_cls == []:
+    #                     inter_feature[n_inter:n_inter+1,:,:] = middle_output['x_masked_b'] #x_restored
+    #                 # print("middle_output['x_masked_b']", middle_output['x_masked_b'].shape)
+    #                 n_inter+=1
+    # elif args.dataset_type == '2D': ## only for 2D model in 3D medical images (3D slice dir)
+    with torch.no_grad():
+        if args.training_version.startswith('v0'):
+            middle1 = {"image_target": image_target, "random_selected_class": random_selected_class}
+            x_restored, cls_tokens, middle_output = model.forward_encoder(x, mask_ratio=args.mask_ratio, middle=middle1)
+            pred1 = model.unpatchify(model.forward_decoder(x_restored, cls_tokens, middle_output))
+            preds = pred1
+            cnts = torch.ones_like(preds).to(device)
+
+            # if args.select_cls == []:
+            #     inter_feature[0,:,:] = middle_output['x_masked_b'] #x_restored
+            n_inter = 1
 
     preds = preds/cnts
 
@@ -358,10 +316,10 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
             preds[preds < 0] = 0
 
     # if args.save_video == 1:
-    #     save_tensor_3D(preds, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_pred_image_'+class_+'_'+str(args.reverse)+'.png')
+    #     save_tensor(preds, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_pred_image_'+class_+'_'+str(args.reverse)+'.png')
     # elif args.save_video == 2:
-    #     save_tensor_3D(image_target, args.output_vis+'/seg_results/'+args.load_csv_type+'/'+case_id+'_test1_image_target_'+class_+'_'+str(args.thre)+'_'+str(args.reverse)+'.png')
-    #     save_tensor_3D(preds, args.output_vis+'/seg_results/'+args.load_csv_type+'/'+case_id+'_test1_pred_image_'+class_+'_'+str(args.thre)+'_'+str(args.reverse)+'.png')
+    #     save_tensor(image_target, args.output_vis+'/seg_results/'+args.load_csv_type+'/'+case_id+'_test1_image_target_'+class_+'_'+str(args.thre)+'_'+str(args.reverse)+'.png')
+    #     save_tensor(preds, args.output_vis+'/seg_results/'+args.load_csv_type+'/'+case_id+'_test1_pred_image_'+class_+'_'+str(args.thre)+'_'+str(args.reverse)+'.png')
 
     # if args.select_cls == []:
     #     inter_feature = inter_feature.detach().cpu().numpy()
@@ -375,37 +333,19 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
     # loss_l1 = loss_l1.detach().cpu().numpy()
     # loss_l1 = np.abs(loss_l1)
 
-    # p_loss = 0
-    # loss_count = 0
-    # for i_sl in range(image_target.shape[2]):
-    #     image_target_i = image_target[:,:,i_sl,:,:]
-    #     pred_i = preds[:,:,i_sl,:,:]
-    #     p_loss = p_loss + torch.mean(perceptual_loss(image_target_i.contiguous(), pred_i.contiguous()))
-    #     loss_count+=1
-    # loss_lpips = p_loss/loss_count
+    # p_loss = torch.mean(perceptual_loss(image_target.contiguous(), preds.contiguous()))
+    # loss_lpips = p_loss
     # loss = (loss_l2 + loss_lpips)
-
-    # ## segmentation evaluation
-    # if args.select_cls == [0]:
-    #     seg_label_ = (image_target>args.thre)*1.0
-    #     seg_preds_ = (preds>args.thre)*1.0
-    # else:
-    #     seg_label_ = ((x-image_target)>args.thre)*1.0
-    #     seg_preds_ = ((x-preds)>args.thre)*1.0
-
-    # print("x.shape, image_target.shape, preds.shape", x.shape, image_target.shape, preds.shape) # torch.Size([1, 3, 112, 224, 224]) torch.Size([1, 3, 112, 224, 224]) torch.Size([1, 3, 112, 224, 224])
-    x = x.squeeze().permute(2, 3, 1, 0).detach().cpu().numpy()
-    image_target = image_target.squeeze().permute(2, 3, 1, 0).detach().cpu().numpy()
-    preds = preds.squeeze().permute(2, 3, 1, 0).detach().cpu().numpy()
-    # print("x.shape, image_target.shape, preds.shape", x.shape, image_target.shape, preds.shape) # (224, 224, 112, 3) (224, 224, 112, 3) (224, 224, 112, 3)
 
     # if len(args.select_cls) > 1:
     #     ## only for just use token for segmentation (direct way)
     #     seg_label = image_target
     #     seg_preds = preds
 
-    #     seg_label = np.mean(seg_label, axis=3)
-    #     seg_preds = np.mean(seg_preds, axis=3)
+    #     seg_label = seg_label.squeeze().permute(1, 2, 0).detach().cpu().numpy()
+    #     seg_preds = seg_preds.squeeze().permute(1, 2, 0).detach().cpu().numpy()
+    #     seg_label = np.mean(seg_label, axis=2)
+    #     seg_preds = np.mean(seg_preds, axis=2)
     #     seg_label = (seg_label>args.thre)*1.0
     #     seg_preds = (seg_preds>args.thre)*1.0
 
@@ -418,45 +358,41 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
     #         seg_label = x-image_target
     #         seg_preds = x-preds
 
-    #     seg_label = np.mean(seg_label, axis=3)
-    #     seg_preds = np.mean(seg_preds, axis=3)
+    #     seg_label = seg_label.squeeze().permute(1, 2, 0).detach().cpu().numpy()
+    #     seg_preds = seg_preds.squeeze().permute(1, 2, 0).detach().cpu().numpy()
+    #     seg_label = np.mean(seg_label, axis=2)
+    #     seg_preds = np.mean(seg_preds, axis=2)
     #     seg_label = (seg_label>args.thre)*1.0 ## predefined 0.25
     #     seg_preds = (seg_preds>args.thre)*1.0 ## predefined 0.25
-    #     # print("seg_label.shape, seg_preds.shape", seg_label.shape, seg_preds.shape) # (224, 224, 112) (224, 224, 112)
-    #     # print("np.unique(seg_label), np.unique(seg_preds)", np.unique(seg_label), np.unique(seg_preds)) # [0. 1.] [False  True]
 
-    seg_label = np.mean(image_target, axis=3)
-    seg_preds = np.mean(preds, axis=3)
+    image_target = image_target.squeeze().permute(1, 2, 0).detach().cpu().numpy()
+    preds = preds.squeeze().permute(1, 2, 0).detach().cpu().numpy()
+
+    seg_label = np.mean(image_target, axis=2)
+    seg_preds = np.mean(preds, axis=2)
     seg_label = (seg_label>args.thre)*1.0 ## predefined 0.25
     seg_preds = (seg_preds>args.thre)*1.0 ## predefined 0.25
 
-    min_size = 100
+    min_size = 20
     labeled_image = measure.label(seg_preds, connectivity=1)
     cleaned_image = remove_small_objects(labeled_image, min_size=min_size)
     binary_cleaned_image = cleaned_image > 0
-    struct_element = ball(1)
+    struct_element = disk(1)
     seg_preds = binary_opening(binary_cleaned_image, struct_element)
 
     dice = dice_score(seg_preds, seg_label)
-    # print("dice", dice)
-    # Example usage with the same volumes from the Dice score example
-    # voxel_spacing = (1, 1, 1)  # Assuming isotropic voxels of size 1 unit
-    # tolerance = 1  # Tolerance distance
-    # nsd_value = nsd(seg_preds, seg_label, voxel_spacing=voxel_spacing, tolerance=tolerance)
-    try:
-        nsd_value, ASD, hausdorff100, hausdorff95, SOverlap = calculate_nsd(seg_preds, seg_label)
-    except:
-        nsd_value, ASD, hausdorff100, hausdorff95, SOverlap = 0, 0, 0, 0, 0
+
+    # try:
+    #     nsd_value, ASD, hausdorff100, hausdorff95, SOverlap = calculate_nsd(seg_preds, seg_label)
+    # except:
+    #     nsd_value, ASD, hausdorff100, hausdorff95, SOverlap = 0, 0, 0, 0, 0
 
     if args.save_video == 2:
-        save_tensor_3D_np(seg_label, args.output_vis+'/seg_results/'+args.load_csv_type+'/'+case_id+'_seg_label_'+class_+'_'+str(args.thre)+'_'+str(args.reverse)+'.png')
-        save_tensor_3D_np(seg_preds, args.output_vis+'/seg_results/'+args.load_csv_type+'/'+case_id+'_seg_preds_'+class_+'_'+str(args.thre)+'_'+str(args.reverse)+'.png')
-
-    # print("dice", dice)
-    # print("nsd_value", nsd_value)
+        cv2.imwrite(args.output_vis+'/seg_results/'+args.load_csv_type+'/'+case_id+'_seg_label_'+class_+'_'+str(args.thre)+'_'+str(args.reverse)+'.png', (seg_label*255).astype(np.uint8))
+        cv2.imwrite(args.output_vis+'/seg_results/'+args.load_csv_type+'/'+case_id+'_seg_preds_'+class_+'_'+str(args.thre)+'_'+str(args.reverse)+'.png', (seg_preds*255).astype(np.uint8))
 
     # return loss.detach().cpu().numpy(), loss_l1.mean(), loss_l2.detach().cpu().numpy(), loss_lpips.detach().cpu().numpy(), dice, nsd_value, ASD, hausdorff100, hausdorff95, SOverlap
-    return dice, nsd_value, ASD, hausdorff100, hausdorff95, SOverlap
+    return dice #, nsd_value, ASD, hausdorff100, hausdorff95, SOverlap
 
 
 if __name__ == '__main__':
@@ -468,7 +404,7 @@ if __name__ == '__main__':
     args.organ_token_selet = args.token_factor*int(args.num_classes_with_bg*args.mask_ratio) #len(random_selected_class) ## 100
 
     args.select_cls = [int(i) for i in args.select_cls.split(',') if i != ''] ## masked in image1, i.e., keep in image2
-    # print("args.select_cls", args.select_cls)
+    print("args.select_cls", args.select_cls)
 
     # args.if_vq = False
     args.vq_version = None
@@ -529,32 +465,60 @@ if __name__ == '__main__':
 
     ## load img
     img_list = sorted_nicely([i for i in os.listdir(args.load_data_vis_path) if not i.startswith(".")])
-    # print(img_list)
 
     # loss_list = []
     # loss_l1_list = []
     # loss_l2_list = []
     # loss_lpips_list = []
 
-    dice_list, nsd_list, ASD_list, hausdorff100_list, hausdorff95_list, SOverlap_list = [], [], [], [], [], []
+    # dice_list, nsd_list, ASD_list, hausdorff100_list, hausdorff95_list, SOverlap_list = [], [], [], [], [], []
+    dice_list = []
 
     print("args.save_video", args.save_video)
     print("args.select_cls", args.select_cls)
 
-    for img in img_list: #[0:1]:
-        data_path = args.load_data_vis_path+'/'+img
-        samp_list = sorted_nicely([i_s for i_s in os.listdir(data_path) if not i_s.startswith(".")])
-        images = [cv2.imread(data_path+"/"+i_i, cv2.IMREAD_GRAYSCALE) for i_i in samp_list]
-        image = np.stack(images)
-        # image = np.transpose(image, (1, 2, 0))
+    for img in img_list:
+        # if args.dataset_type == '3D':
+        #     data_path = args.load_data_vis_path+'/'+img
+        #     samp_list = sorted_nicely([i_s for i_s in os.listdir(data_path) if not i_s.startswith(".")])
+        #     images = [cv2.imread(data_path+"/"+i_i, cv2.IMREAD_GRAYSCALE) for i_i in samp_list]
+        #     image = np.stack(images)
+        #     image = np.float32(image)
+        #     image = (image-image.min())/(image.max()-image.min()+0.00000001)
+        
+        #     mask_path = args.load_label_vis_path+'/'+img
+        #     mask_list = sorted_nicely([i_s for i_s in os.listdir(mask_path) if not i_s.startswith(".")])
+        #     masks = [cv2.imread(mask_path+"/"+i_i, cv2.IMREAD_GRAYSCALE) for i_i in mask_list]
+        #     mask = np.stack(masks)
+        #     labels = np.float32(mask)
+        
+        #     image = torch.tensor(image)
+        #     labels = torch.tensor(labels)
+        
+        #     sample = {'image': image, 'label': labels}
+        
+        #     image = sample['image'].unsqueeze(3)
+        #     d, h, w, _ = image.shape
+        #     sample['image'] = image.expand(d, h, w, 3)
+        
+        #     labels = sample['label'].unsqueeze(3)
+        #     sample['label'] = labels.expand(d, h, w, 3)   
+        
+        #     sample['image'] = sample['image'].permute(3,0,1,2)
+        #     sample['label'] = sample['label'].permute(3,0,1,2)
+        
+        #     sample['image'] = sample['image'].unsqueeze(dim=0)
+        #     sample['label'] = sample['label'].unsqueeze(dim=0)
+        # else:  # 2D
+        data_path = os.path.join(args.load_data_vis_path, img)
+        image = cv2.imread(data_path)  # Read as BGR
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert to RGB
         image = np.float32(image)
         image = (image-image.min())/(image.max()-image.min()+0.00000001)
-        # image = image[40:40+args.fix_frame]
     
-        mask_path = args.load_label_vis_path+'/'+img
-        mask_list = sorted_nicely([i_s for i_s in os.listdir(mask_path) if not i_s.startswith(".")])
-        masks = [cv2.imread(mask_path+"/"+i_i, cv2.IMREAD_GRAYSCALE) for i_i in mask_list]
-        mask = np.stack(masks)
+        mask_path = args.load_label_vis_path+'/'+img.split(".jpg")[0]+".png"
+        mask = cv2.imread(mask_path)
+        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2RGB)
         labels = np.float32(mask)
     
         image = torch.tensor(image)
@@ -562,15 +526,11 @@ if __name__ == '__main__':
     
         sample = {'image': image, 'label': labels}
     
-        image = sample['image'].unsqueeze(3)
-        d, h, w, _ = image.shape
-        sample['image'] = image.expand(d, h, w, 3)
+        # label = sample['label'].unsqueeze(2)
+        # sample['label'] = label.expand(label.shape[0], label.shape[1], 3)   
     
-        labels = sample['label'].unsqueeze(3)
-        sample['label'] = labels.expand(d, h, w, 3)   
-    
-        sample['image'] = sample['image'].permute(3,0,1,2)
-        sample['label'] = sample['label'].permute(3,0,1,2)
+        sample['image'] = sample['image'].permute(2,0,1)
+        sample['label'] = sample['label'].permute(2,0,1)
     
         sample['image'] = sample['image'].unsqueeze(dim=0)
         sample['label'] = sample['label'].unsqueeze(dim=0)
@@ -579,29 +539,30 @@ if __name__ == '__main__':
         input_img.append(sample)
     
         # loss, loss_l1, loss_l2, loss_lpips, dice, nsd_value, ASD, hausdorff100, hausdorff95, SOverlap = gen_one_image(input_img, model_mae, case_id=img, perceptual_loss=perceptual_loss)
-        dice, nsd_value, ASD, hausdorff100, hausdorff95, SOverlap = gen_one_image(input_img, model_mae, case_id=img, perceptual_loss=perceptual_loss)
+        # dice, nsd_value, ASD, hausdorff100, hausdorff95, SOverlap = gen_one_image(input_img, model_mae, case_id=img, perceptual_loss=perceptual_loss)
+        dice = gen_one_image(input_img, model_mae, case_id=img, perceptual_loss=perceptual_loss)
         # loss_list.append(loss)
         # loss_l1_list.append(loss_l1)
         # loss_l2_list.append(loss_l2)
         # loss_lpips_list.append(loss_lpips)
 
         dice_list.append(dice)
-        nsd_list.append(nsd_value)
-        ASD_list.append(ASD)
-        hausdorff100_list.append(hausdorff100)
-        hausdorff95_list.append(hausdorff95)
-        SOverlap_list.append(SOverlap)
+        # nsd_list.append(nsd_value)
+        # ASD_list.append(ASD)
+        # hausdorff100_list.append(hausdorff100)
+        # hausdorff95_list.append(hausdorff95)
+        # SOverlap_list.append(SOverlap)
 
     # print("loss_list", np.mean(loss_list))
     # print("loss_l1_list", np.mean(loss_l1_list))
     # print("loss_l2_list", np.mean(loss_l2_list))
     # print("loss_lpips_list", np.mean(loss_lpips_list))
     print("dice_list", np.mean(dice_list))
-    print("nsd_list", np.mean(nsd_list))
-    print("ASD_list", np.mean(ASD_list))
-    print("hausdorff100_list", np.mean(hausdorff100_list))
-    print("hausdorff95_list", np.mean(hausdorff95_list))
-    print("SOverlap_list", np.mean(SOverlap_list))
+    # print("nsd_list", np.mean(nsd_list))
+    # print("ASD_list", np.mean(ASD_list))
+    # print("hausdorff100_list", np.mean(hausdorff100_list))
+    # print("hausdorff95_list", np.mean(hausdorff95_list))
+    # print("SOverlap_list", np.mean(SOverlap_list))
 
 
 

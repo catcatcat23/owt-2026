@@ -220,9 +220,7 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
                 if args.training_version.startswith('v0'):
                     middle1 = {"image_target": image_target[:,:,fr:fr+args.fix_frame,:,:], "random_selected_class": random_selected_class}
                     x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
-                    pred1 = model.forward_decoder(x_restored, cls_tokens, middle_output)
-                    if args.arch_version.startswith('v1'):
-                        pred1 = model.unpatchify3D(pred1)
+                    pred1 = model.unpatchify3D(model.forward_decoder(x_restored, cls_tokens, middle_output))
                     preds[:,:,fr:fr+args.fix_frame,:,:]+=pred1
                     cnts[:,:,fr:fr+args.fix_frame,:,:]+=1
     
@@ -237,9 +235,7 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
                 if args.training_version.startswith('v0'):
                     middle1 = {"image_target": image_target[:,:,fr,:,:], "random_selected_class": random_selected_class}
                     x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
-                    pred1 = model.forward_decoder(x_restored, cls_tokens, middle_output)
-                    if args.arch_version.startswith('v1'):
-                        pred1 = model.unpatchify(pred1)
+                    pred1 = model.unpatchify(model.forward_decoder(x_restored, cls_tokens, middle_output))
                     preds[:,:,fr,:,:]+=pred1
                     cnts[:,:,fr,:,:]+=1
                     n_inter+=1
@@ -343,9 +339,8 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
 
     ssim_3d_thresh = calculate_3d_ssim(preds_thresholded[0].detach(), image_target_thresholded[0].detach())
     preds_thresh_np = preds_thresholded.detach().cpu().numpy()
-    target_thresh_np = image_target_thresholded.detach().cpu().numpy()
     fid_score_thresh = calculate_fid(preds_thresh_np.reshape(-1, preds_thresh_np.shape[-1]), 
-                                   target_thresh_np.reshape(-1, target_thresh_np.shape[-1]))
+                                   target_np.reshape(-1, target_np.shape[-1]))
 
     loss_l2_thresh = (preds_thresholded - image_target_thresholded) ** 2
     loss_l2_thresh = loss_l2_thresh.mean()

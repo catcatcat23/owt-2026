@@ -72,10 +72,10 @@ class AttentionLA(nn.Module):
         # print("x.shape attn1", x.shape)
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
-        # print("qkv.shape attn1", qkv.shape)
+        # print("qkv.shape attn1", qkv.shape) ## torch.Size([3, 2, 12, 3137, 64])
         q, k, v = qkv.unbind(0)
         q, k = self.q_norm(q), self.k_norm(k)
-        # print("q.shape attn1", q.shape)
+        # print("q.shape attn1", q.shape) ## q.shape attn1 torch.Size([2, 12, 3137, 64])
 
         ## LA
         dim = q.shape[-1]
@@ -83,16 +83,15 @@ class AttentionLA(nn.Module):
         k = k.softmax(dim=-2)
         q = q * dim ** -0.5
         context = torch.einsum('bhnd,bhne->bhde', k, v)
-        # print("context.shape attn1", context.shape)
+        # print("context.shape attn1", context.shape) ## torch.Size([2, 12, 64, 64])
         x = torch.einsum('bhnd,bhde->bhne', q, context)
-        # x = attn.reshape(*q.shape)
-        # print("x.shape attn2", x.shape)
+        # print("x.shape attn2", x.shape) # torch.Size([2, 12, 3137, 64])
 
         x = x.transpose(1, 2).reshape(B, N, C)
-        # print("x.shape attn3", x.shape)
+        # print("x.shape attn3", x.shape) # torch.Size([2, 3137, 768])
         x = self.proj(x)
         x = self.proj_drop(x)
-        # print("x.shape attn4", x.shape)
+        # print("x.shape attn4", x.shape) # torch.Size([2, 3137, 768])
 
         return x
 
@@ -221,7 +220,8 @@ class MaskedAutoencoderViT(nn.Module):
                 self.encoder_embed = nn.Linear(embed_dim, embed_dim, bias=False)
             elif self.model_args.dataset_type == "3D":
                 from VQ.VQ_model3D import Encoder3D
-                self.encoder = Encoder3D(ch=128, out_ch=3, ch_mult=[1,1,2,2,4], num_res_blocks=2, attn_resolutions=[16], dropout=0.0, resamp_with_conv=True, in_channels=3, resolution=224, z_channels=embed_dim, double_z=False, give_pre_end=False)
+                # self.encoder = Encoder3D(ch=128, out_ch=3, ch_mult=[1,1,2,2,4], num_res_blocks=2, attn_resolutions=[16], dropout=0.0, resamp_with_conv=True, in_channels=3, resolution=224, z_channels=embed_dim, double_z=False, give_pre_end=False)
+                self.encoder = Encoder3D(ch=64, out_ch=3, ch_mult=[1,1,2,2,4], num_res_blocks=1, attn_resolutions=[16], dropout=0.0, resamp_with_conv=False, in_channels=3, resolution=224, z_channels=embed_dim, double_z=False, give_pre_end=False)
                 self.avg_pool = nn.AdaptiveAvgPool3d((1,1,1))
                 self.encoder_embed = nn.Linear(embed_dim, embed_dim, bias=False)
 
@@ -283,7 +283,8 @@ class MaskedAutoencoderViT(nn.Module):
                 self.decoder = Decoder(ch=128, out_ch=3, ch_mult=[1,1,2,2,4], num_res_blocks=2, attn_resolutions=[16], dropout=0.0, resamp_with_conv=True, in_channels=3, resolution=224, z_channels=decoder_embed_dim, give_pre_end=False)
             elif self.model_args.dataset_type == "3D":
                 from VQ.VQ_model3D import Decoder3D
-                self.decoder = Decoder3D(ch=128, out_ch=3, ch_mult=[1,1,2,2,4], num_res_blocks=2, attn_resolutions=[16], dropout=0.0, resamp_with_conv=True, in_channels=3, resolution=224, z_channels=decoder_embed_dim, give_pre_end=False)
+                # self.decoder = Decoder3D(ch=128, out_ch=3, ch_mult=[1,1,2,2,4], num_res_blocks=2, attn_resolutions=[16], dropout=0.0, resamp_with_conv=True, in_channels=3, resolution=224, z_channels=decoder_embed_dim, give_pre_end=False)
+                self.decoder = Decoder3D(ch=64, out_ch=3, ch_mult=[1,1,2,2,4], num_res_blocks=1, attn_resolutions=[16], dropout=0.0, resamp_with_conv=False, in_channels=3, resolution=224, z_channels=decoder_embed_dim, give_pre_end=False)
 
         if self.model_args.LA:
             self.decoder_blocks = nn.ModuleList([
@@ -716,11 +717,11 @@ class MaskedAutoencoderViT(nn.Module):
         # else:
         x, _ = self.decoder_embed(x_restored)
         # print("x.shape token1", x.shape) # torch.Size([64, 196, 512]) ## fix16 torch.Size([1, 1568, 768])
-        if self.model_args.dataset_type == "3D": ## for all 3D after decoder_embed
-            if self.model_args.arch_version.startswith("v1") or self.model_args.arch_version.startswith("v2"):
-                x = x[:,:middle_output["shape1"],:]
-            else:
-                pass
+        # if self.model_args.dataset_type == "3D": ## for all 3D after decoder_embed
+        #     if self.model_args.arch_version.startswith("v1") or self.model_args.arch_version.startswith("v2"):
+        #         x = x[:,:middle_output["shape1"],:]
+        #     else:
+        #         pass
             # print("x.shape token2", x.shape) # torch.Size([64, 196, 512]) ## fix16 torch.Size([1, 1568, 768])
 
         if self.model_args.arch_version == 'v11' or self.model_args.arch_version == 'v21' or self.model_args.arch_version == 'v31': ## only v11
@@ -800,6 +801,7 @@ class MaskedAutoencoderViT(nn.Module):
             if self.model_args.dataset_type == "2D":
                 x = x.permute(0,2,1).contiguous().view(x.shape[0], self.embed_dim, self.hw_size, self.hw_size)
             elif self.model_args.dataset_type == "3D":
+                # print("x.shape", x.shape) # torch.Size([10, 3136, 768])
                 x = x.permute(0,2,1).contiguous().view(x.shape[0], self.embed_dim, self.model_args.fix_frame//16, self.hw_size, self.hw_size)
             # print("before VQ decoder, x.shape", x.shape) # torch.Size([64, 768, 14, 14])
             x = self.decoder(x)

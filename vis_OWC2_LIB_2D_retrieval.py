@@ -169,6 +169,9 @@ def get_args_parser():
     parser.add_argument('--save_video', type=int, default=0, help='0=False, 1=True')
     parser.add_argument('--topk', type=int, default=3, help='3,5,7...')
     parser.add_argument('--id_index', type=int, default=0, help='id_index')
+    parser.add_argument('--tnse_plot', type=int, default=0, help='0=False, 1=True')
+
+    parser.add_argument('--text_encoding', type=str, default="None", help='None or path of text_encoding')
 
     return parser
 
@@ -292,32 +295,33 @@ if __name__ == '__main__':
     inter_feature_2_list = torch.stack(inter_feature_2_list).to(device)
     print("inter_feature_list.shape, inter_feature_2_list.shape", inter_feature_list.shape, inter_feature_2_list.shape)
 
-    #### save tsne plot
-    inter_feature_list_tsne = inter_feature_list.mean(dim=2)
-    print("inter_feature_list_tsne.shape", inter_feature_list_tsne.shape)
-    inter_feature_list_tsne = inter_feature_list_tsne.view(inter_feature_list_tsne.shape[0], -1)
-    print("inter_feature_list_tsne.shape", inter_feature_list_tsne.shape)
-
-    tsne = TSNE(n_components=2, perplexity=30, random_state=42)
-    tsne_results = tsne.fit_transform(inter_feature_list_tsne.detach().cpu().numpy())  # Shape: [700, 2]
+    if args.tnse_plot == 1:
+        #### save tsne plot
+        inter_feature_list_tsne = inter_feature_list.mean(dim=2)
+        print("inter_feature_list_tsne.shape", inter_feature_list_tsne.shape)
+        inter_feature_list_tsne = inter_feature_list_tsne.view(inter_feature_list_tsne.shape[0], -1)
+        print("inter_feature_list_tsne.shape", inter_feature_list_tsne.shape)
     
-    plt.figure(figsize=(8, 8))
-    plt.scatter(tsne_results[:, 0], tsne_results[:, 1], alpha=0.7)
-    for i in range(0, len(case_list), 10):  # Annotate every 10th point
-        plt.text(tsne_results[i, 0], tsne_results[i, 1], str(i)+", "+case_list[i], fontsize=4, alpha=0.7)
-
-    plt.xlabel("t-SNE Component 1")
-    plt.ylabel("t-SNE Component 2")
-    plt.title("t-SNE Visualization")
-    plt.savefig(args.generate_in_step4+"/tsne_visualization_"+str(args.fix_frame)+"_"+class_+".png", dpi=300, bbox_inches='tight')
-
-    ## Clean TSNE
-    plt.figure(figsize=(8, 8))
-    plt.scatter(tsne_results[:, 0], tsne_results[:, 1], alpha=0.7)
-    plt.xlabel("t-SNE Component 1")
-    plt.ylabel("t-SNE Component 2")
-    plt.title("t-SNE Visualization")
-    plt.savefig(args.generate_in_step4+"/tsne_visualization_"+str(args.fix_frame)+"_"+class_+"_clean.png", dpi=300, bbox_inches='tight')
+        tsne = TSNE(n_components=2, perplexity=30, random_state=42)
+        tsne_results = tsne.fit_transform(inter_feature_list_tsne.detach().cpu().numpy())  # Shape: [700, 2]
+        
+        plt.figure(figsize=(8, 8))
+        plt.scatter(tsne_results[:, 0], tsne_results[:, 1], alpha=0.7)
+        for i in range(0, len(case_list), 10):  # Annotate every 10th point
+            plt.text(tsne_results[i, 0], tsne_results[i, 1], str(i)+", "+case_list[i], fontsize=4, alpha=0.7)
+    
+        plt.xlabel("t-SNE Component 1")
+        plt.ylabel("t-SNE Component 2")
+        plt.title("t-SNE Visualization")
+        plt.savefig(args.generate_in_step4+"/tsne_visualization_"+str(args.fix_frame)+"_"+class_+".png", dpi=300, bbox_inches='tight')
+    
+        ## Clean TSNE
+        plt.figure(figsize=(8, 8))
+        plt.scatter(tsne_results[:, 0], tsne_results[:, 1], alpha=0.7)
+        plt.xlabel("t-SNE Component 1")
+        plt.ylabel("t-SNE Component 2")
+        plt.title("t-SNE Visualization")
+        plt.savefig(args.generate_in_step4+"/tsne_visualization_"+str(args.fix_frame)+"_"+class_+"_clean.png", dpi=300, bbox_inches='tight')
 
     # exit(0)
 
@@ -366,6 +370,12 @@ if __name__ == '__main__':
         Token_RAG = (Token_candidates * distance_close_rag_p.view(args.topk, 1, 1, 1)).sum(dim=0) ## top5
         print("Token_RAG.shape", Token_RAG.shape)
 
+        ## tensor topk for avg
+        indices_close_avg = indices_close
+        distance_close_avg_p = torch.Tensor([1/(args.topk+1) for ki in range(args.topk+1)]).to(device)
+        Token_candidates_avg = inter_feature_list[indices_close_avg]
+        Token_AVG = (Token_candidates_avg * distance_close_avg_p.view(args.topk+1, 1, 1, 1)).sum(dim=0) 
+
         ## gen
         sample = read_slices_2D(args, case_id)  # Changed to read_slices_2D
         x = sample['image'].to(device)
@@ -399,6 +409,30 @@ if __name__ == '__main__':
                     preds_rag = pred1
 
         save_image(preds_rag, args.generate_in_step4+'/'+str(args.id_index)+'/'+case_id+'_test1_pred_image_top'+str(args.topk)+'_'+class_+'_TokenRAG.png', thre = 0.25)  # Changed to save_image
+
+        ## avg topk
+        preds_avg = torch.zeros(x.shape).to(device)
+        for i_b in range(Token_AVG.shape[0]):
+            x_masked_b = Token_AVG[i_b,:,:]
+            x_masked_b = torch.unsqueeze(x_masked_b, dim=0)
+            # x_masked_b = x_masked_b + 1.0 ## bright in CNN
+            # x_masked_b = x_masked_b - 1.0 ## dark in CNN
+            with torch.no_grad():
+                if args.training_version.startswith('v0'): ## currently only arch v11 and training v01
+                    x_masked_ = model.blocks2[0](x_masked_b)
+                    for bi, blk in enumerate(model.blocks2):
+                        if bi > 0:
+                            x_masked_ = blk(x_masked_) ## token2 torch.Size([64, 101, 768])
+                    x_masked_ = model.norm(x_masked_)
+                    x_masked_ = x_masked_b + x_masked_
+                    x_masked = x_masked_
+                    x_restored = x_masked
+                    pred1 = model.forward_decoder(x_restored, None, None)  # Changed to unpatchify
+                    if args.arch_version.startswith('v1'):
+                        pred1 = model.unpatchify(pred1)  # Changed to unpatchify
+                    preds_avg = pred1
+
+        save_image(preds_avg, args.generate_in_step4+'/'+str(args.id_index)+'/'+case_id+'_test1_pred_image_top'+str(args.topk)+'_'+class_+'_TokenAVG.png', thre = 0.25)  # Changed to save_image
 
         ## use x_masked_b_all (indices_close) as the retrieval results
         pred_list = []
@@ -446,10 +480,70 @@ if __name__ == '__main__':
             label_list.append(case_id_c)
             save_image(preds, args.generate_in_step4+'/'+str(args.id_index)+'/'+case_id+'_test1_pred_image_top'+str(args.topk)+'_'+class_+'_'+case_id_c+'.png', thre = 0.25)  # Changed to save_image
 
+        ## generate images with ori w/o selected classes + top1 selected class
+        ## find itself
+        print("indices_close", indices_close)
+        x_masked_b_all_0 = np.load(args.inter_feature_path + '/' + case_list[indices_close[0]] + '.npy')
+        x_masked_b_all_0 = torch.tensor(x_masked_b_all_0)
+        random_selected_class0_other = list(range(args.num_classes_with_bg)) ## [0,1,2,3,4,5,6,7,8,9]
+        for i in random_selected_class:
+            random_selected_class0_other.remove(i)
+        image_target0_other = filter_class(x, label, random_selected_class)
+        ## inter_feature_list integration
+        x_masked_b_all_0, mask0 = random_masking(x_masked_b_all_0, random_selected_class0_other, args)
+        x_masked_b_all_0 = x_masked_b_all_0.to(device)
+        mask0 = mask0.to(device)
+        print("x_masked_b_all_0.shape", x_masked_b_all_0.shape)
+
+        # ## find top1
+        # case_id_c = case_list[indices_close[1]]
+        # sample = read_slices_2D(args, case_id_c)  # Changed to read_slices_2D
+
+        # x = sample['image'].to(device)
+        # label = sample['label'].to(device)
+        # image_target = filter_class(x, label, random_selected_class)
+        # class_ = 'cls'
+        # for icl in random_selected_class:
+        #     class_ += str(icl)
+
+        preds = torch.zeros(x.shape).to(device)
+        # for i_b in range(inter_feature_list[indices_close[1]].shape[0]):
+        #     x_masked_b = inter_feature_list[indices_close[1]][i_b,:,:]
+        for i_b in range(Token_AVG.shape[0]):
+            x_masked_b = Token_AVG[i_b,:,:]
+            x_masked_b = torch.unsqueeze(x_masked_b, dim=0)
+            print("x_masked_b.shape", x_masked_b.shape)
+            x_masked_b = model.token_restore_sup(x_masked_b_all_0, mask0, x_masked_b)
+            with torch.no_grad():
+                if args.training_version.startswith('v0'): ## currently only arch v11 and training v01
+                    x_masked_ = model.blocks2[0](x_masked_b)
+                    for bi, blk in enumerate(model.blocks2):
+                        if bi > 0:
+                            x_masked_ = blk(x_masked_) ## token2 torch.Size([64, 101, 768])
+                    x_masked_ = model.norm(x_masked_)
+                    x_masked_ = x_masked_b + x_masked_
+                    x_masked = x_masked_
+                    x_restored = x_masked
+                    pred1 = model.forward_decoder(x_restored, None, None)  # Changed to unpatchify
+                    if args.arch_version.startswith('v1'):
+                        pred1 = model.unpatchify(pred1)  # Changed to unpatchify
+                    preds = pred1
+
+        pred_list.append(preds_avg)
+        label_list.append("Avg")
+
+        pred_list.append(preds)
+        label_list.append("Alter")
+        save_image(preds, args.generate_in_step4+'/'+str(args.id_index)+'/'+case_id+'_test1_pred_image_top'+str(args.topk)+'_'+class_+'_alter_avg.png', thre = 0.25)
+
+        # pred_list.append(preds)
+        # label_list.append("")
+        # save_image(preds, args.generate_in_step4+'/'+str(args.id_index)+'/'+case_id+'_test1_pred_image_top'+str(args.topk)+'_'+class_+'_alter_complement.png', thre = 0.25)
+
         pred_list.append(preds_rag)
         label_list.append("RAG")
 
-        save_image_grid(pred_list, args.generate_in_step4+'/'+str(args.id_index)+'/'+case_id+'_test1_pred_image_top'+str(args.topk)+'_'+class_+'_combined.png', \
+        save_image_grid(pred_list, args.generate_in_step4+'/'+str(args.id_index)+'/combined_'+case_id+'_test1_pred_image_top'+str(args.topk)+'_'+class_+'.png', \
             thre=0.25, label_list=label_list, \
             is_list=True, print_slice=True)  # Changed to save_image_grid
 

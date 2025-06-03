@@ -107,6 +107,9 @@ submit_df.to_csv(output_dir, index=False)
 # python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/SyntheticMRI_pre/PV/Training/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/SyntheticMRI_pre/PV/Training/Training_Fixfr4_H100_2_Final112.csv 4
 # python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/SyntheticMRI_pre/PV/Test/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/SyntheticMRI_pre/PV/Test/Test_Fixfr4_H100_2_Final112.csv 4
 
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/RealCT_pre/Training/Training_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/RealCT_pre/Training/Training_Fixfr16_H100_2_Final112.csv 16
+# python filter_Fixfr16.py /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/RealCT_pre/Test/Test_H100_2_Final112.csv /raid/home/CAMCA/ss3112/Datasets/Med3d/Med3d_Others/RAOS/RealCT_pre/Test/Test_Fixfr16_H100_2_Final112.csv 16
+
 
 
 

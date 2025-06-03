@@ -165,6 +165,8 @@ def get_args_parser():
     parser.add_argument('--save_video', type=int, default=0, help='0=False, 1=True')
     parser.add_argument('--thre', type=float, default=0.1, help='0.1')
 
+    parser.add_argument('--text_encoding', type=str, default="None", help='None or path of text_encoding')
+
     return parser
 
 def prepare_model(chkpt_dir, arch, args=None, img_size=None):

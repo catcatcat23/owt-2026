@@ -199,6 +199,8 @@ def get_args_parser():
     parser.add_argument('--save_video', type=int, default=0, help='0=False, 1=True')
     parser.add_argument('--thre', type=float, default=0.1, help='0.1')
 
+    parser.add_argument('--text_encoding', type=str, default="None", help='None or path of text_encoding')
+
     return parser
 
 def prepare_model(chkpt_dir, arch, args=None, img_size=None):
@@ -303,6 +305,12 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
     cnts = torch.zeros(x.shape).to(device)
     # inter_feature = torch.zeros((int(112/16), int(args.token_factor*args.num_classes_with_bg), 768)).to(device)
 
+    if args.text_encoding != "None":
+        # print("args.text_encoding", args.text_encoding, os.path.exists(args.text_encoding))
+        text_features = torch.load(args.text_encoding, map_location="cpu").to(device)
+        aligned_text_features = text_features.repeat_interleave(args.token_factor, dim=0)  # Shape (100, 512)
+        aligned_text_features = aligned_text_features.unsqueeze(0).expand(1, -1, -1).float()  # Shape (B, 100, 512) ## in eval (1, 100, 512)
+
     n_inter=0
     if args.dataset_type == '3D':
         # for fr in range(0, x.shape[2]-args.fix_frame+1, args.fix_frame): ## only used for save inter_feature 
@@ -312,6 +320,8 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
             with torch.no_grad():
                 if args.training_version.startswith('v0'):
                     middle1 = {"image_target": image_target[:,:,fr:fr+args.fix_frame,:,:], "random_selected_class": random_selected_class}
+                    if args.text_encoding != "None":
+                        middle1["text_features"] = aligned_text_features
                     x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
                     pred1 = model.forward_decoder(x_restored, cls_tokens, middle_output)
                     if args.arch_version.startswith('v1'):
@@ -330,6 +340,8 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
             with torch.no_grad():
                 if args.training_version.startswith('v0'):
                     middle1 = {"image_target": image_target[:,:,fr,:,:], "random_selected_class": random_selected_class}
+                    if args.text_encoding != "None":
+                        middle1["text_features"] = aligned_text_features
                     x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
                     pred1 = model.forward_decoder(x_restored, cls_tokens, middle_output)
                     if args.arch_version.startswith('v1'):

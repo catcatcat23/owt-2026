@@ -225,29 +225,27 @@ class MaskedAutoencoderViT(nn.Module):
                 self.avg_pool = nn.AdaptiveAvgPool3d((1,1,1))
                 self.encoder_embed = nn.Linear(embed_dim, embed_dim, bias=False)
 
-        if not self.model_args.arch_version == 'v12unsup':
-            if self.model_args.LA:
-                self.blocks2 = nn.ModuleList([
-                    BlockLA(embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer) 
-                    for i in range(int(depth/2))]) ## delete all qk_scale=None for H100
-            else:
-                self.blocks2 = nn.ModuleList([
-                    Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer) 
-                    for i in range(int(depth/2))]) ## delete all qk_scale=None for H100
+        if self.model_args.LA:
+            self.blocks2 = nn.ModuleList([
+                BlockLA(embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer) 
+                for i in range(int(depth/2))]) ## delete all qk_scale=None for H100
+        else:
+            self.blocks2 = nn.ModuleList([
+                Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer) 
+                for i in range(int(depth/2))]) ## delete all qk_scale=None for H100
 
         self.embed_dim = embed_dim
         self.hw_size = img_size//patch_size
-        if not self.model_args.arch_version == 'v12unsup':
-            if self.model_args.dataset_type == "2D":
-                self.organ_embed = OrganEmbed(embed_dim, embed_dim, self.model_args.organ_token_total, img_size//patch_size)
-            elif self.model_args.dataset_type == "3D":
-                if self.model_args.arch_version.startswith("v1") or self.model_args.arch_version.startswith("v2"):
-                    self.organ_embed = OrganEmbed2(embed_dim, embed_dim, self.model_args.organ_token_total, img_size//patch_size, self.model_args)
-                elif self.model_args.arch_version.startswith("v3"):
-                    if self.model_args.fix_frame == 16: ## only 16 frames supported
-                        self.organ_embed = OrganEmbed(embed_dim, embed_dim, self.model_args.organ_token_total, img_size//patch_size)
-                    else:
-                        exit(0)
+        if self.model_args.dataset_type == "2D":
+            self.organ_embed = OrganEmbed(embed_dim, embed_dim, self.model_args.organ_token_total, img_size//patch_size)
+        elif self.model_args.dataset_type == "3D":
+            if self.model_args.arch_version.startswith("v1") or self.model_args.arch_version.startswith("v2"):
+                self.organ_embed = OrganEmbed2(embed_dim, embed_dim, self.model_args.organ_token_total, img_size//patch_size, self.model_args)
+            elif self.model_args.arch_version.startswith("v3"):
+                if self.model_args.fix_frame == 16: ## only 16 frames supported
+                    self.organ_embed = OrganEmbed(embed_dim, embed_dim, self.model_args.organ_token_total, img_size//patch_size)
+                else:
+                    exit(0)
 
         self.norm = norm_layer(embed_dim)
         self.sigmoid = Sigmoid()
@@ -256,17 +254,16 @@ class MaskedAutoencoderViT(nn.Module):
         # --------------------------------------------------------------------------
         # MAE decoder specifics
         ###  self.decoder_embed = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
-        if not self.model_args.arch_version == 'v12unsup':
-            if self.model_args.dataset_type == "2D":
-                self.decoder_embed = SpatialRestore(embed_dim, decoder_embed_dim, self.model_args.organ_token_total, (img_size//patch_size)*(img_size//patch_size))
-            elif self.model_args.dataset_type == "3D":
-                if self.model_args.arch_version.startswith("v1") or self.model_args.arch_version.startswith("v2"):
-                    self.decoder_embed = SpatialRestore(embed_dim, decoder_embed_dim, self.model_args.organ_token_total, self.patch_embed.grid_size[0]*self.patch_embed.grid_size[1]*self.patch_embed.grid_size[2])
-                    # self.decoder_embed = SpatialRestore2(embed_dim, decoder_embed_dim, self.model_args.organ_token_total, self.patch_embed.grid_size[1]*self.patch_embed.grid_size[2])
-                elif self.model_args.arch_version.startswith("v3"):
-                    self.decoder_embed = SpatialRestore(embed_dim, decoder_embed_dim, self.model_args.organ_token_total, (self.model_args.fix_frame//patch_size)*(img_size//patch_size)*(img_size//patch_size))
+        if self.model_args.dataset_type == "2D":
+            self.decoder_embed = SpatialRestore(embed_dim, decoder_embed_dim, self.model_args.organ_token_total, (img_size//patch_size)*(img_size//patch_size))
+        elif self.model_args.dataset_type == "3D":
+            if self.model_args.arch_version.startswith("v1") or self.model_args.arch_version.startswith("v2"):
+                self.decoder_embed = SpatialRestore(embed_dim, decoder_embed_dim, self.model_args.organ_token_total, self.patch_embed.grid_size[0]*self.patch_embed.grid_size[1]*self.patch_embed.grid_size[2])
+                # self.decoder_embed = SpatialRestore2(embed_dim, decoder_embed_dim, self.model_args.organ_token_total, self.patch_embed.grid_size[1]*self.patch_embed.grid_size[2])
+            elif self.model_args.arch_version.startswith("v3"):
+                self.decoder_embed = SpatialRestore(embed_dim, decoder_embed_dim, self.model_args.organ_token_total, (self.model_args.fix_frame//patch_size)*(img_size//patch_size)*(img_size//patch_size))
 
-        if self.model_args.arch_version == 'v11' or self.model_args.arch_version == 'v12unsup' or self.model_args.arch_version == 'v21' or self.model_args.arch_version == 'v31': ## only v11 no decoder cls token
+        if self.model_args.arch_version == 'v11' or self.model_args.arch_version == 'v21' or self.model_args.arch_version == 'v31': ## only v11 no decoder cls token
             pass
         else:
             self.decoder_embed_cls = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
@@ -403,14 +400,7 @@ class MaskedAutoencoderViT(nn.Module):
             # self.perceptual_weight = 1.0
 
         if self.model_args.text_encoding != "None":
-            # self.text_linear = nn.Linear(768, embed_dim)
-            self.text_linear = nn.Sequential(
-                # nn.Linear(512, 256),
-                # nn.GELU(),
-                # nn.Linear(256, 1),
-                nn.Linear(512, 1),
-                nn.Linear(768, embed_dim)
-            )
+            self.text_linear = nn.Linear(768, embed_dim)
 
     def initialize_weights(self):
         # initialization
@@ -623,31 +613,20 @@ class MaskedAutoencoderViT(nn.Module):
             # print("x_.shape 2", x_.shape)
             x = self.encoder_embed(x_)
         
-        if not self.model_args.arch_version == 'v12unsup':
-            # print("x.shape encoder finalfinal", x.shape) # torch.Size([32, 196, 768])
-            x, _ = self.organ_embed(x) ## torch.Size([64, 200, 768])
-            # print("x.shape before masking", x.shape) # torch.Size([64, 200, 768])
-            # exit(0)
-            if self.model_args.text_encoding != "None":
-                # text_features = self.text_linear(middle["text_features"])
-                # x: (B,100,512,768)
-                B, N, L, C = middle["text_features"].shape
-                text_features = middle["text_features"].permute(0, 1, 3, 2)  # (B,100,768,512)
-                text_features = text_features.reshape(-1, L)  # (B*100*768, 512)
-                # text_features = self.text_linear[2](self.text_linear[1](self.text_linear[0](text_features)))  # (B*100*768, 1)
-                text_features = self.text_linear[0](text_features)  # (B*100*768, 1)
-                text_features = text_features.reshape(B, N, C, 1)  # (B,100,768,1)
-                text_features = text_features.squeeze(-1)  # (B,100,768)
-                # text_features = self.text_linear[3](text_features)  # (B,100,embed_dim)
-                text_features = self.text_linear[1](text_features)  # (B,100,embed_dim)
-                x = x + text_features
+        # print("x.shape encoder finalfinal", x.shape) # torch.Size([32, 196, 768])
+        x, _ = self.organ_embed(x) ## torch.Size([64, 200, 768])
+        # print("x.shape before masking", x.shape) # torch.Size([64, 200, 768])
+        # exit(0)
+        if self.model_args.text_encoding != "None":
+            text_features = self.text_linear(middle["text_features"])
+            x = x + text_features
 
-            ## random mask organ tokens
-            x_masked_b, mask = self.random_masking(x, random_selected_class) ## torch.Size([64, 100, 768])
-            # print("x.shape after masking", x.shape) 
-            # print("random_selected_class", random_selected_class)
-            # print("x_masked_b", x_masked_b.shape, x_masked_b)
-            # print("mask", mask.shape, mask)
+        ## random mask organ tokens
+        x_masked_b, mask = self.random_masking(x, random_selected_class) ## torch.Size([64, 100, 768])
+        # print("x.shape after masking", x.shape) 
+        # print("random_selected_class", random_selected_class)
+        # print("x_masked_b", x_masked_b.shape, x_masked_b)
+        # print("mask", mask.shape, mask)
 
         if self.model_args.arch_version == 'v11' or self.model_args.arch_version == 'v21' or self.model_args.arch_version == 'v31': ## only v11
             # x_masked_b = torch.cat((cls_tokens, x_masked_b), dim=1) ## torch.Size([64, 101, 768])
@@ -660,10 +639,6 @@ class MaskedAutoencoderViT(nn.Module):
             x_masked_ = self.norm(x_masked_)
             x_masked_ = x_masked_b + x_masked_
             x_masked = x_masked_
-        elif self.model_args.arch_version == 'v12unsup':
-            x_masked = x
-            mask=1
-            x_masked_b=x
         else:
             x_masked_ = torch.cat((cls_tokens, x_masked_b), dim=1) ## torch.Size([64, 101, 768])
             # print("x_masked_.shape after cls token", x_masked_.shape) # torch.Size([64, 101, 768])
@@ -747,10 +722,7 @@ class MaskedAutoencoderViT(nn.Module):
         #     x = [self.decoder_embed[i](x_restored)[0] for i in range(36)]
         #     x = torch.cat(x, 1)
         # else:
-        if self.model_args.arch_version == 'v12unsup':
-            x = x_restored
-        else:
-            x, _ = self.decoder_embed(x_restored)
+        x, _ = self.decoder_embed(x_restored)
         # print("x.shape token1", x.shape) # torch.Size([64, 196, 512]) ## fix16 torch.Size([1, 1568, 768])
         # if self.model_args.dataset_type == "3D": ## for all 3D after decoder_embed
         #     if self.model_args.arch_version.startswith("v1") or self.model_args.arch_version.startswith("v2"):
@@ -759,7 +731,7 @@ class MaskedAutoencoderViT(nn.Module):
         #         pass
             # print("x.shape token2", x.shape) # torch.Size([64, 196, 512]) ## fix16 torch.Size([1, 1568, 768])
 
-        if self.model_args.arch_version == 'v11' or self.model_args.arch_version == 'v12unsup' or self.model_args.arch_version == 'v21' or self.model_args.arch_version == 'v31': ## only v11
+        if self.model_args.arch_version == 'v11' or self.model_args.arch_version == 'v21' or self.model_args.arch_version == 'v31': ## only v11
             pass
         else:
             cls_tokens = self.decoder_embed_cls(cls_tokens)
@@ -789,7 +761,7 @@ class MaskedAutoencoderViT(nn.Module):
                 # add pos embed
                 pos_embed = self.decoder_pos_embed_spatial.repeat(1, self.patch_embed.grid_size[0], 1) + \
                             torch.repeat_interleave(self.decoder_pos_embed_temporal, self.patch_embed.grid_size[1] * self.patch_embed.grid_size[2], dim=1)
-                if self.model_args.arch_version == 'v11' or self.model_args.arch_version == 'v12unsup' or self.model_args.arch_version == 'v21': ##  only v11
+                if self.model_args.arch_version == 'v11' or self.model_args.arch_version == 'v21': ##  only v11
                     x = x + pos_embed
                 else:
                     pos_embed = torch.cat([self.decoder_pos_embed_class, pos_embed], 1)
@@ -822,7 +794,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         # print("x.shape token3", x.shape)
         # print("decoder, x.shape6", x.shape) # torch.Size([64, 197, 768])
-        if self.model_args.arch_version == 'v11' or self.model_args.arch_version == 'v12unsup' or self.model_args.arch_version == 'v21' or self.model_args.arch_version == 'v31': ## only v11
+        if self.model_args.arch_version == 'v11' or self.model_args.arch_version == 'v21' or self.model_args.arch_version == 'v31': ## only v11
             pass
         else:                                             ## v2, v3...
             #remove cls token

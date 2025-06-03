@@ -38,6 +38,14 @@ def train_one_epoch(model: torch.nn.Module,
 
     optimizer.zero_grad()
 
+    if args.text_encoding != "None":
+        text_features = torch.load(args.text_encoding, map_location="cpu").to(device)
+        aligned_text_features = text_features.repeat_interleave(args.token_factor, dim=0)  # Shape (100, 512)
+        print("aligned_text_features.shape", aligned_text_features.shape)
+        # aligned_text_features = aligned_text_features.unsqueeze(0).expand(args.batch_size, -1, -1, -1)  # Shape (B, 100, 512)
+        aligned_text_features = aligned_text_features.unsqueeze(0).expand(args.batch_size, -1, -1, -1)  # Shape (B, 100, 512, 768)
+        print("aligned_text_features.shape 2", aligned_text_features.shape)
+
     if log_writer is not None:
         print('log_dir: {}'.format(log_writer.log_dir))
 
@@ -82,10 +90,12 @@ def train_one_epoch(model: torch.nn.Module,
         with torch.amp.autocast('cuda'): ## only for H100
             # with torch.cuda.amp.autocast(): ## only for SLURM
             if args.arch_version.startswith('v0'):
-                loss, _, _ = model(samples, mask_ratio=args.mask_ratio)
+                loss, pred, middle_output = model(samples, mask_ratio=args.mask_ratio)
             else: ## v1, v2, v3
                 if args.training_version.startswith('v0'):
                     middle = {"image_target": image_target, "random_selected_class": random_selected_class}
+                    if args.text_encoding != "None":
+                        middle["text_features"] = aligned_text_features
                     loss, pred, middle_output = model(samples, mask_ratio=mask_ratio, middle=middle)#, mask_ratio=args.mask_ratio)
                 elif args.training_version.startswith('v1'):
                     random_selected_class2 = list(range(args.num_classes_with_bg)) ## [0,1,2,3,4,5,6,7,8,9]
@@ -200,6 +210,11 @@ def train_one_epoch(model: torch.nn.Module,
         if "LPIPS" in args.loss_version:
             p_loss_value = middle_output["p_loss"].item()
             loss = loss + 1.0*middle_output["p_loss"]
+        if args.arch_version == 'v02':
+            d_loss_value = middle_output["d_loss"].item()
+            loss = loss + 1.0*middle_output["d_loss"]
+            g_loss_value = middle_output["g_loss"].item()
+            loss = loss + 1.0*middle_output["g_loss"]
 
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
@@ -225,6 +240,9 @@ def train_one_epoch(model: torch.nn.Module,
             metric_logger.update(loss_vq=loss_value_vq)
         if "LPIPS" in args.loss_version:
             metric_logger.update(p_loss=p_loss_value)
+        if args.arch_version == 'v02':
+            metric_logger.update(d_loss=d_loss_value)
+            metric_logger.update(g_loss=g_loss_value)
 
         lr = optimizer.param_groups[0]["lr"]
         metric_logger.update(lr=lr)

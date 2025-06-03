@@ -105,8 +105,11 @@ def get_args_parser():
     parser.add_argument('--load_label_vis_path', type=str, default=None)
     parser.add_argument('--load_csv_type', type=str, default='train') ## train, test
     parser.add_argument('--save_video', type=int, default=0, help='0=False, 1=True')
+    parser.add_argument('--tnse_plot', type=int, default=0, help='0=False, 1=True')
     parser.add_argument('--topk', type=int, default=3, help='3,5,7...')
     parser.add_argument('--id_index', type=int, default=0, help='id_index')
+
+    parser.add_argument('--text_encoding', type=str, default="None", help='None or path of text_encoding')
 
     return parser
 
@@ -229,32 +232,95 @@ if __name__ == '__main__':
     inter_feature_2_list = torch.stack(inter_feature_2_list).to(device)
     print("inter_feature_list.shape, inter_feature_2_list.shape", inter_feature_list.shape, inter_feature_2_list.shape)
 
-    #### save tsne plot
-    inter_feature_list_tsne = inter_feature_list.mean(dim=2)
-    print("inter_feature_list_tsne.shape", inter_feature_list_tsne.shape)
-    inter_feature_list_tsne = inter_feature_list_tsne.view(inter_feature_list_tsne.shape[0], -1)
-    print("inter_feature_list_tsne.shape", inter_feature_list_tsne.shape)
+    if args.tnse_plot == 1:
+        #### save tsne plot
+        inter_feature_list_tsne = inter_feature_list.mean(dim=1)
+        print("inter_feature_list_tsne.shape", inter_feature_list_tsne.shape)
+        inter_feature_list_tsne = inter_feature_list_tsne.view(inter_feature_list_tsne.shape[0], -1)
+        print("inter_feature_list_tsne.shape", inter_feature_list_tsne.shape)
 
-    tsne = TSNE(n_components=2, perplexity=30, random_state=42)
-    tsne_results = tsne.fit_transform(inter_feature_list_tsne.detach().cpu().numpy())  # Shape: [700, 2]
-    
-    plt.figure(figsize=(8, 8))
-    plt.scatter(tsne_results[:, 0], tsne_results[:, 1], alpha=0.7)
-    for i in range(0, len(case_list), 10):  # Annotate every 10th point
-        plt.text(tsne_results[i, 0], tsne_results[i, 1], str(i)+", "+case_list[i], fontsize=4, alpha=0.7)
+        # Define color palette
+        color_palette = ['#595959', '#C04E15', '#51938B', '#2E85B7', '#FCD46E']
 
-    plt.xlabel("t-SNE Component 1")
-    plt.ylabel("t-SNE Component 2")
-    plt.title("t-SNE Visualization")
-    plt.savefig(args.generate_in_step4+"/tsne_visualization_"+str(args.fix_frame)+"_"+class_+".png", dpi=300, bbox_inches='tight')
+        #### put all token groups in one space
+        inter_feature_list_sub = []
+        if inter_feature_list.shape[2] > args.token_factor:
+            for tf in range(int(inter_feature_list.shape[2]/args.token_factor)):
+                # inter_feature_list_sub.append(inter_feature_list[:,:,tf*args.token_factor:(tf+1)*args.token_factor,:].mean(dim=2).view(inter_feature_list.shape[0], -1))
+                inter_feature_list_sub.append(inter_feature_list[:,:,tf*args.token_factor:(tf+1)*args.token_factor,:].mean(dim=1).view(inter_feature_list.shape[0], -1))
+            inter_feature_list_sub = torch.stack(inter_feature_list_sub).to(device)
+            print("inter_feature_list_sub.shape", inter_feature_list_sub.shape)
+            
+            # Create discrete color labels based on first dimension before reshaping
+            colors = np.repeat(np.arange(inter_feature_list_sub.shape[0]), inter_feature_list_sub.shape[1])
+            
+            # Reshape to (shape[0]*shape[1], shape[2])
+            inter_feature_list_sub = inter_feature_list_sub.view(-1, inter_feature_list_sub.shape[-1])
+            print("inter_feature_list_sub reshaped shape", inter_feature_list_sub.shape)
 
-    ## Clean TSNE
-    plt.figure(figsize=(8, 8))
-    plt.scatter(tsne_results[:, 0], tsne_results[:, 1], alpha=0.7)
-    plt.xlabel("t-SNE Component 1")
-    plt.ylabel("t-SNE Component 2")
-    plt.title("t-SNE Visualization")
-    plt.savefig(args.generate_in_step4+"/tsne_visualization_"+str(args.fix_frame)+"_"+class_+"_clean.png", dpi=300, bbox_inches='tight')
+            # Generate and save TSNE plots with discrete colors
+            # 2D plot
+            # tsne = TSNE(n_components=2, perplexity=30, random_state=42)
+            tsne = TSNE(perplexity=30, n_components=2, init='pca', n_iter=2000, random_state=5, verbose=1)
+            tsne_results_2d = tsne.fit_transform(inter_feature_list_sub.detach().cpu().numpy())
+            
+            plt.figure(figsize=(10, 10))
+            unique_colors = np.unique(colors)
+            for i, color_val in enumerate(unique_colors):
+                mask = colors == color_val
+                plt.scatter(tsne_results_2d[mask, 0], tsne_results_2d[mask, 1], 
+                        # label=f'Group {i}', alpha=0.6)
+                        color=color_palette[i], label=f'Group {i}', alpha=0.6)
+            
+            # plt.legend(fontsize=14)
+            # plt.title("2D t-SNE of Token Groups")
+            # plt.xlabel("t-SNE Component 1")
+            # plt.ylabel("t-SNE Component 2") 
+            plt.savefig(args.generate_in_step4+"/tsne_token_groups_2d_"+str(args.fix_frame)+"_"+class_+".png", dpi=300, bbox_inches='tight')
+            plt.close()
+
+            # 3D plot
+            # tsne = TSNE(n_components=3, perplexity=30, random_state=42)
+            tsne = TSNE(perplexity=30, n_components=3, init='pca', n_iter=2000, random_state=5, verbose=1)
+            tsne_results_3d = tsne.fit_transform(inter_feature_list_sub.detach().cpu().numpy())
+            
+            fig = plt.figure(figsize=(10, 10))
+            ax = fig.add_subplot(111, projection='3d')
+            
+            for i, color_val in enumerate(unique_colors):
+                mask = colors == color_val
+                ax.scatter(tsne_results_3d[mask, 0], tsne_results_3d[mask, 1], tsne_results_3d[mask, 2],
+                        # label=f'Group {i}', alpha=0.6)
+                        color=color_palette[i], label=f'Group {i}', alpha=0.6)
+            
+            # ax.legend(fontsize=14)
+            # ax.set_title("3D t-SNE of Token Groups")
+            # ax.set_xlabel("t-SNE Component 1")
+            # ax.set_ylabel("t-SNE Component 2")
+            # ax.set_zlabel("t-SNE Component 3")
+            plt.savefig(args.generate_in_step4+"/tsne_token_groups_3d_"+str(args.fix_frame)+"_"+class_+".png", dpi=300, bbox_inches='tight')
+            plt.close()
+
+        tsne = TSNE(perplexity=30, n_components=2, init='pca', n_iter=2000, random_state=5, verbose=1) #TSNE(n_components=2, perplexity=30, random_state=42)
+        tsne_results = tsne.fit_transform(inter_feature_list_tsne.detach().cpu().numpy())  # Shape: [700, 2]
+        
+        plt.figure(figsize=(8, 8))
+        plt.scatter(tsne_results[:, 0], tsne_results[:, 1], alpha=0.7)
+        for i in range(0, len(case_list), 10):  # Annotate every 10th point
+            plt.text(tsne_results[i, 0], tsne_results[i, 1], str(i)+", "+case_list[i], fontsize=4, alpha=0.7)
+
+        # plt.xlabel("t-SNE Component 1")
+        # plt.ylabel("t-SNE Component 2")
+        # plt.title("t-SNE Visualization")
+        plt.savefig(args.generate_in_step4+"/tsne_visualization_"+str(args.fix_frame)+"_"+class_+".png", dpi=300, bbox_inches='tight')
+
+        ## Clean TSNE
+        plt.figure(figsize=(8, 8))
+        plt.scatter(tsne_results[:, 0], tsne_results[:, 1], alpha=0.7)
+        # plt.xlabel("t-SNE Component 1")
+        # plt.ylabel("t-SNE Component 2")
+        # plt.title("t-SNE Visualization")
+        plt.savefig(args.generate_in_step4+"/tsne_visualization_"+str(args.fix_frame)+"_"+class_+"_clean.png", dpi=300, bbox_inches='tight')
 
     for i in range(len(case_list))[args.id_index:]:
         case_id = case_list[i]
@@ -306,7 +372,7 @@ if __name__ == '__main__':
         x = sample['image'].to(device)
         label = sample['label'].to(device)
         image_target = filter_class(x, label, random_selected_class)
-        save_nii(image_target, args.generate_in_step4+'/'+str(args.id_index)+'/'+case_id+'_test1_pred_image_top'+str(args.topk)+'_'+class_+'_target.png', thre = 0.0)
+        save_nii(image_target, args.generate_in_step4+'/'+str(args.id_index)+'/'+case_id+'_test1_pred_image_top'+str(args.topk)+'_'+class_+'_target.png', thre = 0.0) #0.02
 
         class_ = 'cls'
         for icl in random_selected_class:
@@ -335,7 +401,7 @@ if __name__ == '__main__':
                     cnts[:,:,i_b*args.fix_frame:(i_b+1)*args.fix_frame,:,:]+=1
         preds_rag = preds_rag/cnts
         # save_tensor_3D(preds, args.generate_in_step4+'/'+str(args.id_index)+'/'+case_id+'_test1_pred_image_top'+class_+'_TokenRAG.png')
-        save_nii(preds_rag, args.generate_in_step4+'/'+str(args.id_index)+'/'+case_id+'_test1_pred_image_top'+str(args.topk)+'_'+class_+'_TokenRAG.png', thre = 0.25)
+        save_nii(preds_rag, args.generate_in_step4+'/'+str(args.id_index)+'/'+case_id+'_test1_pred_image_top'+str(args.topk)+'_'+class_+'_TokenRAG.png', thre = 0.0) #0.02
 
         ## use x_masked_b_all (indices_close) as the retrieval results
         pred_list = []
@@ -346,6 +412,7 @@ if __name__ == '__main__':
 
         indices_close = indices_close ## top5 + self
         indices_large = indices_large[:-1] ## top5
+        indices_close = torch.cat((indices_close, indices_large[1:2]), dim = 0) ## topk + largest one
         for c in indices_close: ## top3
             case_id_c = case_list[c]
             sample = read_slices(args, case_id_c)
@@ -381,17 +448,20 @@ if __name__ == '__main__':
                         cnts[:,:,i_b*args.fix_frame:(i_b+1)*args.fix_frame,:,:]+=1
             preds = preds/cnts
             pred_list.append(preds)
-            label_list.append(case_id_c)
+            # label_list.append(case_id_c)
+            c = str(c.detach().cpu().numpy())
+            label_list.append(c)
             # save_tensor_3D(preds, args.generate_in_step4+'/'+str(args.id_index)+'/'+case_id+'_test1_pred_image_top'+class_+'_'+case_id_c+'.png')
-            save_nii(preds, args.generate_in_step4+'/'+str(args.id_index)+'/'+case_id+'_test1_pred_image_top'+str(args.topk)+'_'+class_+'_'+case_id_c+'.png', thre = 0.25)
+            save_nii(preds, args.generate_in_step4+'/'+str(args.id_index)+'/'+case_id+'_test1_pred_image_top'+str(args.topk)+'_'+class_+'_'+case_id_c+'_'+str(c)+'.png', thre = 0.0) #0.02
             # break
 
         pred_list.append(preds_rag)
         label_list.append("RAG")
+        # label_list.append("")
 
         save_tensor_3D(pred_list, args.generate_in_step4+'/'+str(args.id_index)+'/'+case_id+'_test1_pred_image_top'+str(args.topk)+'_'+class_+'_combined.png', \
-            thre=0.25, label_list=label_list, \
-            is_list=True, print_slice=True)
+            thre=0.0, label_list=label_list, \
+            is_list=True, print_slice=True) #0.02
 
         break
 

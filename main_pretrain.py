@@ -117,6 +117,8 @@ def get_args_parser():
     parser.add_argument('--dataset_type', type=str, default='2D', help='2D, 3D') ## but 3D controlled by training_version -3D
     parser.add_argument('--LA', type=bool, default=False, help='False, True')
 
+    parser.add_argument('--text_encoding', type=str, default="None", help='None or path of text_encoding')
+    parser.add_argument('--checkpoint', default='None', help='resume from checkpoint')
     return parser
 
 
@@ -180,20 +182,49 @@ def main(args):
         data_loader_train = DataLoader(dataset_train, batch_size=args.batch_size, sampler=sampler_train, num_workers=args.num_workers, pin_memory=args.pin_mem,drop_last=True,)
                              #worker_init_fn=worker_init_fn)
     
+    if args.text_encoding != "None":
+        print("args.text_encoding", args.text_encoding, os.path.exists(args.text_encoding))
+
     # define the model
-    if args.num_classes == 1:
-        import models_mae
-        model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
-    else:
-        if args.arch_version.startswith('v0'):
-            import models_mae_token
-            model = models_mae_token.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
-        # elif args.arch_version.startswith('v1'):
-        #     import models_mae_token2
-        #     model = models_mae_token2.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
-        else: ## v1, v2, v3...
-            import OWC2_LIB ## should also include all experiments of OWC2
-            model = OWC2_LIB.__dict__[args.model](img_size=args.input_size, norm_pix_loss=args.norm_pix_loss, model_args=args)
+    # if args.num_classes == 1:
+    #     import models_mae
+    #     model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
+    # else:
+    if args.arch_version.startswith('v0'):
+        if args.dataset_type == '2D':
+            if args.arch_version == 'v0':
+                import models_mae
+                model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
+            elif args.arch_version == 'v01': ## vae
+                import models_vae
+                model = models_vae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
+            elif args.arch_version == 'v011': ## vae cnn
+                import models_vae2
+                model = models_vae2.__dict__[args.model](model_args=args)
+            elif args.arch_version == 'v012': ## vae cnn
+                import models_vae3
+                model = models_vae3.__dict__[args.model](model_args=args)
+            elif args.arch_version == 'v02': ## vqgan
+                import models_vqgan
+                model = models_vqgan.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
+            elif args.arch_version == 'v021': ## vqgan
+                import models_vqgan2
+                model = models_vqgan2.__dict__[args.model](model_args=args)
+        elif args.dataset_type == '3D':
+            import models_mae3D
+            model = models_mae3D.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
+    # elif args.arch_version.startswith('v1'):
+    #     import models_mae_token2
+    #     model = models_mae_token2.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
+    else: ## v1, v2, v3...
+        import OWC2_LIB ## should also include all experiments of OWC2
+        model = OWC2_LIB.__dict__[args.model](img_size=args.input_size, norm_pix_loss=args.norm_pix_loss, model_args=args)
+
+    if args.checkpoint != 'None':
+        # load model
+        checkpoint = torch.load(args.checkpoint, map_location='cpu')
+        msg = model.load_state_dict(checkpoint['model'], strict=False)
+        print(args.checkpoint, "----------------------------------", msg)
 
     model.to(device)
 

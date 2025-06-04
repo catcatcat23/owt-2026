@@ -25,12 +25,6 @@ def sorted_nicely( l ):
     alphanum_key = lambda key: [ convert(c) for c in re.split('([0-9]+)', key) ] 
     return sorted(l, key = alphanum_key)
 
-
-def read_image(path):
-    with open(path, 'rb') as file:
-        img = pickle.load(file)
-        return img
-
 def random_rot_flip(image, label):
     k = np.random.randint(0, 4)
     # image = np.rot90(image, k, axes=(0, 1))
@@ -344,16 +338,13 @@ class RandomGenerator(object):
             label = zoom(label, (self.output_size[0] / x, self.output_size[1] / y, 1.0), order=0)
             image = (image-image.min())/(image.max()-image.min()+0.00000001)
         label_h, label_w, label_d = label.shape
-        # low_res_label = zoom(label, (self.low_res[0] / label_h, self.low_res[1] / label_w, 1.0), order=0)
         
         image = torch.from_numpy(image.astype(np.float32))
         label = torch.from_numpy(label.astype(np.float32))
-        # low_res_label = torch.from_numpy(low_res_label.astype(np.float32))
         image = image.permute(2, 0, 1)
         label = label.permute(2, 0, 1)
-        # low_res_label = low_res_label.permute(2, 0, 1)
         
-        sample = {'image': image, 'label': label.long()}#, 'low_res_label': low_res_label.long()}
+        sample = {'image': image, 'label': label.long()}
         return sample
 
 
@@ -361,140 +352,51 @@ class dataset_reader(Dataset):
     def __init__(self, base_dir, split, num_classes, transform=None, model_args=None):
         self.transform = transform 
         self.split = split
-        
         self.data_dir = base_dir
         self.model_args = model_args
 
-        if split=="train":
-            self.num_classes = num_classes
-            # df = pd.read_csv(base_dir+'/training.csv')
-            df = pd.read_csv(base_dir)
-            # if self.num_classes == 56: ## for TS MR only
-            self.sample_list = [sample_pth for sample_pth in df["image_pth"]]
-            self.masks_list = [sample_pth for sample_pth in df["mask_pth"]]
-            print("len(self.sample_list 2D)", len(self.sample_list))
-            print("self.sample_list[0] 2D", self.sample_list[0])
-
-            ## 3D
-            if self.model_args.dataset_type == "3D" and self.model_args.fix_frame <= 0:
-                self.sample_list = sorted_nicely(list(set(["/".join(i.split('/')[:-1]) for i in self.sample_list])))
-                self.masks_list = sorted_nicely(list(set(["/".join(i.split('/')[:-1]) for i in self.masks_list])))
-                # print("self.sample_list", self.sample_list)
-                print("len(self.sample_list)", len(self.sample_list))
-                print("self.sample_list[0]", self.sample_list[0])
-            elif self.model_args.dataset_type == "3D" and self.model_args.fix_frame > 0:
-                pass
+        self.num_classes = num_classes
+        df = pd.read_csv(base_dir)
+        self.sample_list = [sample_pth for sample_pth in df["image_pth"]]
+        self.masks_list = [sample_pth for sample_pth in df["mask_pth"]]
+        print("len(self.sample_list 2D)", len(self.sample_list))
+        print("self.sample_list[0] 2D", self.sample_list[0])
 
     def __len__(self):
         return len(self.sample_list)
 
     def __getitem__(self, idx):
-        if self.split == "train":
+        if self.model_args.dataset_type == "2D":
+            data = cv2.imread(self.sample_list[idx], cv2.IMREAD_UNCHANGED)
+            data = cv2.cvtColor(data, cv2.COLOR_BGR2RGB)
 
-            if self.model_args.dataset_type == "2D":
-                if self.sample_list[idx].endswith(".pkl"):
-                    data = read_image(self.sample_list[idx])
-                    # print("self.sample_list[idx]", self.sample_list[idx]) # /mnt/weka/wekafs/rad-megtron/cchen/prostateD/2D_all_5slice//0027/ images/2Dimage_0015.pkl
-                elif self.sample_list[idx].endswith(".png") or self.sample_list[idx].endswith(".jpg"):
-                    data = cv2.imread(self.sample_list[idx], cv2.IMREAD_UNCHANGED)
-                    data = cv2.cvtColor(data, cv2.COLOR_BGR2RGB)
-                
-                # if 'synapseCT' in self.sample_list[idx]:
-                # if self.num_classes==12:
-                #     HU_min, HU_max = -200, 250
-                #     data_mean = 50.21997497685108
-                #     data_std = 68.47153712416372
-                #     data = np.clip(data, HU_min, HU_max)
-                #     data = (data-HU_min)/(HU_max-HU_min)*255.0
-                #     data = np.float32(data)
-                #     data = (data - data_mean) / data_std
-                #     # elif 'prostate' in self.sample_list[idx]: 
-                # elif self.num_classes==1: ## only prostate not pancreas 
-                #     data = np.float32(data)
-                # elif self.num_classes==9 or self.num_classes==9: ## only abaltas 
-                #     data = np.float32(data)
-                # elif self.num_classes==56 or self.num_classes==78 or self.num_classes==131:
-                #     data = np.float32(data)
-                # else:
-                #     exit(1)
+            data = np.float32(data)
+            data = (data-data.min())/(data.max()-data.min()+0.00000001)
+            h, w, d = data.shape
 
-                data = np.float32(data)
-                data = (data-data.min())/(data.max()-data.min()+0.00000001)
-                h, w, d = data.shape
-    
-                ## 2d mae
-                if self.sample_list[idx].endswith(".pkl"): ## only pkl 5 slices needs
-                    data = data[:,:,2]
-                    data = np.expand_dims(data, axis=2)
-                    data = np.repeat(data, 3, axis=2)
-                elif self.sample_list[idx].endswith(".png") or self.sample_list[idx].endswith(".jpg"):
-                    pass
-                
-                if self.sample_list[idx].endswith(".pkl"):
-                    mask = read_image(self.masks_list[idx])
-                    ## 2d mae
-                    mask = mask[:,:,2]
-                    mask = np.expand_dims(mask, axis=2)
-                    mask = np.repeat(mask, 3, axis=2)
-                elif self.sample_list[idx].endswith(".png") or self.sample_list[idx].endswith(".jpg"):
-                    mask = cv2.imread(self.masks_list[idx], cv2.IMREAD_UNCHANGED)
-                    mask = cv2.cvtColor(mask, cv2.COLOR_BGR2RGB)
-                
-                if self.num_classes==12:
-                    mask[mask==13] = 12
-    
-                image = np.float32(data)
-                label = np.float32(mask)
+            mask = cv2.imread(self.masks_list[idx], cv2.IMREAD_UNCHANGED)
+            mask = cv2.cvtColor(mask, cv2.COLOR_BGR2RGB)
 
-            elif self.model_args.dataset_type == "3D":
-                if self.model_args.fix_frame <= 0:
-                    data_path = self.sample_list[idx]
-                    # print("data_path", data_path)
-                    samp_list = sorted_nicely([i_s for i_s in os.listdir(data_path) if not i_s.startswith(".")])
-                    # print("len(samp_list)", len(samp_list))
-                    images = [cv2.imread(data_path+"/"+i_i, cv2.IMREAD_GRAYSCALE) for i_i in samp_list]
-                    image = np.stack(images)
-                    # print("image.shape", image.shape)
-                    image = np.transpose(image, (1, 2, 0))
-                    # print("image.shape 2", image.shape)
-                    image = np.float32(image)
-                    image = (image-image.min())/(image.max()-image.min()+0.00000001)
-    
-                    mask_path = self.masks_list[idx]
-                    mask_list = sorted_nicely([i_s for i_s in os.listdir(mask_path) if not i_s.startswith(".")])
-                    masks = [cv2.imread(mask_path+"/"+i_i, cv2.IMREAD_GRAYSCALE) for i_i in mask_list]
-                    mask = np.stack(masks)
-                    mask = np.transpose(mask, (1, 2, 0))
-                    label = np.float32(mask)
-                elif self.model_args.fix_frame > 0:
-                    data_path = self.sample_list[idx]
-                    start_frame = int(data_path.split(".jpg")[0].split("_")[-1])
-                    # print("data_path", data_path)
-                    # print("start_frame", start_frame)
-                    base_data_path = "_".join(data_path.split(".jpg")[0].split("_")[:-1])
-                    # print("base_data_path", base_data_path)
-                    images = [cv2.imread(base_data_path+"_"+str(i_i)+".jpg", cv2.IMREAD_GRAYSCALE) for i_i in range(start_frame, start_frame+self.model_args.fix_frame)]
-                    # images_path = [base_data_path+"_"+str(i_i)+".jpg" for i_i in range(start_frame, start_frame+self.model_args.fix_frame)]
-                    # print("images_path", images_path)
-                    image = np.stack(images)
-                    image = np.transpose(image, (1, 2, 0))
-                    image = np.float32(image)
-                    # print("image.shape", image.shape)
-                    image = (image-image.min())/(image.max()-image.min()+0.00000001)
+            image = np.float32(data)
+            label = np.float32(mask)
 
-                    mask_path = self.masks_list[idx]
-                    # print("mask_path", mask_path)
-                    start_frame = int(mask_path.split(".png")[0].split("_")[-1])
-                    # print("start_frame", start_frame)
-                    base_mask_path = "_".join(mask_path.split(".png")[0].split("_")[:-1])
-                    # print("base_mask_path", base_mask_path)
-                    masks = [cv2.imread(base_mask_path+"_"+str(i_i)+".png", cv2.IMREAD_GRAYSCALE) for i_i in range(start_frame, start_frame+self.model_args.fix_frame)]
-                    # masks_path = [base_mask_path+"_"+str(i_i)+".png" for i_i in range(start_frame, start_frame+self.model_args.fix_frame)]
-                    # print("masks_path", masks_path)
-                    mask = np.stack(masks)
-                    mask = np.transpose(mask, (1, 2, 0))
-                    label = np.float32(mask)
-                    # print("label.shape", label.shape)
+        elif self.model_args.dataset_type == "3D":
+            data_path = self.sample_list[idx]
+            start_frame = int(data_path.split(".jpg")[0].split("_")[-1])
+            base_data_path = "_".join(data_path.split(".jpg")[0].split("_")[:-1])
+            images = [cv2.imread(base_data_path+"_"+str(i_i)+".jpg", cv2.IMREAD_GRAYSCALE) for i_i in range(start_frame, start_frame+self.model_args.fix_frame)]
+            image = np.stack(images)
+            image = np.transpose(image, (1, 2, 0))
+            image = np.float32(image)
+            image = (image-image.min())/(image.max()-image.min()+0.00000001)
+
+            mask_path = self.masks_list[idx]
+            start_frame = int(mask_path.split(".png")[0].split("_")[-1])
+            base_mask_path = "_".join(mask_path.split(".png")[0].split("_")[:-1])
+            masks = [cv2.imread(base_mask_path+"_"+str(i_i)+".png", cv2.IMREAD_GRAYSCALE) for i_i in range(start_frame, start_frame+self.model_args.fix_frame)]
+            mask = np.stack(masks)
+            mask = np.transpose(mask, (1, 2, 0))
+            label = np.float32(mask)
 
         sample = {'image': image, 'label': label}
         
@@ -503,32 +405,14 @@ class dataset_reader(Dataset):
 
         if self.model_args.dataset_type == "3D":
             image = sample['image'].unsqueeze(3)
-            # print("image.shape", image.shape)
             d, h, w, _ = image.shape
             sample['image'] = image.expand(d, h, w, 3)
-            # print("sample['image'].shape 2", sample['image'].shape)
 
             label = sample['label'].unsqueeze(3)
-            # print("label.shape", label.shape)
             sample['label'] = label.expand(d, h, w, 3)   
-            # print("sample['label'].shape 2", sample['label'].shape)     
-            # print("torch.unique(sample['label'])", torch.unique(sample['label']))
 
-            if self.model_args.fix_frame <= 0:
-                if d % 16 != 0:
-                    pad_size = 16 - (d % 16)
-                    pad_tensor = torch.zeros(pad_size, h, w, 3, dtype=sample['image'].dtype)
-                    pad_tensor2 = torch.zeros(pad_size, h, w, 3, dtype=sample['label'].dtype)
-                    sample['image'] = torch.cat((sample['image'], pad_tensor), dim=0)
-                    sample['label'] = torch.cat((sample['label'], pad_tensor2), dim=0)
-            # sample['image'] = rearrange(sample['image'], 'n h w c -> c n h w').contiguous()
-            # sample['label'] = rearrange(sample['label'], 'n h w c -> c n h w').contiguous()
             sample['image'] = sample['image'].permute(3,0,1,2)
             sample['label'] = sample['label'].permute(3,0,1,2)
-            # print("sample['image'].shape 3", sample['image'].shape)
-            # print("sample['label'].shape 3", sample['label'].shape)
-            # print("torch.unique(sample['label'])", torch.unique(sample['label']))
 
         sample['case_name'] = [self.sample_list[idx].strip('\n'), self.masks_list[idx].strip('\n')]
-        # print(sample['case_name'])
         return sample

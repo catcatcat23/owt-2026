@@ -1,6 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 # --------------------------------------------------------
@@ -139,7 +136,6 @@ def main(args):
     cudnn.benchmark = True
 
     if args.num_classes == 1:
-        # simple augmentation
         transform_train = transforms.Compose([
                 transforms.RandomResizedCrop(args.input_size, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
                 transforms.RandomHorizontalFlip(),
@@ -177,48 +173,25 @@ def main(args):
             drop_last=True,
         )
     else:
-        # def worker_init_fn(worker_id):
-        #     random.seed(args.seed + worker_id)
         data_loader_train = DataLoader(dataset_train, batch_size=args.batch_size, sampler=sampler_train, num_workers=args.num_workers, pin_memory=args.pin_mem,drop_last=True,)
-                             #worker_init_fn=worker_init_fn)
     
     if args.text_encoding != "None":
         print("args.text_encoding", args.text_encoding, os.path.exists(args.text_encoding))
 
-    # define the model
-    # if args.num_classes == 1:
-    #     import models_mae
-    #     model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
-    # else:
     if args.arch_version.startswith('v0'):
         if args.dataset_type == '2D':
-            if args.arch_version == 'v0':
+            if args.arch_version == 'v0': ## mae
                 import models_mae
                 model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
             elif args.arch_version == 'v01': ## vae
                 import models_vae
-                model = models_vae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
-            elif args.arch_version == 'v011': ## vae cnn
-                import models_vae2
-                model = models_vae2.__dict__[args.model](model_args=args)
-            elif args.arch_version == 'v012': ## vae cnn
-                import models_vae3
-                model = models_vae3.__dict__[args.model](model_args=args)
-            elif args.arch_version == 'v02': ## vqgan
-                import models_vqgan
-                model = models_vqgan.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
-            elif args.arch_version == 'v021': ## vqgan
-                import models_vqgan2
-                model = models_vqgan2.__dict__[args.model](model_args=args)
+                model = models_vae.__dict__[args.model](model_args=args)
         elif args.dataset_type == '3D':
             import models_mae3D
             model = models_mae3D.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
-    # elif args.arch_version.startswith('v1'):
-    #     import models_mae_token2
-    #     model = models_mae_token2.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
     else: ## v1, v2, v3...
-        import OWC2_LIB ## should also include all experiments of OWC2
-        model = OWC2_LIB.__dict__[args.model](img_size=args.input_size, norm_pix_loss=args.norm_pix_loss, model_args=args)
+        import OWT_models ## OWT
+        model = OWT_models.__dict__[args.model](img_size=args.input_size, norm_pix_loss=args.norm_pix_loss, model_args=args)
 
     if args.checkpoint != 'None':
         # load model
@@ -290,30 +263,24 @@ if __name__ == '__main__':
 
     args.num_classes_with_bg = args.num_classes + 1
     args.organ_token_total = 1*args.token_factor*1 + args.token_factor*args.num_classes ## 20+180 = 200
-    # args.organ_token_selet = args.token_factor*int(args.num_classes_with_bg*args.mask_ratio) #len(random_selected_class) ## 100
 
-    # args.if_vq = False
     args.vq_version = None
     args.lib_version = None
-    if '-VQ' in args.arch_version:
-        # args.if_vq = True
-        args.vq_version = args.arch_version.split('-VQ')[1].split('_nt')[0].split('-')[0]
-        args.vq_n_token = int(args.arch_version.split('-VQ')[1].split('_nt')[1].split('-')[0])
-        if '-LIB' in args.arch_version:
-            args.lib_version = args.arch_version.split('-LIB')[1].split('-')[0]
+    # if '-VQ' in args.arch_version:
+    #     args.vq_version = args.arch_version.split('-VQ')[1].split('_nt')[0].split('-')[0]
+    #     args.vq_n_token = int(args.arch_version.split('-VQ')[1].split('_nt')[1].split('-')[0])
+    #     if '-LIB' in args.arch_version:
+    #         args.lib_version = args.arch_version.split('-LIB')[1].split('-')[0]
 
-    # args.if_disetg = False
     args.disetg_version = None
-    if '-DT' in args.arch_version:
-        # args.if_disetg = True
-        args.disetg_version = args.arch_version.split('-DT')[1].split('-')[0]
+    # if '-DT' in args.arch_version:
+    #     args.disetg_version = args.arch_version.split('-DT')[1].split('-')[0]
 
     args.cls_num = 1
-    if '-cls' in args.arch_version:
-        args.cls_num = int(args.arch_version.split('-cls')[1].split('-')[0])
+    # if '-cls' in args.arch_version:
+    #     args.cls_num = int(args.arch_version.split('-cls')[1].split('-')[0])
 
-    args.arch_version = args.arch_version.split('-')[0]
-
+    # args.arch_version = args.arch_version.split('-')[0]
     args.loss_version = args.loss_version.split('-') ## loss_dict
 
     args.fix_frame = 0

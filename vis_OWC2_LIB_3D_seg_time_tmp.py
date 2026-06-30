@@ -14,40 +14,49 @@ import pickle
 from scipy.ndimage import zoom
 
 sys.path.append('..')
-import OWT_models
+import OWC2_LIB
 import re
 from einops import rearrange
 
-from skimage.metrics import structural_similarity as ssim
-from skimage.metrics import peak_signal_noise_ratio as psnr
-import torch.nn.functional as F
-from scipy import linalg
-from torchvision.models import inception_v3
-from torch.nn.functional import adaptive_avg_pool2d
-
-def calculate_3d_ssim(img1, img2):
-    if not isinstance(img1, np.ndarray):
-        img1 = img1.cpu().numpy()
-    if not isinstance(img2, np.ndarray):
-        img2 = img2.cpu().numpy()
-        
-    window_size = min(33, img1.shape[-1]//2)
-    if window_size % 2 == 0:
-        window_size -= 1
-        
-    result = ssim(img1, img2, 
-               data_range=img1.max() - img1.min(),
-               win_size=window_size,
-               channel_axis=0)
-               
-    if np.isnan(result):
-        return 0.0
-    return result
+from skimage import measure
+from skimage.morphology import remove_small_objects, ball, binary_opening, remove_small_holes, binary_closing
+import surface_distance
+import nibabel as nib
 
 def sorted_nicely( l ): 
     convert = lambda text: int(text) if text.isdigit() else text 
     alphanum_key = lambda key: [ convert(c) for c in re.split('([0-9]+)', key) ] 
     return sorted(l, key = alphanum_key)
+
+def dice_score(prediction, ground_truth):
+    assert prediction.shape == ground_truth.shape, "Volumes must have the same shape."
+
+    prediction = prediction.astype(bool)
+    ground_truth = ground_truth.astype(bool)
+
+    intersection = np.logical_and(prediction, ground_truth).sum()
+    size_pred = prediction.sum()
+    size_gt = ground_truth.sum()
+
+    if size_pred + size_gt == 0:
+        return 1.0
+
+    dice = 2.0 * intersection / (size_pred + size_gt)
+    return dice
+
+def calculate_nsd(pred, gt, spacing=(1.5, 1.5, 1.5), tolerance=1.5):
+    pred = (pred > 0).astype(bool)
+    gt = (gt > 0).astype(bool)
+    
+    if not np.any(pred) and not np.any(gt):
+        return 1.0 #, 0.0
+    elif not np.any(pred) or not np.any(gt):
+        return 0.0 #, 0.0
+        
+    surface_distances = surface_distance.compute_surface_distances(gt, pred, spacing)
+    nsd = surface_distance.compute_surface_dice_at_tolerance(surface_distances, tolerance)
+
+    return nsd
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
@@ -122,61 +131,84 @@ def get_args_parser():
     parser.add_argument('--load_csv_type', type=str, default='train')
     parser.add_argument('--save_video', type=int, default=0, help='0=False, 1=True')
     parser.add_argument('--thre', type=float, default=0.1, help='0.1')
-    parser.add_argument('--id_index', type=int, default=0, help='id_index')
 
     parser.add_argument('--text_encoding', type=str, default="None", help='None or path of text_encoding')
 
     return parser
 
 def prepare_model(chkpt_dir, arch, args=None, img_size=None):
-    import OWT_models
-    model = OWT_models.__dict__[args.model](img_size=args.input_size, norm_pix_loss=args.norm_pix_loss, model_args=args)
+    model = OWT_models.__dict__[arch](img_size=img_size, norm_pix_loss=args.norm_pix_loss, model_args=args)
     checkpoint = torch.load(chkpt_dir, map_location='cpu')
     msg = model.load_state_dict(checkpoint['model'], strict=True)
     print(msg)
     return model
 
-def filter_class(img, label, selected_classes):
+def filter_class(img, labels, selected_classes):
     image_target = img.clone()
     for ms in selected_classes:
-        image_target[label==ms] = 0
+        image_target[labels==ms] = 0
     return image_target
 
-def save_tensor_3D(x, save_name, mask = False, norm=False, save_video = 1):
-    x_np = x.squeeze().permute(1, 2, 3, 0).detach().cpu().numpy()
+def save_tensor_3D(x, save_name, mask = False, norm=False, save_nii=False):
+    # Convert to numpy and permute dimensions
+    x_np = x.squeeze().permute(1, 2, 3, 0).detach().cpu().numpy() ## (fr,w,h,c)
+    
+    # Process for video saving
+    x_video = x_np.copy()
     if mask == False:
         if norm == True:
-            x_np = (x_np - x_np.min()) / (x_np.max() - x_np.min() + 1e-8)
-        x_np = (x_np * 255).astype(np.uint8)
+            x_video = (x_video - x_video.min()) / (x_video.max() - x_video.min() + 1e-8)
+        x_video = (x_video * 255).astype(np.uint8)
     else:
-        x_np = (x_np * 20).astype(np.uint8)
+        x_video = (x_video * 20).astype(np.uint8) ## only for 9 labels
 
-    if save_video == 2:
-        for i in range(x_np.shape[0]):
-            cv2.imwrite(save_name+"_"+str(i)+".png", cv2.cvtColor(x_np[i,:,:,:], cv2.COLOR_RGB2BGR))
+    # Save as video
+    x_frames = [x_video[i,:,:,:] for i in range(x_video.shape[0])]
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
+    out = cv2.VideoWriter(save_name+".mp4", fourcc, 20.0, (224, 224))
+    for img in x_frames:
+        out.write(img)
+    out.release()
+    
+    if save_nii:
+        # Save as nii.gz
+        # import nibabel as nib
+        x_nii = x_np.copy()
+        if norm:
+            x_nii = (x_nii - x_nii.min()) / (x_nii.max() - x_nii.min() + 1e-8)
+        nii_img = nib.Nifti1Image(x_nii, np.eye(4))
+        nib.save(nii_img, save_name + '.nii.gz')
 
-    x_np = [x_np[i,:,:,:] for i in range(x_np.shape[0])]
+def save_tensor_3D_np(x, save_name, mask = False, norm=False, save_nii=False):
+    x_video = (x * 255).astype(np.uint8)
+    x_video = np.expand_dims(x_video, axis=3)
+    h,w,d,_ = x_video.shape
+    x_video = np.broadcast_to(x_video, (h, w, d, 3))
+    x_np = [x_video[:,:,i,:] for i in range(x_video.shape[2])]
     fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
     out = cv2.VideoWriter(save_name+".mp4", fourcc, 20.0, (224, 224))
     for img in x_np:
         out.write(img)
     out.release()
+    
+    if save_nii:
+        x_nii = x.copy()
+        if norm:
+            x_nii = (x_nii - x_nii.min()) / (x_nii.max() - x_nii.min() + 1e-8)
+        nii_img = nib.Nifti1Image(x_nii, np.eye(4))
+        nib.save(nii_img, save_name + '.nii.gz')
 
 def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
     random_selected_class = args.select_cls
     sample1 = input_img[0]
     x = sample1['image'].to(device)
-    label = sample1['label'].to(device)
+    labels = sample1['label'].to(device)
 
-    image_target = filter_class(x, label, random_selected_class)
+    image_target = filter_class(x, labels, random_selected_class)
+
     class_ = 'cls'
     for icl in random_selected_class:
         class_ += str(icl)
-
-    if args.save_video == 1 or args.save_video == 2:
-        save_tensor_3D(x, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_image_'+class_+'_'+str(args.reverse), save_video = args.save_video)
-        save_tensor_3D(label, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_label_'+class_+'_'+str(args.reverse), mask = True, save_video = args.save_video)
-        save_tensor_3D(image_target, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_image_target_'+class_+'_'+str(args.reverse), save_video = args.save_video)
 
     preds = torch.zeros(x.shape).to(device)
     cnts = torch.zeros(x.shape).to(device)
@@ -187,113 +219,103 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
         aligned_text_features = aligned_text_features.unsqueeze(0).expand(1, -1, -1).float()
 
     n_inter=0
+    total_time = 0.0
     if args.dataset_type == '3D':
         for fr in range(0, x.shape[2]-args.fix_frame+1):
             x_ = x[:,:,fr:fr+args.fix_frame,:,:]
+            
             with torch.no_grad():
                 middle1 = {"image_target": image_target[:,:,fr:fr+args.fix_frame,:,:], "random_selected_class": random_selected_class}
                 if args.text_encoding != "None":
                     middle1["text_features"] = aligned_text_features
+                
+                start_time = torch.cuda.Event(enable_timing=True)
+                end_time = torch.cuda.Event(enable_timing=True)
+                
+                start_time.record()
                 x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
                 pred1 = model.forward_decoder(x_restored, cls_tokens, middle_output)
                 if args.arch_version.startswith('v1'):
                     pred1 = model.unpatchify3D(pred1)
+                end_time.record()
+                
+                torch.cuda.synchronize()
+                elapsed_time = start_time.elapsed_time(end_time) / 1000.0  # Convert to seconds
+                total_time += elapsed_time
+                
                 preds[:,:,fr:fr+args.fix_frame,:,:]+=pred1
                 cnts[:,:,fr:fr+args.fix_frame,:,:]+=1
                 n_inter+=1
     elif args.dataset_type == '2D':
         for fr in range(0, x.shape[2]):
             x_ = x[:,:,fr,:,:]
+            
             with torch.no_grad():
                 middle1 = {"image_target": image_target[:,:,fr,:,:], "random_selected_class": random_selected_class}
                 if args.text_encoding != "None":
                     middle1["text_features"] = aligned_text_features
+                
+                start_time = torch.cuda.Event(enable_timing=True)
+                end_time = torch.cuda.Event(enable_timing=True)
+                
+                start_time.record()
                 x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
                 pred1 = model.forward_decoder(x_restored, cls_tokens, middle_output)
                 if args.arch_version.startswith('v1'):
                     pred1 = model.unpatchify(pred1)
+                end_time.record()
+                
+                torch.cuda.synchronize()
+                elapsed_time = start_time.elapsed_time(end_time) / 1000.0  # Convert to seconds
+                total_time += elapsed_time
+                
                 preds[:,:,fr,:,:]+=pred1
                 cnts[:,:,fr,:,:]+=1
                 n_inter+=1
+    
+    # Calculate average time per sample (divided by batch size)
+    batch_size = x.shape[0]
+    avg_time_per_sample = total_time / (n_inter * batch_size)
+    print(f"Average processing time per sample: {avg_time_per_sample:.4f} seconds")
 
     preds = preds/cnts
-    preds[preds < 0] = 0
 
-    preds_thresholded = preds.clone()
-    preds_thresholded[preds_thresholded < args.thre] = 0
-    image_target_thresholded = image_target.clone()
-    image_target_thresholded[image_target_thresholded < args.thre] = 0
-    
-    if args.save_video == 1 or args.save_video == 2:
-        save_tensor_3D(preds, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_pred_image_'+class_+'_'+str(args.reverse)+'.png', save_video = args.save_video)
-        save_tensor_3D(preds_thresholded, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_pred_image_thresholded_'+str(args.thre)+'_'+class_+'_'+str(args.reverse)+'.png', save_video = args.save_video)
-        save_tensor_3D(image_target_thresholded, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_image_target_thresholded_'+str(args.thre)+'_'+class_+'_'+str(args.reverse)+'.png', save_video = args.save_video)
+    if 0 in args.select_cls:
+        image_target = image_target
+        preds = preds
+    else:
+        if args.select_cls == []:
+            image_target = image_target
+            preds = preds
+        else:
+            image_target = x-image_target
+            preds = x-preds
+            preds[preds < 0] = 0
 
-    metrics = {}
-    
-    loss_l2 = (preds - image_target) ** 2
-    loss_l2 = loss_l2.mean()
+    x = x.squeeze().permute(2, 3, 1, 0).detach().cpu().numpy()
+    image_target = image_target.squeeze().permute(2, 3, 1, 0).detach().cpu().numpy()
+    preds = preds.squeeze().permute(2, 3, 1, 0).detach().cpu().numpy()
 
-    loss_l1 = (preds - image_target)
-    loss_l1 = loss_l1.detach().cpu().numpy()
-    loss_l1 = np.abs(loss_l1)
+    seg_label = np.mean(image_target, axis=3)
+    seg_preds = np.mean(preds, axis=3)
+    seg_label = (seg_label>args.thre)*1.0
+    seg_preds = (seg_preds>args.thre)*1.0
 
-    p_loss = 0
-    loss_count = 0
-    for i_sl in range(image_target.shape[2]):
-        image_target_i = image_target[:,:,i_sl,:,:]
-        pred_i = preds[:,:,i_sl,:,:]
-        p_loss = p_loss + torch.mean(perceptual_loss(image_target_i.contiguous(), pred_i.contiguous()))
-        loss_count+=1
-    loss_lpips = p_loss/loss_count
+    min_size = 100
+    labeled_image = measure.label(seg_preds, connectivity=1)
+    cleaned_image = remove_small_objects(labeled_image, min_size=min_size)
+    binary_cleaned_image = cleaned_image > 0
+    struct_element = ball(1)
+    seg_preds = binary_opening(binary_cleaned_image, struct_element)
 
-    ssim_scores = []
-    for i in range(preds.shape[2]):
-        pred_slice = preds[0,:,i,:,:].detach().cpu().numpy()
-        target_slice = image_target[0,:,i,:,:].detach().cpu().numpy()
-        ssim_val = ssim(target_slice, pred_slice, data_range=1.0, channel_axis=0)
-        ssim_scores.append(ssim_val)
+    dice = dice_score(seg_preds, seg_label)
+    nsd_value = calculate_nsd(seg_preds, seg_label)
 
-    ssim_3d = calculate_3d_ssim(preds[0].detach(), image_target[0].detach())
+    if args.save_video == 1:
+        save_tensor_3D_np(seg_label, args.output_vis+'/seg_results/'+args.load_csv_type+'/'+case_id+'_seg_label_'+class_+'_'+str(args.thre)+'_'+str(args.reverse)+'.png')
+        save_tensor_3D_np(seg_preds, args.output_vis+'/seg_results/'+args.load_csv_type+'/'+case_id+'_seg_preds_'+class_+'_'+str(args.thre)+'_'+str(args.reverse)+'.png')
 
-    metrics['original'] = {
-        'loss_l1': loss_l1.mean(),
-        'loss_l2': loss_l2.detach().cpu().numpy(),
-        'loss_lpips': loss_lpips.detach().cpu().numpy(),
-        'ssim_avg': np.mean(ssim_scores),
-        'ssim_3d': ssim_3d
-    }
-
-    loss_l2_thresh = (preds_thresholded - image_target_thresholded) ** 2
-    loss_l2_thresh = loss_l2_thresh.mean()
-
-    loss_l1_thresh = np.abs((preds_thresholded - image_target_thresholded).detach().cpu().numpy())
-
-    p_loss_thresh = 0
-    for i_sl in range(image_target_thresholded.shape[2]):
-        image_target_i = image_target_thresholded[:,:,i_sl,:,:]
-        pred_i = preds_thresholded[:,:,i_sl,:,:]
-        p_loss_thresh = p_loss_thresh + torch.mean(perceptual_loss(image_target_i.contiguous(), pred_i.contiguous()))
-    loss_lpips_thresh = p_loss_thresh/loss_count
-
-    ssim_scores_thresh = []
-    for i in range(preds_thresholded.shape[2]):
-        pred_slice = preds_thresholded[0,:,i,:,:].detach().cpu().numpy()
-        target_slice = image_target_thresholded[0,:,i,:,:].detach().cpu().numpy()
-        ssim_val = ssim(target_slice, pred_slice, data_range=1.0, channel_axis=0)
-        ssim_scores_thresh.append(ssim_val)
-
-    ssim_3d_thresh = calculate_3d_ssim(preds_thresholded[0].detach(), image_target_thresholded[0].detach())
-
-    metrics['thresholded'] = {
-        'loss_l1': loss_l1_thresh.mean(),
-        'loss_l2': loss_l2_thresh.detach().cpu().numpy(),
-        'loss_lpips': loss_lpips_thresh.detach().cpu().numpy(),
-        'ssim_avg': np.mean(ssim_scores_thresh),
-        'ssim_3d': ssim_3d_thresh
-    }
-
-    return metrics
+    return dice, nsd_value
 
 if __name__ == '__main__':
     args = get_args_parser()
@@ -326,6 +348,7 @@ if __name__ == '__main__':
 
     os.makedirs(args.output_vis+'/masked_results/'+args.load_csv_type, exist_ok=True)
     os.makedirs(args.output_vis+'/inter_features/'+args.load_csv_type, exist_ok=True)
+    os.makedirs(args.output_vis+'/seg_results/'+args.load_csv_type, exist_ok=True)
 
     chkpt_dir = args.checkpoint
     model_mae = prepare_model(chkpt_dir, args.model, args, img_size=args.input_size)
@@ -344,12 +367,10 @@ if __name__ == '__main__':
 
     img_list = sorted_nicely([i for i in os.listdir(args.load_data_vis_path) if not i.startswith(".")])
 
-    metrics_list = []
+    dice_list, nsd_list = [], []
 
     print("args.save_video", args.save_video)
     print("args.select_cls", args.select_cls)
-
-    break_id = 0
 
     for img in img_list:
         data_path = args.load_data_vis_path+'/'+img
@@ -363,19 +384,19 @@ if __name__ == '__main__':
         mask_list = sorted_nicely([i_s for i_s in os.listdir(mask_path) if not i_s.startswith(".")])
         masks = [cv2.imread(mask_path+"/"+i_i, cv2.IMREAD_GRAYSCALE) for i_i in mask_list]
         mask = np.stack(masks)
-        label = np.float32(mask)
+        labels = np.float32(mask)
     
         image = torch.tensor(image)
-        label = torch.tensor(label)
+        labels = torch.tensor(labels)
     
-        sample = {'image': image, 'label': label}
+        sample = {'image': image, 'label': labels}
     
         image = sample['image'].unsqueeze(3)
         d, h, w, _ = image.shape
         sample['image'] = image.expand(d, h, w, 3)
     
-        label = sample['label'].unsqueeze(3)
-        sample['label'] = label.expand(d, h, w, 3)   
+        labels = sample['label'].unsqueeze(3)
+        sample['label'] = labels.expand(d, h, w, 3)   
     
         sample['image'] = sample['image'].permute(3,0,1,2)
         sample['label'] = sample['label'].permute(3,0,1,2)
@@ -386,23 +407,10 @@ if __name__ == '__main__':
         input_img=[]
         input_img.append(sample)
     
-        metrics = gen_one_image(input_img, model_mae, case_id=img, perceptual_loss=perceptual_loss)
-        metrics_list.append(metrics)
+        dice, nsd_value = gen_one_image(input_img, model_mae, case_id=img, perceptual_loss=perceptual_loss)
 
-        break_id +=1
-        if break_id == args.id_index:
-            break
+        dice_list.append(dice)
+        nsd_list.append(nsd_value)
 
-    print("\nOriginal Predictions Metrics:")
-    print("Average L1 Loss:", np.mean([m['original']['loss_l1'] for m in metrics_list]))
-    print("Average L2 Loss:", np.mean([m['original']['loss_l2'] for m in metrics_list]))
-    print("Average LPIPS Loss:", np.mean([m['original']['loss_lpips'] for m in metrics_list]))
-    print("Average SSIM:", np.mean([m['original']['ssim_avg'] for m in metrics_list]))
-    print("Average 3D SSIM:", np.mean([m['original']['ssim_3d'] for m in metrics_list]))
-
-    print("\nThresholded Predictions Metrics:")
-    print("Average L1 Loss:", np.mean([m['thresholded']['loss_l1'] for m in metrics_list]))
-    print("Average L2 Loss:", np.mean([m['thresholded']['loss_l2'] for m in metrics_list]))
-    print("Average LPIPS Loss:", np.mean([m['thresholded']['loss_lpips'] for m in metrics_list]))
-    print("Average SSIM:", np.mean([m['thresholded']['ssim_avg'] for m in metrics_list]))
-    print("Average 3D SSIM:", np.mean([m['thresholded']['ssim_3d'] for m in metrics_list]))
+    print("dice_list", np.mean(dice_list))
+    print("nsd_list", np.mean(nsd_list))

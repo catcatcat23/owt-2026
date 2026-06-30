@@ -15,9 +15,9 @@ from pathlib import Path
 
 import torch
 import torch.distributed as dist
-# from torch._six import inf ## only for SLURM
+from torch._six import inf ## only for SLURM
 # ~~from torch._six import inf~~
-from torch import inf ## only for H100 mae and mae2
+# from torch import inf ## only for H100 mae and mae2
 
 
 class SmoothedValue(object):

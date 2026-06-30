@@ -71,8 +71,8 @@ def train_one_epoch(model: torch.nn.Module,
                 for ms in random_selected_class:
                     image_target[label==ms] = 0
 
-        with torch.amp.autocast('cuda'): ## only for H100
-            # with torch.cuda.amp.autocast(): ## only for A100
+        # with torch.amp.autocast('cuda'): ## only for H100
+        with torch.cuda.amp.autocast(): ## only for A100
             if args.arch_version.startswith('v0'):
                 loss, pred, middle_output = model(samples, mask_ratio=args.mask_ratio)
             else:

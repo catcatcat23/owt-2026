@@ -26,7 +26,7 @@ import random
 import timm
 
 # assert timm.__version__ == "0.3.2"  # version check
-# assert timm.__version__ == "0.3.2"  # version check # comment for H100
+assert timm.__version__ == "0.3.2"  # version check # comment for H100
 import timm.optim.optim_factory as optim_factory
 
 import util.misc as misc
@@ -263,24 +263,7 @@ if __name__ == '__main__':
 
     args.num_classes_with_bg = args.num_classes + 1
     args.organ_token_total = 1*args.token_factor*1 + args.token_factor*args.num_classes ## 20+180 = 200
-
-    args.vq_version = None
-    args.lib_version = None
-    # if '-VQ' in args.arch_version:
-    #     args.vq_version = args.arch_version.split('-VQ')[1].split('_nt')[0].split('-')[0]
-    #     args.vq_n_token = int(args.arch_version.split('-VQ')[1].split('_nt')[1].split('-')[0])
-    #     if '-LIB' in args.arch_version:
-    #         args.lib_version = args.arch_version.split('-LIB')[1].split('-')[0]
-
-    args.disetg_version = None
-    # if '-DT' in args.arch_version:
-    #     args.disetg_version = args.arch_version.split('-DT')[1].split('-')[0]
-
     args.cls_num = 1
-    # if '-cls' in args.arch_version:
-    #     args.cls_num = int(args.arch_version.split('-cls')[1].split('-')[0])
-
-    # args.arch_version = args.arch_version.split('-')[0]
     args.loss_version = args.loss_version.split('-') ## loss_dict
 
     args.fix_frame = 0

@@ -14,7 +14,7 @@ import pickle
 from scipy.ndimage import zoom
 
 # sys.path.append('..')
-import OWC2_LIB #models_mae_token2
+import OWT_models
 import re
 from einops import rearrange
 
@@ -52,9 +52,8 @@ def load_mp4_as_numpy_array(file_path):
     return video_array
 
 def prepare_model(chkpt_dir, arch, args=None, img_size=None):
-    # build model
-    model = OWC2_LIB.__dict__[arch](img_size=img_size, norm_pix_loss=args.norm_pix_loss, model_args=args)
-    # load model
+    import OWT_models
+    model = OWT_models.__dict__[args.model](img_size=args.input_size, norm_pix_loss=args.norm_pix_loss, model_args=args)
     checkpoint = torch.load(chkpt_dir, map_location='cpu')
     msg = model.load_state_dict(checkpoint['model'], strict=True)
     print(msg)

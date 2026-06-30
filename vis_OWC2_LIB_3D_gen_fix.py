@@ -14,7 +14,7 @@ import pickle
 from scipy.ndimage import zoom
 
 sys.path.append('..')
-import OWC2_LIB #models_mae_token2
+import OWT_models
 import re
 from einops import rearrange
 
@@ -107,7 +107,7 @@ def get_args_parser():
 
 def prepare_model(chkpt_dir, arch, args=None, img_size=None):
     # build model
-    model = OWC2_LIB.__dict__[arch](img_size=img_size, norm_pix_loss=args.norm_pix_loss, model_args=args)
+    model = OWT_models.__dict__[arch](img_size=img_size, norm_pix_loss=args.norm_pix_loss, model_args=args)
     # load model
     checkpoint = torch.load(chkpt_dir, map_location='cpu')
     msg = model.load_state_dict(checkpoint['model'], strict=True)
@@ -120,16 +120,6 @@ def filter_class(img, label, selected_classes):
         image_target[label==ms] = 0
     return image_target
 
-def save_tensor(x, save_name, mask = False, norm=False):
-    x_np = x.squeeze().permute(1, 2, 0).detach().cpu().numpy()
-    if mask == False:
-        if norm == True:
-            x_np = (x_np - x_np.min()) / (x_np.max() - x_np.min() + 1e-8)
-        x_np = (x_np * 255).astype(np.uint8)
-    else:
-        x_np = (x_np * 20).astype(np.uint8) ## only for 9 labels
-    cv2.imwrite(save_name, cv2.cvtColor(x_np, cv2.COLOR_RGB2BGR))
-
 def save_tensor_3D(x, save_name, mask = False, norm=False):
     x_np = x.squeeze().permute(1, 2, 3, 0).detach().cpu().numpy() ## (fr,w,h,c)
     if mask == False:
@@ -137,9 +127,7 @@ def save_tensor_3D(x, save_name, mask = False, norm=False):
             x_np = (x_np - x_np.min()) / (x_np.max() - x_np.min() + 1e-8)
         x_np = (x_np * 255).astype(np.uint8)
     else:
-        x_np = (x_np * 20).astype(np.uint8) ## only for 9 labels
-    # for i in range(x_np.shape[0]):
-    #     cv2.imwrite(save_name+"_"+str(i)+".png", cv2.cvtColor(x_np[i,:,:,:], cv2.COLOR_RGB2BGR))
+        x_np = (x_np * 20).astype(np.uint8)
 
     x_np = [x_np[i,:,:,:] for i in range(x_np.shape[0])]
     fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
@@ -160,7 +148,6 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
     class_ = 'cls'
     for icl in random_selected_class:
         class_ += str(icl)
-    # print("class_", class_)
     if args.save_video == 1:
         save_tensor_3D(x, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_image_'+class_+'_'+str(args.reverse))
         save_tensor_3D(label, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_label_'+class_+'_'+str(args.reverse), mask = True)
@@ -169,27 +156,23 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
     preds = torch.zeros(x.shape).to(device)
     cnts = torch.zeros(x.shape).to(device)
     inter_feature = torch.zeros((int(112/args.fix_frame), int(args.token_factor*args.num_classes_with_bg), 768)).to(device)
-    inter_feature_2 = torch.zeros((int(112/args.fix_frame), int(args.token_factor*args.num_classes_with_bg), 768)).to(device)
 
     n_inter=0
     for fr in range(0, x.shape[2]-args.fix_frame+1, args.fix_frame):
         x_ = x[:,:,fr:fr+args.fix_frame,:,:]
         
         with torch.no_grad():
-            if args.training_version.startswith('v0'):
-                middle1 = {"image_target": image_target[:,:,fr:fr+args.fix_frame,:,:], "random_selected_class": random_selected_class}
-                x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
-                pred1 = model.forward_decoder(x_restored, cls_tokens, middle_output)
-                if args.arch_version.startswith('v1'):
-                    pred1 = model.unpatchify3D(pred1)
-                preds[:,:,fr:fr+args.fix_frame,:,:]+=pred1
-                cnts[:,:,fr:fr+args.fix_frame,:,:]+=1
+            middle1 = {"image_target": image_target[:,:,fr:fr+args.fix_frame,:,:], "random_selected_class": random_selected_class}
+            x_restored, cls_tokens, middle_output = model.forward_encoder(x_, mask_ratio=args.mask_ratio, middle=middle1)
+            pred1 = model.forward_decoder(x_restored, cls_tokens, middle_output)
+            if args.arch_version.startswith('v1'):
+                pred1 = model.unpatchify3D(pred1)
+            preds[:,:,fr:fr+args.fix_frame,:,:]+=pred1
+            cnts[:,:,fr:fr+args.fix_frame,:,:]+=1
 
-                if args.select_cls == []:
-                    inter_feature[n_inter:n_inter+1,:,:] = middle_output['x_masked_b'] #x_restored
-                    inter_feature_2[n_inter:n_inter+1,:,:] = x_restored #x_restored
-                # print("middle_output['x_masked_b']", middle_output['x_masked_b'].shape)
-                n_inter+=1
+            if args.select_cls == []:
+                inter_feature[n_inter:n_inter+1,:,:] = middle_output['x_masked_b'] #x_restored
+            n_inter+=1
 
     preds = preds/cnts
     if args.save_video == 1:
@@ -197,10 +180,8 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
 
     if args.select_cls == []:
         inter_feature = inter_feature.detach().cpu().numpy()
-        inter_feature_2 = inter_feature_2.detach().cpu().numpy()
         if args.save_video == 1:
             np.save(args.output_vis+'/inter_features/'+args.load_csv_type+'/'+case_id+'.npy', inter_feature)
-            np.save(args.output_vis+'/inter_features/'+args.load_csv_type+'/'+case_id+'_2.npy', inter_feature_2)
 
     loss_l2 = (preds - image_target) ** 2
     loss_l2 = loss_l2.mean()
@@ -227,32 +208,13 @@ if __name__ == '__main__':
     args = args.parse_args()
 
     args.num_classes_with_bg = args.num_classes + 1
-    args.organ_token_total = 1*args.token_factor*1 + args.token_factor*args.num_classes ## 20+180 = 200
-    args.organ_token_selet = args.token_factor*int(args.num_classes_with_bg*args.mask_ratio) #len(random_selected_class) ## 100
+    args.organ_token_total = 1*args.token_factor*1 + args.token_factor*args.num_classes
+    args.organ_token_selet = args.token_factor*int(args.num_classes_with_bg*args.mask_ratio)
 
-    args.select_cls = [int(i) for i in args.select_cls.split(',') if i != ''] ## masked in image1, i.e., keep in image2
+    args.select_cls = [int(i) for i in args.select_cls.split(',') if i != '']
     print("args.select_cls", args.select_cls)
 
-    # args.if_vq = False
-    args.vq_version = None
-    args.lib_version = None
-    if '-VQ' in args.arch_version:
-        # args.if_vq = True
-        args.vq_version = args.arch_version.split('-VQ')[1].split('_nt')[0].split('-')[0]
-        args.vq_n_token = int(args.arch_version.split('-VQ')[1].split('_nt')[1].split('-')[0])
-        if '-LIB' in args.arch_version:
-            args.lib_version = args.arch_version.split('-LIB')[1].split('-')[0]
-
-    # args.if_disetg = False
-    args.disetg_version = None
-    if '-DT' in args.arch_version:
-        # args.if_disetg = True
-        args.disetg_version = args.arch_version.split('-DT')[1].split('-')[0]
-
     args.cls_num = 1
-    if '-cls' in args.arch_version:
-        args.cls_num = int(args.arch_version.split('-cls')[1].split('-')[0])
-
     args.arch_version = args.arch_version.split('-')[0]
 
     args.fix_frame = 0
@@ -290,7 +252,6 @@ if __name__ == '__main__':
 
     ## load img
     img_list = sorted_nicely([i for i in os.listdir(args.load_data_vis_path) if (not i.startswith(".")) and (not len(os.listdir(args.load_data_vis_path+"/"+i))==0)])
-    # print(img_list)
 
     loss_list = []
     loss_l1_list = []
@@ -300,16 +261,13 @@ if __name__ == '__main__':
     print("args.save_video", args.save_video)
     print("args.select_cls", args.select_cls)
 
-    for img in img_list: #[0:1]:
-        # print("img", img)
+    for img in img_list:
         data_path = args.load_data_vis_path+'/'+img
         samp_list = sorted_nicely([i_s for i_s in os.listdir(data_path) if not i_s.startswith(".")])
         images = [cv2.imread(data_path+"/"+i_i, cv2.IMREAD_GRAYSCALE) for i_i in samp_list]
         image = np.stack(images)
-        # image = np.transpose(image, (1, 2, 0))
         image = np.float32(image)
         image = (image-image.min())/(image.max()-image.min()+0.00000001)
-        # image = image[40:40+args.fix_frame]
     
         mask_path = args.load_label_vis_path+'/'+img
         mask_list = sorted_nicely([i_s for i_s in os.listdir(mask_path) if not i_s.startswith(".")])

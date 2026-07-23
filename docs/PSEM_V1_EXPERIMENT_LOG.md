@@ -184,4 +184,30 @@ run and fixed by flattening spatial dimensions before reduction.
 - Observed labels were within the configured range 0 to 4.
 - A background-only 2D slice correctly receives a one-state cycle and is never
   left with zero valid tokens.
+## Step 5: First Slurm Submission Attempt
+
+### Action
+
+Submitted slurm/psem/smoke_psem_abdautopet_2d.sbatch after creating its
+dedicated log directories.
+
+### Result
+
+Slurm rejected the submission before creating a job:
+
+QOSMaxSubmitJobPerUserLimit
+
+The 4a800 QOS currently permits four submitted jobs for this user, and all four
+slots are occupied by jobs 1560192, 1560193, 1560195, and 1560196.
+
+### Queue Audit
+
+- 1560192: WORD 2D LossBalance training, pending by priority.
+- 1560193: WORD 3D LossBalance training, pending by priority.
+- 1560195: the same WORD 2D training script, dependent on 1560192.
+- 1560196: the same WORD 3D training script, dependent on 1560193.
+
+The dependent jobs use the same commands and output locations as their parent
+jobs, so they appear to be duplicate reruns rather than evaluation jobs. No
+existing job was cancelled automatically. No PSEM job ID exists yet.
 

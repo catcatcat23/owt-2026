@@ -278,9 +278,10 @@ def scale(img, label, v):
     return img, label
 
 class RandomGenerator(object):
-    def __init__(self, output_size, low_res):
+    def __init__(self, output_size, low_res, renormalize_after_resize=True):
         self.output_size = output_size
         self.low_res = low_res
+        self.renormalize_after_resize = renormalize_after_resize
         seed = 42
         self.rng = np.random.default_rng(seed)
         self.p = 0.5
@@ -336,7 +337,10 @@ class RandomGenerator(object):
         if x != self.output_size[0] or y != self.output_size[1]:
             image = zoom(image, (self.output_size[0] / x, self.output_size[1] / y, 1.0), order=3)
             label = zoom(label, (self.output_size[0] / x, self.output_size[1] / y, 1.0), order=0)
-            image = (image-image.min())/(image.max()-image.min()+0.00000001)
+            if self.renormalize_after_resize:
+                image = (image-image.min())/(image.max()-image.min()+0.00000001)
+            else:
+                image = np.clip(image, 0.0, 1.0)
         label_h, label_w, label_d = label.shape
         
         image = torch.from_numpy(image.astype(np.float32))
@@ -371,7 +375,10 @@ class dataset_reader(Dataset):
             data = cv2.cvtColor(data, cv2.COLOR_BGR2RGB)
 
             data = np.float32(data)
-            data = (data-data.min())/(data.max()-data.min()+0.00000001)
+            if getattr(self.model_args, "intensity_norm", "per_sample") == "fixed_255":
+                data = data / 255.0
+            else:
+                data = (data-data.min())/(data.max()-data.min()+0.00000001)
             h, w, d = data.shape
 
             mask = cv2.imread(self.masks_list[idx], cv2.IMREAD_UNCHANGED)
@@ -388,7 +395,10 @@ class dataset_reader(Dataset):
             image = np.stack(images)
             image = np.transpose(image, (1, 2, 0))
             image = np.float32(image)
-            image = (image-image.min())/(image.max()-image.min()+0.00000001)
+            if getattr(self.model_args, "intensity_norm", "per_sample") == "fixed_255":
+                image = image / 255.0
+            else:
+                image = (image-image.min())/(image.max()-image.min()+0.00000001)
 
             mask_path = self.masks_list[idx]
             start_frame = int(mask_path.split(".png")[0].split("_")[-1])
@@ -415,4 +425,5 @@ class dataset_reader(Dataset):
             sample['label'] = sample['label'].permute(3,0,1,2)
 
         sample['case_name'] = [self.sample_list[idx].strip('\n'), self.masks_list[idx].strip('\n')]
+        sample['sample_index'] = idx
         return sample

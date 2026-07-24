@@ -210,4 +210,20 @@ slots are occupied by jobs 1560192, 1560193, 1560195, and 1560196.
 The dependent jobs use the same commands and output locations as their parent
 jobs, so they appear to be duplicate reruns rather than evaluation jobs. No
 existing job was cancelled automatically. No PSEM job ID exists yet.
+## Step 6: Successful Smoke Submissions
+
+At the next progress check, the two parent LossBalance jobs had completed and
+their dependent full runs were active. This confirmed that the dependent jobs
+were intentional smoke-to-full transitions, so preserving them was correct.
+
+The freed QOS slots were used for the PSEM smoke tests:
+
+- Job 1561497: AbdAutoPET 2D PSEM smoke.
+- Job 1561498: AbdAutoPET Fixfr4 3D PSEM smoke.
+- Initial state: PENDING (Priority).
+- Requested resources per job: 2 A800 GPUs, 16 CPUs, 128 GB RAM.
+- Time limit: 30 minutes.
+- Scheduler estimate at submission: 2026-07-25 23:30:39.
+
+No PSEM error or result files exist yet because neither job has started.
 

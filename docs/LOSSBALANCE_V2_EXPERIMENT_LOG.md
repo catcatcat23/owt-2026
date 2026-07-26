@@ -103,7 +103,7 @@ LPIPS, base LR `1e-4`, effective global batch 64, and 1200 epochs.
 
 | Job | Experiment | Status |
 |---:|---|---|
-| TBD | WORD 2D LossBalance-v2 smoke | not submitted |
-| TBD | WORD Fixfr4 3D LossBalance-v2 smoke, 4 GPUs | not submitted |
+| 1567943 | WORD 2D LossBalance-v2 smoke, 2 GPUs, 4a800 | PENDING (Priority) |
+| 1567944 | WORD Fixfr4 3D LossBalance-v2 smoke, 4 GPUs, 8a800 | PENDING (Priority) |
 | TBD | WORD 2D LossBalance-v2 full | gated on smoke |
 | TBD | WORD Fixfr4 3D LossBalance-v2 full, 4 GPUs | gated on smoke |

@@ -1,0 +1,5 @@
+__pycache__/
+*.py[cod]
+Results/OrganSlotBank/
+slurm/orgslot/logs/*.out
+codex_vscode_backup.tar.gz

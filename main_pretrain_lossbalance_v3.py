@@ -35,7 +35,7 @@ from util.misc import NativeScalerWithGradNormCount as NativeScaler
 # import models_mae
 # import models_mae_token
 
-from engine_pretrain_lossbalance_v2 import train_one_epoch
+from engine_pretrain_lossbalance_v3 import train_one_epoch
 from util.frequency_balanced_loss import build_class_frequency_weights
 
 
@@ -112,8 +112,8 @@ def get_args_parser():
     parser.add_argument('--training_version', type=str, default='v0', help='v0, v1...')
     parser.add_argument('--token_factor', type=int, default=1, help='how many tokens to generate a class')
     parser.add_argument('--loss_version', type=str, default='L2', help='L1-LPIPS-GAN')
-    parser.add_argument('--roi_loss_weight', type=float, default=1.0,
-                        help='weight of frequency-balanced per-organ ROI-L2')
+    parser.add_argument('--positive_roi_loss_weight', type=float, default=0.25,
+                        help='weight of kept-state frequency-balanced positive ROI-L2')
     parser.add_argument('--roi_positive_sample_counts', type=int, nargs='+', default=None,
                         help='positive training-sample count for each foreground class')
     parser.add_argument('--roi_frequency_alpha', type=float, default=0.5,
@@ -166,7 +166,7 @@ def main(args):
                                     )]), model_args = args)
         print("The length of train set is: {}".format(len(dataset_train)))
         if args.roi_positive_sample_counts is None:
-            raise ValueError('--roi_positive_sample_counts is required for LossBalance-v2')
+            raise ValueError('--roi_positive_sample_counts is required for LossBalance-v3')
         if len(args.roi_positive_sample_counts) != args.num_classes:
             raise ValueError(
                 '--roi_positive_sample_counts must have one value per foreground class'
@@ -224,7 +224,7 @@ def main(args):
             import models_mae3D
             model = models_mae3D.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
     else: ## v1, v2, v3...
-        import OWT_models_lossbalance_v2 as OWT_models
+        import OWT_models_lossbalance_v3 as OWT_models
         model = OWT_models.__dict__[args.model](img_size=args.input_size, norm_pix_loss=args.norm_pix_loss, model_args=args)
 
     if args.checkpoint != 'None':
@@ -295,8 +295,8 @@ if __name__ == '__main__':
     args = get_args_parser()
     args = args.parse_args()
 
-    if args.roi_loss_weight < 0:
-        raise ValueError('--roi_loss_weight must be non-negative')
+    if args.positive_roi_loss_weight < 0:
+        raise ValueError('--positive_roi_loss_weight must be non-negative')
     if not 0.0 <= args.roi_frequency_alpha <= 1.0:
         raise ValueError('--roi_frequency_alpha must be in [0, 1]')
     if args.roi_max_weight_ratio < 1.0:

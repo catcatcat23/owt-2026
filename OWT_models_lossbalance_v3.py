@@ -1,4 +1,4 @@
-"""OWT model variant with area- and sample-frequency-balanced ROI loss."""
+"""OWT model variant with state-separated positive ROI supervision."""
 
 from functools import partial
 
@@ -6,10 +6,10 @@ import torch
 import torch.nn as nn
 
 from OWT_models import MaskedAutoencoderViT
-from util.frequency_balanced_loss import frequency_balanced_roi_l2
+from util.state_separated_balanced_loss import state_separated_roi_l2
 
 
-class LossBalancedMaskedAutoencoderViT(MaskedAutoencoderViT):
+class StateSeparatedLossMaskedAutoencoderViT(MaskedAutoencoderViT):
     """Preserve the OWT architecture and replace only loss accounting."""
 
     def __init__(self, *args, **kwargs):
@@ -28,7 +28,7 @@ class LossBalancedMaskedAutoencoderViT(MaskedAutoencoderViT):
             "roi_class_weights", class_weights, persistent=False
         )
 
-    def forward_loss(self, image_target, pred, label):
+    def forward_loss(self, image_target, pred, label, class_keep_mask):
         if self.model_args.arch_version.startswith('v1'):
             if self.model_args.dataset_type == "2D":
                 pred = self.unpatchify(pred)
@@ -42,19 +42,19 @@ class LossBalancedMaskedAutoencoderViT(MaskedAutoencoderViT):
         else:
             raise ValueError("LossBalance requires L2 or L1 in loss_version")
 
-        (
-            roi_loss,
-            class_losses,
-            class_counts,
-            valid_samples,
-            weighted_mass,
-        ) = frequency_balanced_roi_l2(
+        state_stats = state_separated_roi_l2(
             pred,
             image_target,
             label,
+            class_keep_mask=class_keep_mask,
             class_weights=self.roi_class_weights,
         )
-        loss = global_recon_loss + self.model_args.roi_loss_weight * roi_loss
+        positive = state_stats["positive"]
+        removed = state_stats["removed"]
+        loss = (
+            global_recon_loss
+            + self.model_args.positive_roi_loss_weight * positive["loss"]
+        )
 
         if "LPIPS" in self.model_args.loss_version:
             if self.model_args.dataset_type == "2D":
@@ -74,22 +74,30 @@ class LossBalancedMaskedAutoencoderViT(MaskedAutoencoderViT):
 
         return loss, p_loss, {
             "global_recon_loss": global_recon_loss,
-            "roi_loss": roi_loss,
-            "roi_class_losses": class_losses,
-            "roi_class_counts": class_counts,
-            "roi_valid_samples": valid_samples,
-            "roi_weighted_mass": weighted_mass,
+            "positive_roi_loss": positive["loss"],
+            "positive_class_losses": positive["class_losses"],
+            "positive_class_counts": positive["class_counts"],
+            "positive_valid_samples": positive["valid_samples"],
+            "positive_weighted_mass": positive["mass"],
+            "removed_monitor_loss": removed["loss"],
+            "removed_class_losses": removed["class_losses"],
+            "removed_class_counts": removed["class_counts"],
+            "removed_valid_samples": removed["valid_samples"],
+            "removed_mass": removed["mass"],
             "roi_class_weights": self.roi_class_weights,
         }
 
     def forward(self, imgs, mask_ratio=0.75, middle=None):
         image_target = middle["image_target"]
         label = middle["label"]
+        class_keep_mask = middle["class_keep_mask"]
         x_restored, cls_tokens, middle_output = self.forward_encoder(
             imgs, mask_ratio, middle=middle
         )
         pred = self.forward_decoder(x_restored, cls_tokens, middle_output)
-        loss, p_loss, loss_stats = self.forward_loss(image_target, pred, label)
+        loss, p_loss, loss_stats = self.forward_loss(
+            image_target, pred, label, class_keep_mask
+        )
         middle_output.update(loss_stats)
         if "LPIPS" in self.model_args.loss_version:
             middle_output["p_loss"] = p_loss
@@ -103,7 +111,7 @@ class LossBalancedMaskedAutoencoderViT(MaskedAutoencoderViT):
 
 
 def mae_vit_base_patch16_dec512d8b(**kwargs):
-    return LossBalancedMaskedAutoencoderViT(
+    return StateSeparatedLossMaskedAutoencoderViT(
         patch_size=16, embed_dim=768, depth=12, num_heads=12,
         decoder_embed_dim=768, decoder_depth=8, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs
@@ -111,7 +119,7 @@ def mae_vit_base_patch16_dec512d8b(**kwargs):
 
 
 def mae_vit_large_patch16_dec512d8b(**kwargs):
-    return LossBalancedMaskedAutoencoderViT(
+    return StateSeparatedLossMaskedAutoencoderViT(
         patch_size=16, embed_dim=1024, depth=24, num_heads=16,
         decoder_embed_dim=1024, decoder_depth=8, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs
@@ -119,7 +127,7 @@ def mae_vit_large_patch16_dec512d8b(**kwargs):
 
 
 def mae_vit_huge_patch14_dec512d8b(**kwargs):
-    return LossBalancedMaskedAutoencoderViT(
+    return StateSeparatedLossMaskedAutoencoderViT(
         patch_size=14, embed_dim=1280, depth=32, num_heads=16,
         decoder_embed_dim=1280, decoder_depth=8, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import torch
 
 import OWT_models
-import OWT_models_lossbalance_v2
+import OWT_models_lossbalance_v3
 
 
 def model_args(dataset_type):
@@ -20,7 +20,7 @@ def model_args(dataset_type):
         num_classes_with_bg=3,
         loss_version=['L2'],
         text_encoding='None',
-        roi_loss_weight=1.0,
+        positive_roi_loss_weight=0.25,
         roi_class_weights=[0.0, 1.0, 1.0],
     )
 
@@ -43,23 +43,23 @@ def build_model(model_class, dataset_type='2D'):
     )
 
 
-class LossBalanceV2ModelTest(unittest.TestCase):
+class LossBalanceV3ModelTest(unittest.TestCase):
     def test_state_dict_keys_and_shapes_match_original_owt(self):
         baseline = build_model(OWT_models.MaskedAutoencoderViT)
-        v2 = build_model(
-            OWT_models_lossbalance_v2.LossBalancedMaskedAutoencoderViT
+        v3 = build_model(
+            OWT_models_lossbalance_v3.StateSeparatedLossMaskedAutoencoderViT
         )
         baseline_state = baseline.state_dict()
-        v2_state = v2.state_dict()
-        self.assertEqual(set(baseline_state), set(v2_state))
+        v3_state = v3.state_dict()
+        self.assertEqual(set(baseline_state), set(v3_state))
         for key in baseline_state:
-            self.assertEqual(baseline_state[key].shape, v2_state[key].shape)
-        self.assertNotIn('roi_class_weights', v2_state)
+            self.assertEqual(baseline_state[key].shape, v3_state[key].shape)
+        self.assertNotIn('roi_class_weights', v3_state)
 
     def _forward_backward(self, dataset_type):
         torch.manual_seed(7)
         model = build_model(
-            OWT_models_lossbalance_v2.LossBalancedMaskedAutoencoderViT,
+            OWT_models_lossbalance_v3.StateSeparatedLossMaskedAutoencoderViT,
             dataset_type,
         )
         if dataset_type == '2D':
@@ -82,12 +82,15 @@ class LossBalanceV2ModelTest(unittest.TestCase):
                 'image_target': target,
                 'random_selected_class': [2],
                 'label': labels,
+                'class_keep_mask': torch.tensor(
+                    [[True, True, False], [True, True, False]]
+                ),
             },
         )
         self.assertTrue(torch.isfinite(loss))
         self.assertEqual(pred.shape, images.shape)
-        self.assertTrue(torch.isfinite(middle['roi_loss']))
-        self.assertTrue(torch.isfinite(middle['roi_weighted_mass']))
+        self.assertTrue(torch.isfinite(middle['positive_roi_loss']))
+        self.assertTrue(torch.isfinite(middle['positive_weighted_mass']))
         loss.backward()
         grad = model.organ_embed.conv1.weight.grad
         self.assertIsNotNone(grad)
@@ -96,7 +99,7 @@ class LossBalanceV2ModelTest(unittest.TestCase):
     def test_tiny_batch_overfits(self):
         torch.manual_seed(11)
         model = build_model(
-            OWT_models_lossbalance_v2.LossBalancedMaskedAutoencoderViT
+            OWT_models_lossbalance_v3.StateSeparatedLossMaskedAutoencoderViT
         )
         optimizer = torch.optim.Adam(model.parameters(), lr=3e-3)
         images = torch.rand(1, 3, 32, 32)
@@ -112,6 +115,9 @@ class LossBalanceV2ModelTest(unittest.TestCase):
                     'image_target': images,
                     'random_selected_class': [],
                     'label': labels,
+                    'class_keep_mask': torch.ones(
+                        1, 3, dtype=torch.bool
+                    ),
                 },
             )
             self.assertTrue(torch.isfinite(loss))

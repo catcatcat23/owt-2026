@@ -68,6 +68,13 @@ def train_one_epoch(model: torch.nn.Module,
                 mask_ratio = random.random() * args.mask_ratio
                 selected_count = int(args.num_classes_with_bg * mask_ratio)
                 random_selected_class = class_list[:selected_count]
+                class_keep_mask = torch.ones(
+                    (image.shape[0], args.num_classes_with_bg),
+                    dtype=torch.bool,
+                    device=device,
+                )
+                if random_selected_class:
+                    class_keep_mask[:, random_selected_class] = False
 
                 for ms in random_selected_class:
                     image_target[label==ms] = 0
@@ -81,6 +88,7 @@ def train_one_epoch(model: torch.nn.Module,
                     "image_target": image_target,
                     "random_selected_class": random_selected_class,
                     "label": label,
+                    "class_keep_mask": class_keep_mask,
                 }
                 if args.text_encoding != "None":
                     middle["text_features"] = aligned_text_features
@@ -166,26 +174,35 @@ def train_one_epoch(model: torch.nn.Module,
         metric_logger.update(loss=loss_value)
         metric_logger.update(
             global_recon_loss=middle_output["global_recon_loss"].item(),
-            roi_loss=middle_output["roi_loss"].item(),
-            roi_valid_samples=middle_output["roi_valid_samples"].item(),
-            roi_weighted_mass=middle_output["roi_weighted_mass"].item(),
+            positive_roi_loss=middle_output["positive_roi_loss"].item(),
+            positive_valid_samples=middle_output["positive_valid_samples"].item(),
+            positive_weighted_mass=middle_output["positive_weighted_mass"].item(),
+            removed_monitor_loss=middle_output["removed_monitor_loss"].item(),
+            removed_valid_samples=middle_output["removed_valid_samples"].item(),
+            removed_mass=middle_output["removed_mass"].item(),
             optimized_loss=optimized_loss_value,
         )
-        class_losses = middle_output["roi_class_losses"].detach()
-        class_counts = middle_output["roi_class_counts"].detach()
+        positive_losses = middle_output["positive_class_losses"].detach()
+        positive_counts = middle_output["positive_class_counts"].detach()
+        removed_losses = middle_output["removed_class_losses"].detach()
+        removed_counts = middle_output["removed_class_counts"].detach()
         class_weights = middle_output["roi_class_weights"].detach()
         for class_id in range(1, args.num_classes_with_bg):
             metric_logger.update(**{
-                f"roi_c{class_id}_sum": (
-                    class_losses[class_id] * class_counts[class_id]
+                f"positive_c{class_id}_sum": (
+                    positive_losses[class_id] * positive_counts[class_id]
                 ).item(),
-                f"roi_c{class_id}_count": class_counts[class_id].item(),
-                f"roi_c{class_id}_weight": class_weights[class_id].item(),
-                f"roi_c{class_id}_weighted_sum": (
-                    class_losses[class_id]
-                    * class_counts[class_id]
+                f"positive_c{class_id}_count": positive_counts[class_id].item(),
+                f"positive_c{class_id}_weight": class_weights[class_id].item(),
+                f"positive_c{class_id}_weighted_sum": (
+                    positive_losses[class_id]
+                    * positive_counts[class_id]
                     * class_weights[class_id]
                 ).item(),
+                f"removed_c{class_id}_sum": (
+                    removed_losses[class_id] * removed_counts[class_id]
+                ).item(),
+                f"removed_c{class_id}_count": removed_counts[class_id].item(),
             })
         if "LPIPS" in args.loss_version:
             metric_logger.update(p_loss=p_loss_value)

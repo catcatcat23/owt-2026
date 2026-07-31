@@ -99,10 +99,25 @@ substantial over-segmentation.
 4. Full training is submitted with `afterok` dependency on the validated smoke.
 5. Formal evaluation is submitted with `afterok` dependency on full training.
 
+## Local validation
+
+- `git diff --check`: passed.
+- Python syntax compilation: passed.
+- All three Slurm scripts pass `bash -n`.
+- 13/13 unit tests pass.
+- Positive/Removed routing and gradient isolation pass.
+- Original OWT/v3 state-dict key and shape compatibility passes.
+- 2D and Fixfr4-style 3D forward/backward pass with finite gradients.
+- The 20-step one-sample tiny overfit reduces the loss by at least 20%.
+
 ## Jobs
 
 | Job | Stage | Status |
 |---:|---|---|
-| TBD | WORD 2D smoke | not submitted |
-| TBD | WORD 2D full | not submitted |
-| TBD | WORD 2D formal evaluation | not submitted |
+| 1627035 | WORD 2D smoke, 2 GPU, 4a800 | PENDING (Priority) |
+| 1627036 | WORD 2D full, 2 GPU, 4a800 | PENDING (afterok:1627035) |
+| 1627039 | WORD 2D formal evaluation, 1 GPU, 8a800 | PENDING (afterok:1627036) |
+
+Submission time: 2026-07-31 15:47 CST. At submission, Slurm estimated
+the smoke start at 2026-08-03 06:14 CST; dependency job start times remain
+unknown until their prerequisites finish.

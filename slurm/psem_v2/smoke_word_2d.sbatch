@@ -18,7 +18,7 @@ WORKDIR=/gpfs/work/aac/bolinren19/OD_OWT_psem_v2
 CONDA_ENV=/gpfs/work/aac/bolinren19/.conda/envs/abdpet
 TRAIN_CSV=/gpfs/work/aac/bolinren19/2026-07/DATA/processed/OWT_Common8/WORD/csv/WORD_Training_2D_224.csv
 RESULT_ROOT=${WORKDIR}/Results/PSEM_v2/_smoke/WORD_2D
-RUN_NAME=PSEM_v2a_Query20_Common8_WORD_2D_C8_T20_GPU2_B16_E1_N256
+RUN_NAME=PSEM_v2a_Query20_Common8_WORD_2D_C8_T20_GPU2_B32_E1_N256
 OUT_DIR=${RESULT_ROOT}/${RUN_NAME}
 
 mkdir -p ${OUT_DIR}/vis
@@ -37,7 +37,7 @@ echo "Output dir: ${OUT_DIR}"
 python -m torch.distributed.launch \
   --nproc_per_node=2 --master_port=${PORT_NUM} --use_env \
   main_pretrain_psem.py \
-  --batch_size 16 --model mae_vit_base_patch16-LA --mask_ratio 1.0 \
+  --batch_size 32 --model mae_vit_base_patch16-LA --mask_ratio 1.0 \
   --epochs 1 --warmup_epochs 0 --blr 1e-4 --weight_decay 0.05 \
   --input_size 224 --num_classes 8 --arch_version v11 \
   --training_version v01 --token_factor 20 --loss_version L2-LPIPS \

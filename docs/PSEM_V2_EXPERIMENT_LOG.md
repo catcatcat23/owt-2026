@@ -120,6 +120,10 @@ successful smoke validator, and evaluation depends on successful full training.
 | AbdAutoPET 2D | Full training | 1629561 | angelosstefanidis | PENDING (Dependency) | afterok:1629559 |
 | AbdAutoPET 2D | Evaluation | 1629564 | angelosstefanidis | PENDING (Dependency) | afterok:1629561 |
 
+The initial jobs `1629541`-`1629544` and `1629547` were cancelled before
+execution because the smoke batch sizes did not match the full runs. The jobs
+above use corrected per-GPU smoke batches of 32 (WORD) and 96 (AbdAutoPET).
+
 The WORD evaluation script is ready, but its first submission was rejected by
 the `sifansong` QOS submit-count limit. It must be submitted after that account
 releases one job slot. This does not block the smoke or full training chain.

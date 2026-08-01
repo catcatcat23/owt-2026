@@ -6,6 +6,7 @@
 - Branch: `experiment/psem-v2-query-mask`
 - Worktree: `/gpfs/work/aac/bolinren19/OD_OWT_psem_v2`
 - Starting point: PSEM-v1 commit `8a7da1f`
+- Implementation commit: `d7a0170`
 - Model and optimized loss: unchanged PSEM model with global L2 plus LPIPS
 - Datasets: WORD 2D and AbdAutoPET 2D
 - Status: implementation validated locally; smoke and training chains submitted
@@ -110,18 +111,18 @@ successful smoke validator, and evaluation depends on successful full training.
 
 ## Slurm Jobs
 
-| Job | Dataset / stage | Dependency | State at submission |
-|---:|---|---:|---|
-| 1629541 | WORD 2D smoke | none | PENDING (Priority) |
-| 1629543 | WORD 2D 1200-epoch train | 1629541 afterok | PENDING (Dependency) |
-| not submitted | WORD 2D evaluation | 1629543 afterok | 4a800 submit-count limit |
-| 1629542 | AbdAutoPET 2D smoke | none | PENDING (Priority) |
-| 1629544 | AbdAutoPET 2D 1200-epoch train | 1629542 afterok | PENDING (Dependency) |
-| 1629547 | AbdAutoPET 2D evaluation | 1629544 afterok | PENDING (Dependency) |
+| Dataset | Stage | Job ID | Account | State at submission | Dependency |
+|---|---|---:|---|---|---|
+| WORD 2D | Smoke | 1629541 | sifansong | PENDING (Priority) | None |
+| WORD 2D | Full training | 1629543 | sifansong | PENDING (Dependency) | afterok:1629541 |
+| WORD 2D | Evaluation | Not submitted | sifansong | QOSMaxSubmitJobPerUserLimit | afterok:1629543 planned |
+| AbdAutoPET 2D | Smoke | 1629542 | angelosstefanidis | PENDING (Priority) | None |
+| AbdAutoPET 2D | Full training | 1629544 | angelosstefanidis | PENDING (Dependency) | afterok:1629542 |
+| AbdAutoPET 2D | Evaluation | 1629547 | angelosstefanidis | PENDING (Dependency) | afterok:1629544 |
 
-The WORD evaluation script is complete and syntax-checked. It should be
-submitted as soon as one 4a800 job leaves the queue; the failed submission did
-not create a Slurm job.
+The WORD evaluation script is ready, but its first submission was rejected by
+the `sifansong` QOS submit-count limit. It must be submitted after that account
+releases one job slot. This does not block the smoke or full training chain.
 
 ## Completion Criteria
 

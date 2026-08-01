@@ -113,12 +113,12 @@ successful smoke validator, and evaluation depends on successful full training.
 
 | Dataset | Stage | Job ID | Account | State at submission | Dependency |
 |---|---|---:|---|---|---|
-| WORD 2D | Smoke | 1629541 | sifansong | PENDING (Priority) | None |
-| WORD 2D | Full training | 1629543 | sifansong | PENDING (Dependency) | afterok:1629541 |
-| WORD 2D | Evaluation | Not submitted | sifansong | QOSMaxSubmitJobPerUserLimit | afterok:1629543 planned |
-| AbdAutoPET 2D | Smoke | 1629542 | angelosstefanidis | PENDING (Priority) | None |
-| AbdAutoPET 2D | Full training | 1629544 | angelosstefanidis | PENDING (Dependency) | afterok:1629542 |
-| AbdAutoPET 2D | Evaluation | 1629547 | angelosstefanidis | PENDING (Dependency) | afterok:1629544 |
+| WORD 2D | Smoke | 1629558 | sifansong | PENDING (Priority) | None |
+| WORD 2D | Full training | 1629560 | sifansong | PENDING (Dependency) | afterok:1629558 |
+| WORD 2D | Evaluation | Not submitted | sifansong | QOSMaxSubmitJobPerUserLimit | afterok:1629560 planned |
+| AbdAutoPET 2D | Smoke | 1629559 | angelosstefanidis | PENDING (Priority) | None |
+| AbdAutoPET 2D | Full training | 1629561 | angelosstefanidis | PENDING (Dependency) | afterok:1629559 |
+| AbdAutoPET 2D | Evaluation | 1629564 | angelosstefanidis | PENDING (Dependency) | afterok:1629561 |
 
 The WORD evaluation script is ready, but its first submission was rejected by
 the `sifansong` QOS submit-count limit. It must be submitted after that account

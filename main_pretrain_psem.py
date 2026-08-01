@@ -21,7 +21,7 @@ from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
 def get_args_parser():
     parser = get_base_args_parser()
-    parser.description = "PSEM-v1 OWT pre-training"
+    parser.description = "PSEM-v2a query-matched OWT pre-training"
     parser.add_argument(
         "--intensity_norm",
         default="per_sample",
@@ -30,9 +30,9 @@ def get_args_parser():
     )
     parser.add_argument(
         "--mask_schedule",
-        default="psem_exhaustive",
-        choices=("psem_exhaustive",),
-        help="Deterministic per-sample present-label schedule.",
+        default="query_matched20",
+        choices=("query_matched20",),
+        help="Deterministic 20-slot per-sample query-state schedule.",
     )
     parser.add_argument(
         "--max_train_samples",
@@ -72,7 +72,7 @@ def main(args):
     if args.max_train_samples > 0:
         subset_size = min(args.max_train_samples, len(dataset_train))
         dataset_train = Subset(dataset_train, range(subset_size))
-        print(f"PSEM smoke subset: first {subset_size} CSV rows")
+        print(f"PSEM-v2 smoke subset: first {subset_size} CSV rows")
 
 
     sampler_train = torch.utils.data.DistributedSampler(
@@ -144,7 +144,7 @@ def main(args):
         loss_scaler=loss_scaler,
     )
 
-    print(f"Start PSEM training for {args.epochs} epochs")
+    print(f"Start PSEM-v2a training for {args.epochs} epochs")
     start_time = time.time()
     for epoch in range(args.start_epoch, args.epochs):
         sampler_train.set_epoch(epoch)
@@ -173,7 +173,7 @@ def main(args):
         log_stats = {
             **{f"train_{key}": value for key, value in train_stats.items()},
             "epoch": epoch,
-            "method": "PSEM-v1",
+            "method": "PSEM-v2a",
         }
         if args.output_dir and misc.is_main_process():
             if log_writer is not None:
@@ -210,7 +210,7 @@ def finalize_args(args):
         args.training_version = args.training_version.split("-3D")[0]
 
     if "-LA" not in args.model:
-        raise ValueError("PSEM-v1 requires an OWT -LA model")
+        raise ValueError("PSEM-v2a requires an OWT -LA model")
     args.LA = True
     args.model = args.model.split("-LA")[0].split("-")[0]
 

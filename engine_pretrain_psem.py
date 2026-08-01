@@ -10,9 +10,13 @@ from PIL import Image
 import util.lr_sched as lr_sched
 import util.misc as misc
 from util.per_sample_mask_schedule import (
-    exhaustive_present_label_schedule,
+    MODE_DIRECT_NEGATIVE,
+    MODE_DIRECT_POSITIVE,
+    MODE_LEAVE_ONE_OUT,
+    QUERY_MODE_NAMES,
     masked_reconstruction_target,
     present_class_mask,
+    query_matched_schedule,
 )
 
 
@@ -84,8 +88,8 @@ def train_one_epoch(
         sample_indices = batch["sample_index"].to(device, non_blocking=True)
 
         present_mask = present_class_mask(label, args.num_classes_with_bg)
-        keep_mask, drop_mask, codes, cycles = exhaustive_present_label_schedule(
-            present_mask, sample_indices, epoch
+        keep_mask, drop_mask, slots, mode_ids, query_classes = (
+            query_matched_schedule(present_mask, sample_indices, epoch)
         )
         image_target = masked_reconstruction_target(image, label, keep_mask)
 
@@ -96,7 +100,9 @@ def train_one_epoch(
         valid_token_count = kept_count.sum().item() * args.token_factor
         padded_token_count = image.shape[0] * max_token_length
         padding_fraction = 1.0 - valid_token_count / max(padded_token_count, 1)
-        mask_ratio = (dropped_count.float() / present_count.float()).mean().item()
+        mask_ratio = (
+            dropped_count.float() / args.num_classes_with_bg
+        ).mean().item()
 
         middle = {
             "image_target": image_target,
@@ -113,6 +119,15 @@ def train_one_epoch(
             )
 
         reconstruction_loss_value = loss.item()
+        per_sample_mse = (
+            (pred.detach() - image_target).square().flatten(1).mean(dim=1)
+        )
+        prediction_energy = pred.detach().square().flatten(1).mean(dim=1)
+        negative_query = mode_ids == MODE_DIRECT_NEGATIVE
+        negative_hallucination_sum = (
+            prediction_energy[negative_query].sum().item()
+        )
+        negative_query_count = negative_query.sum().item()
         perceptual_loss_value = 0.0
         if "LPIPS" in args.loss_version:
             perceptual_loss_value = middle_output["p_loss"].item()
@@ -140,8 +155,12 @@ def train_one_epoch(
                 "PSEM first batch:",
                 f"present={present_count.tolist()[:8]}",
                 f"kept={kept_count.tolist()[:8]}",
-                f"codes={codes.tolist()[:8]}",
-                f"cycles={cycles.tolist()[:8]}",
+                f"slots={slots.tolist()[:8]}",
+                "modes=" + str([
+                    QUERY_MODE_NAMES[int(value)]
+                    for value in mode_ids.tolist()[:8]
+                ]),
+                f"query_classes={query_classes.tolist()[:8]}",
             )
 
         metric_logger.update(loss=reconstruction_loss_value)
@@ -154,6 +173,43 @@ def train_one_epoch(
             padding_fraction=padding_fraction,
             lr=optimizer.param_groups[0]["lr"],
         )
+
+        for mode_id, mode_name in QUERY_MODE_NAMES.items():
+            selected = mode_ids == mode_id
+            metric_logger.update(**{
+                f"mode_{mode_name}_fraction": selected.float().mean().item(),
+                f"{mode_name}_mse_sum": per_sample_mse[selected].sum().item(),
+                f"{mode_name}_sample_count": selected.sum().item(),
+            })
+
+        queried_present = torch.gather(
+            present_mask, 1, query_classes.clamp_min(0).unsqueeze(1)
+        ).squeeze(1)
+        leave_one_out = mode_ids == MODE_LEAVE_ONE_OUT
+        metric_logger.update(
+            leave_one_out_present_fraction=(
+                leave_one_out & queried_present
+            ).float().mean().item(),
+            leave_one_out_absent_fraction=(
+                leave_one_out & ~queried_present
+            ).float().mean().item(),
+        )
+        metric_logger.update(
+            negative_hallucination_sum=negative_hallucination_sum,
+            negative_query_count=negative_query_count,
+        )
+
+        for class_id in range(1, args.num_classes_with_bg):
+            metric_logger.update(**{
+                f"direct_positive_c{class_id}_fraction": (
+                    (mode_ids == MODE_DIRECT_POSITIVE)
+                    & (query_classes == class_id)
+                ).float().mean().item(),
+                f"direct_negative_c{class_id}_fraction": (
+                    (mode_ids == MODE_DIRECT_NEGATIVE)
+                    & (query_classes == class_id)
+                ).float().mean().item(),
+            })
 
         reduced_loss = misc.all_reduce_mean(reconstruction_loss_value)
         if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
@@ -169,10 +225,29 @@ def train_one_epoch(
             log_writer.add_scalar(
                 "psem/padding_fraction", padding_fraction, epoch_1000x
             )
+            if negative_query_count > 0:
+                log_writer.add_scalar(
+                    "psem/negative_hallucination_energy",
+                    negative_hallucination_sum / negative_query_count,
+                    epoch_1000x,
+                )
             log_writer.add_scalar(
                 "lr", optimizer.param_groups[0]["lr"], epoch_1000x
             )
 
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
-    return {key: meter.global_avg for key, meter in metric_logger.meters.items()}
+    stats = {
+        key: meter.global_avg for key, meter in metric_logger.meters.items()
+    }
+    for mode_name in QUERY_MODE_NAMES.values():
+        mse_sum = stats.pop(f"{mode_name}_mse_sum")
+        sample_count = stats.pop(f"{mode_name}_sample_count")
+        stats[f"{mode_name}_mse"] = mse_sum / max(sample_count, 1e-12)
+    hallucination_sum = stats.pop("negative_hallucination_sum")
+    negative_count = stats.pop("negative_query_count")
+    stats["negative_hallucination_energy"] = (
+        hallucination_sum / max(negative_count, 1e-12)
+    )
+    stats["negative_query_count"] = negative_count
+    return stats

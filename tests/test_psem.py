@@ -1,4 +1,5 @@
 import unittest
+from collections import Counter
 from types import SimpleNamespace
 
 import torch
@@ -6,9 +7,17 @@ import torch
 import OWT_models
 import OWT_models_psem
 from util.per_sample_mask_schedule import (
+    MODE_BACKGROUND_ONLY,
+    MODE_DIRECT_NEGATIVE,
+    MODE_DIRECT_POSITIVE,
+    MODE_LEAVE_ONE_OUT,
+    MODE_ORGANS_ONLY,
+    MODE_RANDOM_SUBSET,
+    MODE_WHOLE,
     exhaustive_present_label_schedule,
     masked_reconstruction_target,
     present_class_mask,
+    query_matched_schedule,
 )
 
 
@@ -110,6 +119,7 @@ class ScheduleTests(unittest.TestCase):
         )
 
 
+
 class PaddingTests(unittest.TestCase):
     def test_tgenc_padding_does_not_change_valid_outputs(self):
         torch.manual_seed(0)
@@ -179,7 +189,7 @@ class ModelTests(unittest.TestCase):
             labels[1, :, :, 16:] = 2
 
         present = present_class_mask(labels, 3)
-        keep, _, _, _ = exhaustive_present_label_schedule(
+        keep, _, _, _, _ = query_matched_schedule(
             present, torch.tensor([0, 1]), epoch=0
         )
         target = masked_reconstruction_target(images, labels, keep)
@@ -201,6 +211,148 @@ class ModelTests(unittest.TestCase):
 
     def test_3d_forward_backward(self):
         self._forward_backward("3D")
+
+
+class QueryMatchedScheduleTests(unittest.TestCase):
+    def setUp(self):
+        self.present = torch.tensor([[True, True, False, True, False]])
+        self.sample_indices = torch.tensor([9])
+
+    def test_cycle_has_expected_mode_weights(self):
+        modes = []
+        slots = []
+        for epoch in range(20):
+            _, _, slot, mode, _ = query_matched_schedule(
+                self.present, self.sample_indices, epoch
+            )
+            slots.append(slot.item())
+            modes.append(mode.item())
+
+        self.assertEqual(set(slots), set(range(20)))
+        self.assertEqual(
+            Counter(modes),
+            Counter({
+                MODE_DIRECT_POSITIVE: 4,
+                MODE_DIRECT_NEGATIVE: 4,
+                MODE_LEAVE_ONE_OUT: 5,
+                MODE_WHOLE: 2,
+                MODE_BACKGROUND_ONLY: 1,
+                MODE_ORGANS_ONLY: 1,
+                MODE_RANDOM_SUBSET: 3,
+            }),
+        )
+
+    def test_consecutive_samples_cover_all_slots(self):
+        present = self.present.expand(20, -1).clone()
+        _, _, slots, _, _ = query_matched_schedule(
+            present, torch.arange(20), epoch=7
+        )
+        self.assertEqual(sorted(slots.tolist()), list(range(20)))
+
+    def test_direct_positive_and_negative_targets(self):
+        labels = torch.tensor([[[[0, 1], [1, 0]]] * 3])
+        images = torch.ones(1, 3, 2, 2)
+        present = present_class_mask(labels, 3)
+        observed = {}
+
+        for epoch in range(20):
+            keep, _, _, modes, classes = query_matched_schedule(
+                present, torch.tensor([4]), epoch
+            )
+            mode = modes.item()
+            if mode in (MODE_DIRECT_POSITIVE, MODE_DIRECT_NEGATIVE):
+                observed.setdefault(
+                    mode,
+                    (keep.clone(), classes.item(),
+                     masked_reconstruction_target(images, labels, keep)),
+                )
+
+        positive_keep, positive_class, positive_target = observed[
+            MODE_DIRECT_POSITIVE
+        ]
+        self.assertEqual(positive_class, 1)
+        self.assertEqual(positive_keep.tolist(), [[False, True, False]])
+        self.assertEqual(
+            positive_target[0, 0].tolist(), [[0.0, 1.0], [1.0, 0.0]]
+        )
+
+        negative_keep, negative_class, negative_target = observed[
+            MODE_DIRECT_NEGATIVE
+        ]
+        self.assertEqual(negative_class, 2)
+        self.assertEqual(negative_keep.tolist(), [[False, False, True]])
+        self.assertEqual(negative_target.abs().sum().item(), 0.0)
+
+    def test_exact_inference_query_masks_are_scheduled(self):
+        observed = {}
+        for epoch in range(20):
+            keep, _, _, modes, classes = query_matched_schedule(
+                self.present, self.sample_indices, epoch
+            )
+            observed.setdefault(
+                modes.item(), (keep[0].clone(), classes.item())
+            )
+
+        leave_keep, leave_class = observed[MODE_LEAVE_ONE_OUT]
+        self.assertGreater(leave_class, 0)
+        self.assertEqual(leave_keep.sum().item(), 4)
+        self.assertFalse(leave_keep[leave_class].item())
+        self.assertTrue(torch.all(observed[MODE_WHOLE][0]))
+        self.assertEqual(
+            observed[MODE_BACKGROUND_ONLY][0].tolist(),
+            [True, False, False, False, False],
+        )
+        self.assertEqual(
+            observed[MODE_ORGANS_ONLY][0].tolist(),
+            [False, True, True, True, True],
+        )
+        self.assertGreater(observed[MODE_RANDOM_SUBSET][0].sum().item(), 0)
+
+
+class QueryMatchedTinyOverfitTests(unittest.TestCase):
+    def test_positive_and_negative_queries_overfit(self):
+        torch.manual_seed(17)
+        model = build_model(OWT_models_psem.PSEMMaskedAutoencoderViT)
+        model.train()
+        images = torch.rand(2, 3, 32, 32)
+        labels = torch.zeros(2, 3, 32, 32, dtype=torch.long)
+        labels[0, :, :16] = 1
+        keep = torch.tensor([
+            [False, True, False],
+            [False, True, False],
+        ])
+        target = masked_reconstruction_target(images, labels, keep)
+        optimizer = torch.optim.AdamW(
+            model.parameters(), lr=3e-3, weight_decay=0.0
+        )
+
+        with torch.no_grad():
+            initial_loss, initial_pred, _ = model(
+                images,
+                middle={"image_target": target, "class_keep_mask": keep},
+            )
+            initial_negative_energy = initial_pred[1].square().mean().item()
+
+        for _ in range(25):
+            optimizer.zero_grad()
+            loss, _, _ = model(
+                images,
+                middle={"image_target": target, "class_keep_mask": keep},
+            )
+            loss.backward()
+            optimizer.step()
+
+        with torch.no_grad():
+            final_loss, final_pred, _ = model(
+                images,
+                middle={"image_target": target, "class_keep_mask": keep},
+            )
+            final_negative_energy = final_pred[1].square().mean().item()
+
+        self.assertLess(final_loss.item(), initial_loss.item() * 0.8)
+        self.assertLess(
+            final_negative_energy, initial_negative_energy * 0.8
+        )
 
 
 if __name__ == "__main__":

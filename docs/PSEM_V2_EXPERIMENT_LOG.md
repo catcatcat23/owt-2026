@@ -8,7 +8,7 @@
 - Starting point: PSEM-v1 commit `8a7da1f`
 - Model and optimized loss: unchanged PSEM model with global L2 plus LPIPS
 - Datasets: WORD 2D and AbdAutoPET 2D
-- Status: implementation validated locally; Slurm submission pending
+- Status: implementation validated locally; smoke and training chains submitted
 
 ## Motivation
 
@@ -107,6 +107,21 @@ Python compilation, Bash syntax checks, and git diff whitespace checks pass.
 
 Each dataset uses a one-epoch real-data smoke. The full training depends on a
 successful smoke validator, and evaluation depends on successful full training.
+
+## Slurm Jobs
+
+| Job | Dataset / stage | Dependency | State at submission |
+|---:|---|---:|---|
+| 1629541 | WORD 2D smoke | none | PENDING (Priority) |
+| 1629543 | WORD 2D 1200-epoch train | 1629541 afterok | PENDING (Dependency) |
+| not submitted | WORD 2D evaluation | 1629543 afterok | 4a800 submit-count limit |
+| 1629542 | AbdAutoPET 2D smoke | none | PENDING (Priority) |
+| 1629544 | AbdAutoPET 2D 1200-epoch train | 1629542 afterok | PENDING (Dependency) |
+| 1629547 | AbdAutoPET 2D evaluation | 1629544 afterok | PENDING (Dependency) |
+
+The WORD evaluation script is complete and syntax-checked. It should be
+submitted as soon as one 4a800 job leaves the queue; the failed submission did
+not create a Slurm job.
 
 ## Completion Criteria
 

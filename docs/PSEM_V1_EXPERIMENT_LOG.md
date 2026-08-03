@@ -8,7 +8,7 @@
 - Baseline worktree: `/gpfs/work/aac/bolinren19/2026-07/OD_OWT`
 - Baseline branch: `main`
 - Starting commit: `6cdf9b5`
-- Status: implementation in progress
+- Status: AbdAutoPET 2D and WORD 2D formally evaluated; AbdAutoPET 3D running
 
 ## Goal
 
@@ -227,3 +227,91 @@ The freed QOS slots were used for the PSEM smoke tests:
 
 No PSEM error or result files exist yet because neither job has started.
 
+## 2026-07-25 Full training and evaluation chain
+
+Both smoke jobs completed successfully with finite losses and saved
+checkpoints:
+
+- 2D smoke `1561497`: max memory about 5.76 GB.
+- 3D Fixfr4 smoke `1561498`: max memory about 7.15 GB.
+
+The full runs were then submitted across both available account/QOS
+associations:
+
+- PSEM AbdAutoPET 2D full: job `1563805`,
+  `account=sifansong`, `qos=4a800`, 2 GPUs.
+- PSEM AbdAutoPET 3D Fixfr4 full: job `1563807`,
+  `account=angelosstefanidis`, `qos=8a800`, 2 GPUs.
+
+Evaluation jobs:
+
+- PSEM 2D evaluation: job `1563831`, `afterok:1563805`.
+- PSEM 3D Fixfr4 evaluation: job `1563842`, `afterok:1563807`.
+
+The shared 3D evaluator defaults to fixed-255 intensity scaling, whereas
+PSEM AbdAutoPET was trained with per-sample normalization. The small wrapper
+`tools/evaluate_psem_abdautopet_3d.py` therefore reuses the shared evaluator
+while forcing `per_sample` case loading and explicit `label_1` through
+`label_4` names. Its import and command-line entry point were smoke-tested
+before job `1563842` was submitted.
+
+LossBalance evaluation jobs were also scheduled as part of the same queue
+fill:
+
+- completed WORD 2D checkpoint evaluation: job `1563822`;
+- WORD 3D evaluation: job `1563824`, `afterok:1560196`.
+
+At the final submission check, full PSEM training and immediate LossBalance
+2D evaluation were pending for priority; the three dependent evaluations
+were pending for their corresponding successful training completion. No
+QOS submission limit was reached.
+
+
+## 2026-08-02 Formal Result And Queue Refresh
+
+### AbdAutoPET 2D
+
+- Full training job 1563805 and evaluation job 1563831 completed.
+- Direct post macro Dice is 90.11 versus OWT 89.94.
+- Indirect post macro Dice is 90.51 versus OWT 90.39.
+- Whole L2 is 0.00015039 versus OWT 0.00015664.
+- The gains are only +0.17 and +0.13 points from one training seed. This is
+  recorded as limited or marginal evidence, not a stable improvement claim.
+
+### WORD Common8 2D
+
+- Smoke 1605665, full training 1605670, and evaluation 1605673 completed.
+- The evaluation used the same 24-case CSV, fixed-255 normalization, thresholds,
+  component filtering, spacing, and common evaluator as the original OWT.
+- Direct raw/post macro Dice is 34.48/36.27 versus OWT 55.30/55.07.
+- Indirect raw/post macro Dice is 17.66/34.87 versus OWT 47.23/58.31.
+- Whole L2 is 0.00171145, 5.45 times the OWT value.
+- Organs-only L2 is 0.00667906, 9.83 times the OWT value.
+- Direct predicted-volume/GT-volume ratio is 2.664 after class macro averaging.
+- Gallbladder and esophagus Direct post Dice become 10.83 and 9.89 instead of
+  zero, but large-organ performance collapses. The net result is formally
+  classified as ineffective.
+
+The WORD failure does not indicate a padding leak: TGEnc and AHER padding
+isolation tests pass. The design problem is that PSEM-v1 uses GT presence both
+as supervision and token eligibility. WORD training samples contain only
+2.276 present classes on average and keep 1.511, whereas Whole, organs-only,
+and leave-one-out inference combine most or all nine token groups. AbdAutoPET
+has fewer and more frequent classes, so its train/inference state mismatch is
+much smaller.
+
+### AbdAutoPET 3D
+
+- The original two-GPU job 1563807 was cancelled after 19:12:08.
+- The run resumed from checkpoint-100 as four-GPU job 1567343.
+- At this refresh it is running at epoch 1098 with L2 0.000926 and LPIPS
+  0.018219.
+- Evaluation job 1563842 waits on successful completion of 1567343.
+
+### Follow-up
+
+PSEM-v2a was created in a separate worktree to keep the padding-safe model but
+train explicit Direct-positive, Direct-negative, leave-one-out, Whole,
+background-only, organs-only, and random full-bank query states. Its evidence
+must remain separate from PSEM-v1 until its WORD and AbdAutoPET 2D evaluations
+finish.

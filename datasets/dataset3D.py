@@ -278,9 +278,10 @@ def scale(img, label, v):
     return img, label
 
 class RandomGenerator(object):
-    def __init__(self, output_size, low_res):
+    def __init__(self, output_size, low_res, renormalize_after_resize=True):
         self.output_size = output_size
         self.low_res = low_res
+        self.renormalize_after_resize = renormalize_after_resize
         seed = 42
         self.rng = np.random.default_rng(seed)
         self.p = 0.5
@@ -336,7 +337,10 @@ class RandomGenerator(object):
         if x != self.output_size[0] or y != self.output_size[1]:
             image = zoom(image, (self.output_size[0] / x, self.output_size[1] / y, 1.0), order=3)
             label = zoom(label, (self.output_size[0] / x, self.output_size[1] / y, 1.0), order=0)
-            image = (image-image.min())/(image.max()-image.min()+0.00000001)
+            if self.renormalize_after_resize:
+                image = (image-image.min())/(image.max()-image.min()+0.00000001)
+            else:
+                image = np.clip(image, 0.0, 1.0)
         label_h, label_w, label_d = label.shape
         
         image = torch.from_numpy(image.astype(np.float32))
@@ -346,6 +350,42 @@ class RandomGenerator(object):
         
         sample = {'image': image, 'label': label.long()}
         return sample
+
+
+def _parse_present_classes(value):
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return []
+    return [int(item) for item in str(value).split('|') if item]
+
+
+def crop_around_class(image, label, crop_size, class_id=None, jitter=0):
+    """Crop image and label together in XY; 3D depth is kept unchanged."""
+    height, width = image.shape[:2]
+    if crop_size > height or crop_size > width:
+        return image, label, False
+
+    if class_id is not None:
+        label_map = np.any(label == class_id, axis=2) if label.ndim == 3 else label == class_id
+        coordinates = np.argwhere(label_map)
+    else:
+        coordinates = np.empty((0, 2))
+    if coordinates.size:
+        center_y = int((coordinates[:, 0].min() + coordinates[:, 0].max()) // 2)
+        center_x = int((coordinates[:, 1].min() + coordinates[:, 1].max()) // 2)
+        if jitter > 0:
+            center_y += random.randint(-jitter, jitter)
+            center_x += random.randint(-jitter, jitter)
+        top = min(max(center_y - crop_size // 2, 0), height - crop_size)
+        left = min(max(center_x - crop_size // 2, 0), width - crop_size)
+    else:
+        top = random.randint(0, height - crop_size)
+        left = random.randint(0, width - crop_size)
+
+    return (
+        image[top:top + crop_size, left:left + crop_size, ...],
+        label[top:top + crop_size, left:left + crop_size, ...],
+        True,
+    )
 
 
 class dataset_reader(Dataset):
@@ -359,44 +399,99 @@ class dataset_reader(Dataset):
         df = pd.read_csv(base_dir)
         self.sample_list = [sample_pth for sample_pth in df["image_pth"]]
         self.masks_list = [sample_pth for sample_pth in df["mask_pth"]]
+        self.present_classes = (
+            [_parse_present_classes(value) for value in df["present_classes"]]
+            if "present_classes" in df.columns
+            else [[] for _ in self.sample_list]
+        )
+        self.crop_mix_prob = float(getattr(model_args, "crop_mix_prob", 0.0))
+        self.crop_focus_sample_prob = float(getattr(model_args, "crop_focus_sample_prob", 0.0))
+        self.crop_focus_classes = set(getattr(model_args, "crop_focus_classes", []))
+        self.crop_size = int(getattr(model_args, "crop_size", 0) or model_args.input_size)
+        self.crop_jitter = int(getattr(model_args, "crop_jitter", 0))
+        self.focus_indices = [
+            index for index, classes in enumerate(self.present_classes)
+            if self.crop_focus_classes.intersection(classes)
+        ]
         print("len(self.sample_list 2D)", len(self.sample_list))
         print("self.sample_list[0] 2D", self.sample_list[0])
+        if self.crop_mix_prob > 0:
+            print(
+                "CropMix enabled:",
+                f"crop_prob={self.crop_mix_prob}",
+                f"focus_sample_prob={self.crop_focus_sample_prob}",
+                f"focus_classes={sorted(self.crop_focus_classes)}",
+                f"focus_rows={len(self.focus_indices)}",
+                f"crop_size={self.crop_size}",
+                f"jitter={self.crop_jitter}",
+            )
 
     def __len__(self):
         return len(self.sample_list)
 
     def __getitem__(self, idx):
+        crop_requested = self.crop_mix_prob > 0 and random.random() < self.crop_mix_prob
+        actual_idx = idx
+        if (
+            crop_requested
+            and self.focus_indices
+            and random.random() < self.crop_focus_sample_prob
+        ):
+            actual_idx = random.choice(self.focus_indices)
+
         if self.model_args.dataset_type == "2D":
-            data = cv2.imread(self.sample_list[idx], cv2.IMREAD_UNCHANGED)
+            data = cv2.imread(self.sample_list[actual_idx], cv2.IMREAD_UNCHANGED)
             data = cv2.cvtColor(data, cv2.COLOR_BGR2RGB)
 
             data = np.float32(data)
-            data = (data-data.min())/(data.max()-data.min()+0.00000001)
+            if getattr(self.model_args, "intensity_norm", "per_sample") == "fixed_255":
+                data = data / 255.0
+            else:
+                data = (data-data.min())/(data.max()-data.min()+0.00000001)
             h, w, d = data.shape
 
-            mask = cv2.imread(self.masks_list[idx], cv2.IMREAD_UNCHANGED)
+            mask = cv2.imread(self.masks_list[actual_idx], cv2.IMREAD_UNCHANGED)
             mask = cv2.cvtColor(mask, cv2.COLOR_BGR2RGB)
 
             image = np.float32(data)
             label = np.float32(mask)
 
         elif self.model_args.dataset_type == "3D":
-            data_path = self.sample_list[idx]
+            data_path = self.sample_list[actual_idx]
             start_frame = int(data_path.split(".jpg")[0].split("_")[-1])
             base_data_path = "_".join(data_path.split(".jpg")[0].split("_")[:-1])
             images = [cv2.imread(base_data_path+"_"+str(i_i)+".jpg", cv2.IMREAD_GRAYSCALE) for i_i in range(start_frame, start_frame+self.model_args.fix_frame)]
             image = np.stack(images)
             image = np.transpose(image, (1, 2, 0))
             image = np.float32(image)
-            image = (image-image.min())/(image.max()-image.min()+0.00000001)
+            if getattr(self.model_args, "intensity_norm", "per_sample") == "fixed_255":
+                image = image / 255.0
+            else:
+                image = (image-image.min())/(image.max()-image.min()+0.00000001)
 
-            mask_path = self.masks_list[idx]
+            mask_path = self.masks_list[actual_idx]
             start_frame = int(mask_path.split(".png")[0].split("_")[-1])
             base_mask_path = "_".join(mask_path.split(".png")[0].split("_")[:-1])
             masks = [cv2.imread(base_mask_path+"_"+str(i_i)+".png", cv2.IMREAD_GRAYSCALE) for i_i in range(start_frame, start_frame+self.model_args.fix_frame)]
             mask = np.stack(masks)
             mask = np.transpose(mask, (1, 2, 0))
             label = np.float32(mask)
+
+        crop_focus_class = 0
+        crop_applied = False
+        if crop_requested:
+            present = {int(value) for value in np.unique(label) if value > 0}
+            focus_candidates = sorted(present.intersection(self.crop_focus_classes))
+            candidates = focus_candidates or sorted(present)
+            selected_class = random.choice(candidates) if candidates else None
+            image, label, crop_applied = crop_around_class(
+                image,
+                label,
+                self.crop_size,
+                class_id=selected_class,
+                jitter=self.crop_jitter,
+            )
+            crop_focus_class = selected_class or 0
 
         sample = {'image': image, 'label': label}
         
@@ -414,5 +509,12 @@ class dataset_reader(Dataset):
             sample['image'] = sample['image'].permute(3,0,1,2)
             sample['label'] = sample['label'].permute(3,0,1,2)
 
-        sample['case_name'] = [self.sample_list[idx].strip('\n'), self.masks_list[idx].strip('\n')]
+        if crop_focus_class and not torch.any(sample['label'] == crop_focus_class):
+            crop_focus_class = 0
+        sample['crop_applied'] = int(crop_applied)
+        sample['crop_focus_class'] = int(crop_focus_class)
+        sample['case_name'] = [
+            self.sample_list[actual_idx].strip('\n'),
+            self.masks_list[actual_idx].strip('\n'),
+        ]
         return sample

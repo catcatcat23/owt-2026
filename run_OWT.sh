@@ -59,16 +59,16 @@ ARCH_Ver=v11
 TRAIN_Ver=v01
 LOSS_Ver=L2-LPIPS ## L2; -LPIPS
 ####################################################
-TRAIN_CSV_PATH=${SERVER_PATH}/Datasets/Med3d/Med3d_Others/AbdAutoPet/Training/Training_H100_1_Final112.csv
+TRAIN_CSV_PATH=/gpfs/work/aac/bolinren19/2026-07/Training_Fixfr4_A100_Final112.csv
 RESULT_PATH=${SERVER_PATH}/Github/OWT/Results/
 PROCESS_NAME=Token_${MODEL_NAME}_${BASE_LR}_${CLASSES}_${INPUT_SIZE}_${TOKEN_Fac}_${ARCH_Ver}_${TRAIN_Ver}_${LOSS_Ver}_GPU${N_GPU}_${BATCH_SIZE}_${EPOCH}
 mkdir -p ${RESULT_PATH}/${CUR_PATH}/${PROCESS_NAME}/
 mkdir -p ${RESULT_PATH}/${CUR_PATH}/${PROCESS_NAME}/vis/
 ###########################################################
-TRAIN_DATA_PATH=/raid/camca/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Training/image/
-TRAIN_LABL_PATH=/raid/camca/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Training/mask/
-TEST_DATA_PATH=/raid/camca/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Test/image/
-TEST_LABL_PATH=/raid/camca/ss3112/Datasets/Med3d/Med3d_Others/AbdAutoPet/Test/mask/
+TRAIN_DATA_PATH=/gpfs/work/aac/bolinren19/2026-07/DATA/zip/Training/image
+TRAIN_LABL_PATH=/gpfs/work/aac/bolinren19/2026-07/DATA/zip/Training/mask
+TEST_DATA_PATH=/gpfs/work/aac/bolinren19/2026-07/DATA/zip/Test/image/
+TEST_LABL_PATH=/gpfs/work/aac/bolinren19/2026-07/DATA/zip/Test/mask/
 
 ## 1-slice alter with 2D VAGAN Encoder/Decoder, training for medical image datasets ## 
 ####################################################

@@ -35,7 +35,7 @@ from util.misc import NativeScalerWithGradNormCount as NativeScaler
 # import models_mae
 # import models_mae_token
 
-from engine_pretrain import train_one_epoch
+from engine_pretrain_lossbalance import train_one_epoch
 
 
 def get_args_parser():
@@ -111,6 +111,12 @@ def get_args_parser():
     parser.add_argument('--training_version', type=str, default='v0', help='v0, v1...')
     parser.add_argument('--token_factor', type=int, default=1, help='how many tokens to generate a class')
     parser.add_argument('--loss_version', type=str, default='L2', help='L1-LPIPS-GAN')
+    parser.add_argument('--roi_loss_weight', type=float, default=1.0,
+                        help='weight of per-sample, per-organ ROI-L2 reconstruction loss')
+    parser.add_argument('--roi_background_weight', type=float, default=0.0,
+                        help='background weight inside ROI-L2; 0 excludes background')
+    parser.add_argument('--lpips_loss_weight', type=float, default=1.0,
+                        help='weight applied to LPIPS when enabled')
     parser.add_argument('--dataset_type', type=str, default='2D', help='2D, 3D') ## but 3D controlled by training_version -3D
     parser.add_argument('--intensity_norm', type=str, default='per_sample',
                         choices=('per_sample', 'fixed_255'),
@@ -191,7 +197,7 @@ def main(args):
         )
     else:
         data_loader_train = DataLoader(dataset_train, batch_size=args.batch_size, sampler=sampler_train, num_workers=args.num_workers, pin_memory=args.pin_mem,drop_last=True,)
-    
+
     if args.text_encoding != "None":
         print("args.text_encoding", args.text_encoding, os.path.exists(args.text_encoding))
 
@@ -207,7 +213,7 @@ def main(args):
             import models_mae3D
             model = models_mae3D.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, model_args=args)
     else: ## v1, v2, v3...
-        import OWT_models ## OWT
+        import OWT_models_lossbalance as OWT_models
         model = OWT_models.__dict__[args.model](img_size=args.input_size, norm_pix_loss=args.norm_pix_loss, model_args=args)
 
     if args.checkpoint != 'None':
@@ -222,7 +228,7 @@ def main(args):
     print("Model = %s" % str(model_without_ddp))
 
     eff_batch_size = args.batch_size * args.accum_iter * misc.get_world_size()
-    
+
     if args.lr is None:  # only base_lr is specified
         args.lr = args.blr * eff_batch_size / 256
 
@@ -235,7 +241,7 @@ def main(args):
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
         model_without_ddp = model.module
-    
+
     # following timm: set wd as 0 for bias and norm layers
     param_groups = optim_factory.add_weight_decay(model_without_ddp, args.weight_decay)
     optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.95))
@@ -284,6 +290,10 @@ if __name__ == '__main__':
         raise ValueError('--crop_focus_sample_prob must be in [0, 1]')
     if args.crop_size < 0 or args.crop_jitter < 0:
         raise ValueError('--crop_size and --crop_jitter must be non-negative')
+    if args.roi_loss_weight < 0 or args.roi_background_weight < 0:
+        raise ValueError('ROI loss weights must be non-negative')
+    if args.lpips_loss_weight < 0:
+        raise ValueError('--lpips_loss_weight must be non-negative')
 
     args.num_classes_with_bg = args.num_classes + 1
     args.organ_token_total = 1*args.token_factor*1 + args.token_factor*args.num_classes ## 20+180 = 200

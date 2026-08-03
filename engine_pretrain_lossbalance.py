@@ -45,7 +45,7 @@ def train_one_epoch(model: torch.nn.Module,
     if log_writer is not None:
         print('log_dir: {}'.format(log_writer.log_dir))
 
-    # for data_iter_step, (samples, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)): 
+    # for data_iter_step, (samples, _) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
     for data_iter_step, samples in enumerate(metric_logger.log_every(data_loader, print_freq, header)): ## num_classes !=1
 
         # we use a per iteration (instead of per epoch) lr scheduler
@@ -94,7 +94,11 @@ def train_one_epoch(model: torch.nn.Module,
             if args.arch_version.startswith('v0'):
                 loss, pred, middle_output = model(samples, mask_ratio=args.mask_ratio)
             else:
-                middle = {"image_target": image_target, "random_selected_class": random_selected_class}
+                middle = {
+                    "image_target": image_target,
+                    "random_selected_class": random_selected_class,
+                    "label": label,
+                }
                 if args.text_encoding != "None":
                     middle["text_features"] = aligned_text_features
                 loss, pred, middle_output = model(samples, mask_ratio=mask_ratio, middle=middle)
@@ -103,30 +107,30 @@ def train_one_epoch(model: torch.nn.Module,
             if args.dataset_type == "2D":
                 # Convert the first prediction to a numpy array and save as PNG
                 pred_image = pred[-1].detach().cpu().numpy()
-                pred_image = (pred_image * 255).astype(np.uint8) 
+                pred_image = (pred_image * 255).astype(np.uint8)
                 pred_image = np.transpose(pred_image, (1, 2, 0))
                 pred_image_pil = Image.fromarray(pred_image)
                 pred_image_pil.save(args.output_dir+'vis/0_pred.png')
-    
+
                 image_target_image = image_target[-1].detach().cpu().numpy()
                 image_target_image = (image_target_image * 255).astype(np.uint8)
                 image_target_image = np.transpose(image_target_image, (1, 2, 0))
                 image_target_image_pil = Image.fromarray(image_target_image)
                 image_target_image_pil.save(args.output_dir+'vis/0_image_target.png')
-    
+
                 image_pil = image[-1].detach().cpu().numpy()
                 image_pil = (image_pil * 255).astype(np.uint8)
                 image_pil = np.transpose(image_pil, (1, 2, 0))
                 image_pil_pil = Image.fromarray(image_pil)
                 image_pil_pil.save(args.output_dir+'vis/0_image.png')
-    
+
                 mask = label[-1].detach().cpu().numpy()
                 mask = mask*20/255
                 mask = (mask * 255).astype(np.uint8)
                 mask = np.transpose(mask, (1, 2, 0))
                 mask_pil = Image.fromarray(mask)
                 mask_pil.save(args.output_dir+'vis/0_mask_check.png')
-                
+
                 mask = label[-1].detach().cpu().numpy()
                 mask = mask.astype(np.uint8)
                 mask = np.transpose(mask, (1, 2, 0))
@@ -139,21 +143,21 @@ def train_one_epoch(model: torch.nn.Module,
                     pred_image = np.transpose(pred_images[:,i_im,:,:], (1, 2, 0))
                     pred_image_pil = Image.fromarray(pred_image)
                     pred_image_pil.save(args.output_dir+'vis/0_pred_'+str(i_im)+'.png')
-    
+
                 image_target_images = image_target[-1].detach().cpu().numpy()
                 image_target_images = (image_target_images * 255).astype(np.uint8)
                 for i_im in range(image_target_images.shape[1]):
                     image_target_image = np.transpose(image_target_images[:,i_im,:,:], (1, 2, 0))
                     image_target_image_pil = Image.fromarray(image_target_image)
                     image_target_image_pil.save(args.output_dir+'vis/0_image_target_'+str(i_im)+'.png')
-    
+
                 image_pils = image[-1].detach().cpu().numpy()
                 image_pils = (image_pils * 255).astype(np.uint8)
                 for i_im in range(image_pils.shape[1]):
                     image_pil = np.transpose(image_pils[:,i_im,:,:], (1, 2, 0))
                     image_pil_pil = Image.fromarray(image_pil)
                     image_pil_pil.save(args.output_dir+'vis/0_image_'+str(i_im)+'.png')
-    
+
                 masks = label[-1].detach().cpu().numpy()
                 masks = masks*20/255
                 masks = (masks * 255).astype(np.uint8)
@@ -161,11 +165,11 @@ def train_one_epoch(model: torch.nn.Module,
                     mask = np.transpose(masks[:,i_im,:,:], (1, 2, 0))
                     mask_pil = Image.fromarray(mask)
                     mask_pil.save(args.output_dir+'vis/0_mask_check_'+str(i_im)+'.png')
-            
+
         loss_value = loss.item()
         if "LPIPS" in args.loss_version:
             p_loss_value = middle_output["p_loss"].item()
-            loss = loss + 1.0*middle_output["p_loss"]
+            loss = loss + args.lpips_loss_weight * middle_output["p_loss"]
 
         loss /= accum_iter
         loss_scaler(loss, optimizer, parameters=model.parameters(),
@@ -176,6 +180,20 @@ def train_one_epoch(model: torch.nn.Module,
         torch.cuda.synchronize()
 
         metric_logger.update(loss=loss_value)
+        metric_logger.update(
+            global_recon_loss=middle_output["global_recon_loss"].item(),
+            roi_loss=middle_output["roi_loss"].item(),
+            roi_valid_samples=middle_output["roi_valid_samples"].item(),
+        )
+        class_losses = middle_output["roi_class_losses"].detach()
+        class_counts = middle_output["roi_class_counts"].detach()
+        for class_id in range(1, args.num_classes_with_bg):
+            metric_logger.update(**{
+                f"roi_c{class_id}_sum": (
+                    class_losses[class_id] * class_counts[class_id]
+                ).item(),
+                f"roi_c{class_id}_count": class_counts[class_id].item(),
+            })
         if args.num_classes > 1 and crop_applied is not None:
             metric_logger.update(crop_fraction=crop_applied.float().mean().item())
             metric_logger.update(

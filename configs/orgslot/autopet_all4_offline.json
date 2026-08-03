@@ -1,0 +1,21 @@
+{
+  "classes": [
+    {"name": "background", "raw_id": 0, "is_background": true},
+    {"name": "kidney_combined", "raw_id": 1},
+    {"name": "spleen", "raw_id": 2},
+    {"name": "pancreas", "raw_id": 3},
+    {"name": "liver", "raw_id": 4}
+  ],
+  "stages": {
+    "base": {
+      "stage": "base",
+      "visible_slots": [
+        "background",
+        "kidney_combined",
+        "spleen",
+        "pancreas",
+        "liver"
+      ]
+    }
+  }
+}

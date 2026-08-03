@@ -179,6 +179,9 @@ class StrictVisibilityDataset(Dataset):
                 output["case_id"] = str(case_name)
         if "slice_index" in sample:
             output["slice_index"] = int(sample["slice_index"])
+        for key in ("focus_class_id", "roi_applied", "crop_box"):
+            if key in sample:
+                output[key] = sample[key]
         return output
 
 

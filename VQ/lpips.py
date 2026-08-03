@@ -10,11 +10,14 @@ from VQ.util import get_ckpt_path
 
 class LPIPS(nn.Module):
     # Learned perceptual metric
-    def __init__(self, use_dropout=True):
+    def __init__(self, use_dropout=True, vgg_pretrained=True):
         super().__init__()
         self.scaling_layer = ScalingLayer()
         self.chns = [64, 128, 256, 512, 512]  # vg16 features
-        self.net = vgg16(pretrained=True, requires_grad=False)
+        self.net = vgg16(
+            pretrained=vgg_pretrained,
+            requires_grad=False,
+        )
         self.lin0 = NetLinLayer(self.chns[0], use_dropout=use_dropout)
         self.lin1 = NetLinLayer(self.chns[1], use_dropout=use_dropout)
         self.lin2 = NetLinLayer(self.chns[2], use_dropout=use_dropout)
@@ -121,4 +124,3 @@ def normalize_tensor(x,eps=1e-10):
 
 def spatial_average(x, keepdim=True):
     return x.mean([2,3],keepdim=keepdim)
-

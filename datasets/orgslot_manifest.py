@@ -75,7 +75,9 @@ class OrganSlotManifestDataset(Dataset):
         self.dataset_type = dataset_type
         self.fix_frame = int(fix_frame)
         self.intensity_norm = intensity_norm
-        self.expected_size = int(expected_size)
+        self.expected_size = (
+            None if expected_size is None else int(expected_size)
+        )
         self.records = _read_csv(csv_path)
         if max_samples is not None:
             self.records = self.records[: int(max_samples)]
@@ -95,6 +97,8 @@ class OrganSlotManifestDataset(Dataset):
         return value
 
     def _check_spatial_size(self, value, path):
+        if self.expected_size is None:
+            return
         if tuple(value.shape[:2]) != (self.expected_size, self.expected_size):
             raise ValueError(
                 f"expected {self.expected_size}x{self.expected_size}, "

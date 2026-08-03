@@ -26,7 +26,12 @@ def model_args(dataset_type="2D", slot_count=3):
     )
 
 
-def tiny_model(dataset_type="2D", specs=None, slot_tg_depth=1):
+def tiny_model(
+    dataset_type="2D",
+    specs=None,
+    slot_tg_depth=1,
+    fusion_mode="post_layernorm",
+):
     if specs is None:
         specs = [
             {"name": "background", "raw_class_id": 0},
@@ -48,6 +53,7 @@ def tiny_model(dataset_type="2D", specs=None, slot_tg_depth=1):
         model_args=model_args(dataset_type, len(specs)),
         slot_specs=specs,
         slot_tg_depth=slot_tg_depth,
+        fusion_mode=fusion_mode,
     )
 
 
@@ -100,6 +106,27 @@ class OrganSlotModelTests(unittest.TestCase):
         self.assertTrue(torch.equal(actual[0], changed[0]))
         with self.assertRaisesRegex(ValueError, "retain at least one"):
             model.fuse_canvases(canvases, torch.zeros_like(keep))
+
+    def test_linear_sqrt_fusion_bypasses_post_layernorm(self):
+        model = tiny_model(fusion_mode="linear_sqrt")
+        canvases = {
+            "background": torch.randn(2, 4, 32),
+            "kidney": torch.randn(2, 4, 32),
+            "spleen": torch.randn(2, 4, 32),
+        }
+        keep = torch.tensor([[1, 1, 0], [0, 1, 1]], dtype=torch.bool)
+        expected = torch.stack([
+            (canvases["background"][0] + canvases["kidney"][0])
+            / (2 ** 0.5),
+            (canvases["kidney"][1] + canvases["spleen"][1])
+            / (2 ** 0.5),
+        ])
+        actual = model.fuse_canvases(canvases, keep)
+        self.assertTrue(torch.equal(actual, expected))
+        self.assertTrue(all(
+            not parameter.requires_grad
+            for parameter in model.fusion_norm.parameters()
+        ))
 
     def test_append_copy_preserves_all_existing_tensors(self):
         model = tiny_model()

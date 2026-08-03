@@ -29,6 +29,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         model_args=None,
         slot_specs=None,
         slot_tg_depth=1,
+        fusion_mode="post_layernorm",
     ):
         if slot_specs is None:
             raise ValueError("slot_specs are required")
@@ -91,7 +92,17 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                 init_from=None,
             )
 
+        if fusion_mode not in {"post_layernorm", "linear_sqrt"}:
+            raise ValueError(
+                "fusion_mode must be post_layernorm or linear_sqrt"
+            )
+        self.fusion_mode = fusion_mode
+        # Keep this module in both variants so checkpoints remain structurally
+        # compatible. The linear-sqrt ablation bypasses and freezes it.
         self.fusion_norm = norm_layer(decoder_embed_dim)
+        if self.fusion_mode == "linear_sqrt":
+            for parameter in self.fusion_norm.parameters():
+                parameter.requires_grad = False
 
     @property
     def slot_names(self):
@@ -174,7 +185,9 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         fused = canvas_sum / retained_count.sqrt()[:, None, None].to(
             canvas_sum.dtype
         )
-        return self.fusion_norm(fused)
+        if self.fusion_mode == "post_layernorm":
+            return self.fusion_norm(fused)
+        return fused
 
     def forward_slots(
         self,
@@ -353,7 +366,12 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                     p.numel() for p in slot.parameters() if p.requires_grad
                 ),
             }
-        return {"total": total, "trainable": trainable, "per_slot": per_slot}
+        return {
+            "total": total,
+            "trainable": trainable,
+            "fusion_mode": self.fusion_mode,
+            "per_slot": per_slot,
+        }
 
 
 def mae_vit_base_patch16_dec512d8b(**kwargs):

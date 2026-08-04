@@ -282,8 +282,8 @@ LossBalance-v2 WORD 2D 的统一评估 Job `1623976` 已于 2026-07-31 完成，
 | 方法 | 分支 / commit | smoke | 正式训练 | 统一评估 | 当前状态 |
 |---|---|---:|---:|---:|---|
 | PSEM-v2 + VQ-CNN | `experiment/psem-v2-vqcnn-word-v0@dbeea72` | 1639875 | 1639876 | 1639877 | 三段 afterok 链已提交；smoke 等待 Priority |
-| LossBalance-v3a + VQ-CNN | `experiment/lossbalance-v3-vqcnn-word-v0@771a38b` | 1639878 | 1639891 | 1639892 | 三段 afterok 链已提交；smoke 等待 Priority |
-| PSEM-v2 + LossBalance-v3a（ViT） | `experiment/psem-v2-lossbalance-v3-word-v0@53db079` | 尚未提交 | 尚未提交 | 尚未提交 | 代码、forward/backward、tiny overfit 已通过；两个 A800 QOS 均达到 submit 上限 |
+| LossBalance-v3a + VQ-CNN | `experiment/lossbalance-v3-vqcnn-word-v0@771a38b` | 1639878 | 1639883 | 1639884 | 三段 afterok 链已提交；smoke 等待 Priority |
+| PSEM-v2 + LossBalance-v3a（ViT） | `experiment/psem-v2-lossbalance-v3-word-v0@53db079` | 1639885 | 1639886 | 1639887 | 三段 afterok 链已提交；smoke 等待 Priority |
 
 控制变量：均使用 WORD Common8 2D、224×224、20 tokens/class、L2+LPIPS、`fixed_255`、有效 batch size 64、2×A800 和 1200 epochs。两条 VQ-CNN 实验沿用 v31 CNN 主干；融合实验沿用 v11 ViT 主干，仅组合 PSEM-v2 query-matched20 与 LossBalance-v3a 正状态 ROI 项。三套测试均通过模型 forward/backward 和 tiny overfit；PSEM 组合额外使用不等长 per-sample keep mask 验证 padding 隔离。
 

@@ -275,6 +275,20 @@ LossBalance-v2 WORD 2D 的统一评估 Job `1623976` 已于 2026-07-31 完成，
 
 后续实验资源策略（2026-08-03）：新损失、mask 或架构先完成 2D smoke、2D 正式训练和统一推理；只有 2D 的 Direct/Indirect、关键小器官 Dice 与重建指标证明有意义且无灾难性退化后，才提交对应 3D 正式训练。3D smoke 仅作为代码可运行性验证。
 
+### 2026-08-04 WORD 2D CNN / 融合消融
+
+为检验小规模 WORD 上 ViT 图像主干是否限制效果，新建三条严格分离的 2D 实验链。这里的“VQ-CNN”沿用仓库命名，实际只启用 VQGAN-style 连续 CNN encoder/decoder，不包含 codebook、quantizer 或离散 VQ loss。
+
+| 方法 | 分支 / commit | smoke | 正式训练 | 统一评估 | 当前状态 |
+|---|---|---:|---:|---:|---|
+| PSEM-v2 + VQ-CNN | `experiment/psem-v2-vqcnn-word-v0@dbeea72` | 1639875 | 1639876 | 1639877 | 三段 afterok 链已提交；smoke 等待 Priority |
+| LossBalance-v3a + VQ-CNN | `experiment/lossbalance-v3-vqcnn-word-v0@771a38b` | 1639878 | 1639891 | 1639892 | 三段 afterok 链已提交；smoke 等待 Priority |
+| PSEM-v2 + LossBalance-v3a（ViT） | `experiment/psem-v2-lossbalance-v3-word-v0@53db079` | 尚未提交 | 尚未提交 | 尚未提交 | 代码、forward/backward、tiny overfit 已通过；两个 A800 QOS 均达到 submit 上限 |
+
+控制变量：均使用 WORD Common8 2D、224×224、20 tokens/class、L2+LPIPS、`fixed_255`、有效 batch size 64、2×A800 和 1200 epochs。两条 VQ-CNN 实验沿用 v31 CNN 主干；融合实验沿用 v11 ViT 主干，仅组合 PSEM-v2 query-matched20 与 LossBalance-v3a 正状态 ROI 项。三套测试均通过模型 forward/backward 和 tiny overfit；PSEM 组合额外使用不等长 per-sample keep mask 验证 padding 隔离。
+
+资源说明：`sifansong/4a800` 已占满提交数后，LossBalance-v3a + VQ-CNN 的正式训练/评估改投 `angelosstefanidis/8a800`。两者均为 A800，脚本中的 GPU 数、batch、优化器与超参数未改变，因此不构成方法侧实验差异。
+
 ## 11. 已知数据质量问题
 
 原始 OWT AbdAutoPET 合并目录中的 `step3_segmentation_summary.csv` 被错误写成 `cases=0` 和 `inf`，但同目录的 `step3_segmentation_per_case.csv` 完整包含 200 个唯一病例、1,600 行结果，`Result.txt` 也记录了正确的合并结果。本文 E01 的所有 Step 3 数值均由逐病例 CSV 按统一口径重算，而不是读取这个损坏的 summary 文件。

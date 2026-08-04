@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=eval_psemv2a_word2d
+#SBATCH --job-name=eval_psemv2_lbv3
 #SBATCH --partition=gpua800
 #SBATCH --account=sifansong
 #SBATCH --qos=4a800

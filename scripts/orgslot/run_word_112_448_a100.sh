@@ -20,6 +20,12 @@ LPIPS_STATE=${LPIPS_STATE:-${DATA_ROOT}/pretrained/owt_lpips_vgg16.pth}
 
 FUSION_MODE=${FUSION_MODE:?Set FUSION_MODE after the current AutoPET evaluations}
 LAMBDA_SEG=${LAMBDA_SEG:?Set LAMBDA_SEG after the current AutoPET evaluations}
+POSITIVE_ROI_LOSS_WEIGHT=${POSITIVE_ROI_LOSS_WEIGHT:-0}
+ROI_POSITIVE_SAMPLE_COUNTS=${ROI_POSITIVE_SAMPLE_COUNTS:-}
+ROI_FREQUENCY_DATASET_SIZE=${ROI_FREQUENCY_DATASET_SIZE:-}
+ROI_FREQUENCY_ALPHA=${ROI_FREQUENCY_ALPHA:-0.5}
+ROI_MAX_WEIGHT_RATIO=${ROI_MAX_WEIGHT_RATIO:-4.0}
+ORGAN_ROI_PROBABILITY=${ORGAN_ROI_PROBABILITY:-0.2}
 GPU_IDS=${GPU_IDS:-0,1}
 N_GPU=${N_GPU:-2}
 MASTER_PORT=${MASTER_PORT:-25741}
@@ -50,7 +56,7 @@ if [[ "${ARM}" == "roi20" && ! -f "${ROI_INDEX}" ]]; then
   exit 2
 fi
 
-RUN_NAME=${RUN_NAME:-OrgSlot_WORD112_input448_${ARM}_${FUSION_MODE}_seg${LAMBDA_SEG}_eb${TARGET_EFFECTIVE_BATCH}_u${MAX_UPDATES}}
+RUN_NAME=${RUN_NAME:-OrgSlot_WORD112_input448_${ARM}_${FUSION_MODE}_seg${LAMBDA_SEG}_pos${POSITIVE_ROI_LOSS_WEIGHT}_eb${TARGET_EFFECTIVE_BATCH}_u${MAX_UPDATES}}
 OUTPUT_DIR=${OUTPUT_DIR:-${REPO_ROOT}/Results/OrganSlotBank/Common8/WORD_2D/${RUN_NAME}}
 if [[ -e "${OUTPUT_DIR}" ]]; then
   echo "Refusing to reuse output directory: ${OUTPUT_DIR}" >&2
@@ -81,6 +87,9 @@ COMMAND=(
   --lambda_lpips 1.0
   --lpips_state "${LPIPS_STATE}"
   --lambda_seg "${LAMBDA_SEG}"
+  --positive_roi_loss_weight "${POSITIVE_ROI_LOSS_WEIGHT}"
+  --roi_frequency_alpha "${ROI_FREQUENCY_ALPHA}"
+  --roi_max_weight_ratio "${ROI_MAX_WEIGHT_RATIO}"
   --tgr_mode legacy_batch
   --data_path "${TRAIN_CSV}"
   --val_data_path "${VAL_CSV}"
@@ -93,10 +102,21 @@ COMMAND=(
   --print_freq 20
   --seed 0
 )
+if [[ "${POSITIVE_ROI_LOSS_WEIGHT}" != "0" && "${POSITIVE_ROI_LOSS_WEIGHT}" != "0.0" ]]; then
+  if [[ -z "${ROI_POSITIVE_SAMPLE_COUNTS}" || -z "${ROI_FREQUENCY_DATASET_SIZE}" ]]; then
+    echo "Loss-v3 requires ROI_POSITIVE_SAMPLE_COUNTS and ROI_FREQUENCY_DATASET_SIZE" >&2
+    exit 2
+  fi
+  read -r -a ROI_COUNTS_ARRAY <<< "${ROI_POSITIVE_SAMPLE_COUNTS}"
+  COMMAND+=(
+    --roi_positive_sample_counts "${ROI_COUNTS_ARRAY[@]}"
+    --roi_frequency_dataset_size "${ROI_FREQUENCY_DATASET_SIZE}"
+  )
+fi
 if [[ "${ARM}" == "roi20" ]]; then
   COMMAND+=(
     --organ_roi_aug
-    --organ_roi_probability 0.2
+    --organ_roi_probability "${ORGAN_ROI_PROBABILITY}"
     --roi_index "${ROI_INDEX}"
   )
 fi
@@ -113,6 +133,8 @@ fi
   echo "train_csv=${TRAIN_CSV}"
   echo "gpu_ids=${GPU_IDS}"
   echo "fusion_mode=${FUSION_MODE} lambda_seg=${LAMBDA_SEG}"
+  echo "positive_roi_loss_weight=${POSITIVE_ROI_LOSS_WEIGHT} frequency_alpha=${ROI_FREQUENCY_ALPHA} max_weight_ratio=${ROI_MAX_WEIGHT_RATIO}"
+  echo "organ_roi_probability=${ORGAN_ROI_PROBABILITY}"
   echo "micro_batch=${MICRO_BATCH} accum_iter=${ACCUM_ITER} effective_batch=${EFFECTIVE_BATCH}"
   echo "max_updates=${MAX_UPDATES} warmup_updates=${WARMUP_UPDATES}"
   printf 'command='

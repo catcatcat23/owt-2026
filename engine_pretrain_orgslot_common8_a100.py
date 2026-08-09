@@ -8,6 +8,7 @@ import torch
 from engine_pretrain_orgslot import perceptual_reconstruction_loss
 from losses_orgslot import base_reconstruction_loss, base_segmentation_loss
 import util.misc as misc
+from util.orgslot_lossbalance_v3 import state_separated_mask_roi_l2
 from util.slot_tgr import build_base_reconstruction_target, sample_base_slot_keep_mask
 
 
@@ -92,6 +93,9 @@ def train_one_epoch(
     focus_class_ids = tuple(
         int(value) for value in args.focus_class_ids.split(",") if value
     )
+    roi_class_weights = torch.as_tensor(
+        args.roi_class_weights, dtype=torch.float32, device=device
+    )
     metric_logger = misc.MetricLogger(delimiter="  ")
     metric_logger.add_meter("lr", misc.SmoothedValue(window_size=1, fmt="{value:.6f}"))
     header = "Epoch: [{}]".format(epoch)
@@ -143,10 +147,29 @@ def train_one_epoch(
                     keep,
                     background_weight=args.lambda_bg_seg,
                 )
+            if args.positive_roi_loss_weight > 0:
+                state_stats = state_separated_mask_roi_l2(
+                    output["reconstruction"], target, visible_masks,
+                    slot_names, keep, roi_class_weights,
+                )
+                positive = state_stats["positive"]
+                removed = state_stats["removed"]
+            else:
+                zero = reconstruction_loss.detach() * 0.0
+                empty = torch.zeros(len(slot_names), device=device)
+                positive = {
+                    "loss": zero, "class_losses": empty, "class_counts": empty,
+                    "valid_samples": zero, "mass": zero,
+                }
+                removed = {
+                    "loss": zero, "class_losses": empty, "class_counts": empty,
+                    "valid_samples": zero, "mass": zero,
+                }
             total_loss = (
                 reconstruction_loss
                 + args.lambda_lpips * perceptual_loss
                 + args.lambda_seg * segmentation_loss
+                + args.positive_roi_loss_weight * positive["loss"]
             )
 
         if not torch.isfinite(total_loss):
@@ -173,10 +196,31 @@ def train_one_epoch(
             "reconstruction_loss": float(reconstruction_loss.detach()),
             "p_loss": float(perceptual_loss.detach()),
             "segmentation_loss": float(segmentation_loss.detach()),
+            "positive_roi_loss": float(positive["loss"].detach()),
+            "positive_valid_samples": float(positive["valid_samples"].detach()),
+            "positive_weighted_mass": float(positive["mass"].detach()),
+            "removed_monitor_loss": float(removed["loss"].detach()),
+            "removed_valid_samples": float(removed["valid_samples"].detach()),
+            "removed_mass": float(removed["mass"].detach()),
             "retained_slots": float(keep.sum(dim=1).float().mean()),
             "roi_fraction": float(roi.float().mean()),
             "lr": optimizer.param_groups[0]["lr"],
         }
+        for slot_index, slot_name in enumerate(slot_names):
+            if float(roi_class_weights[slot_index]) <= 0:
+                continue
+            values["positive_{}_loss".format(slot_name)] = float(
+                positive["class_losses"][slot_index].detach()
+            )
+            values["positive_{}_count".format(slot_name)] = float(
+                positive["class_counts"][slot_index].detach()
+            )
+            values["removed_{}_loss".format(slot_name)] = float(
+                removed["class_losses"][slot_index].detach()
+            )
+            values["removed_{}_count".format(slot_name)] = float(
+                removed["class_counts"][slot_index].detach()
+            )
         if "focus_class_id" in batch:
             focus = batch["focus_class_id"].to(device=device, dtype=torch.long)
             for class_id in focus_class_ids:

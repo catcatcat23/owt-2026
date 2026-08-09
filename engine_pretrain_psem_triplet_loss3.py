@@ -1,0 +1,229 @@
+import math
+import os
+import sys
+from typing import Iterable
+
+import torch
+
+import util.lr_sched as lr_sched
+import util.misc as misc
+from util.per_sample_mask_schedule import (
+    masked_reconstruction_target,
+    present_class_mask,
+)
+from util.triplet_query_loss import triplet_delta_loss
+from util.triplet_query_schedule import triplet_query_schedule
+
+
+def train_one_epoch(
+    model: torch.nn.Module,
+    data_loader: Iterable,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    epoch: int,
+    loss_scaler,
+    log_writer=None,
+    args=None,
+):
+    """Train one PSEM-v3 epoch with aligned anchor/context triplets."""
+    model.train(True)
+    metric_logger = misc.MetricLogger(delimiter="  ")
+    metric_logger.add_meter(
+        "lr", misc.SmoothedValue(window_size=1, fmt="{value:.6f}")
+    )
+    header = f"Epoch: [{epoch}]"
+    accum_iter = args.accum_iter
+    optimizer.zero_grad()
+
+    text_features = None
+    if args.text_encoding != "None":
+        text_features = torch.load(args.text_encoding, map_location="cpu").to(device)
+        text_features = text_features.repeat_interleave(args.token_factor, dim=0)
+
+    if log_writer is not None:
+        print(f"log_dir: {log_writer.log_dir}")
+
+    for data_iter_step, batch in enumerate(
+        metric_logger.log_every(data_loader, 20, header)
+    ):
+        if data_iter_step % accum_iter == 0:
+            lr_sched.adjust_learning_rate(
+                optimizer, data_iter_step / len(data_loader) + epoch, args
+            )
+
+        image = batch["image"].to(device, non_blocking=True)
+        label = batch["label"].to(device, non_blocking=True)
+        sample_indices = batch["sample_index"].to(device, non_blocking=True)
+        source_batch_size = image.shape[0]
+
+        schedule = triplet_query_schedule(
+            sample_indices,
+            epoch,
+            args.num_classes_with_bg,
+        )
+        direct_mask = schedule["direct_mask"]
+        context_mask = schedule["context_mask"]
+        plus_mask = schedule["plus_mask"]
+        anchor_classes = schedule["anchor_classes"]
+
+        target_direct = masked_reconstruction_target(image, label, direct_mask)
+        target_context = masked_reconstruction_target(image, label, context_mask)
+        target_plus = masked_reconstruction_target(image, label, plus_mask)
+
+        triplet_image = torch.cat((image, image, image), dim=0)
+        triplet_label = torch.cat((label, label, label), dim=0)
+        triplet_target = torch.cat(
+            (target_direct, target_context, target_plus), dim=0
+        )
+        triplet_keep_mask = torch.cat(
+            (direct_mask, context_mask, plus_mask), dim=0
+        )
+
+        kept_count = triplet_keep_mask.sum(dim=1)
+        dropped_count = args.num_classes_with_bg - kept_count
+        max_token_length = int(kept_count.max().item()) * args.token_factor
+        valid_token_count = kept_count.sum().item() * args.token_factor
+        padded_token_count = triplet_image.shape[0] * max_token_length
+        padding_fraction = 1.0 - valid_token_count / max(padded_token_count, 1)
+        mask_ratio = (
+            dropped_count.float() / args.num_classes_with_bg
+        ).mean().item()
+
+        middle = {
+            "image_target": triplet_target,
+            "class_keep_mask": triplet_keep_mask,
+            "label": triplet_label,
+        }
+        if text_features is not None:
+            middle["text_features"] = text_features.unsqueeze(0).expand(
+                triplet_image.shape[0], -1, -1
+            )
+
+        with torch.cuda.amp.autocast():
+            branch_loss, triplet_pred, middle_output = model(
+                triplet_image,
+                mask_ratio=mask_ratio,
+                middle=middle,
+            )
+            pred_direct, pred_context, pred_plus = triplet_pred.chunk(3, dim=0)
+            delta_stats = triplet_delta_loss(
+                pred_context=pred_context,
+                pred_plus=pred_plus,
+                target_direct=target_direct,
+                label=label,
+                direct_mask=direct_mask,
+                class_weights=middle_output["roi_class_weights"],
+                positive_roi_loss_weight=args.positive_roi_loss_weight,
+            )
+            loss = branch_loss + args.delta_loss_weight * delta_stats["loss"]
+            if "LPIPS" in args.loss_version:
+                loss = loss + args.lpips_loss_weight * middle_output["p_loss"]
+
+        if not math.isfinite(loss.item()):
+            print(f"Loss is {loss.item()}, stopping training")
+            sys.exit(1)
+
+        loss_value = loss.item()
+        loss = loss / accum_iter
+        loss_scaler(
+            loss,
+            optimizer,
+            parameters=model.parameters(),
+            update_grad=(data_iter_step + 1) % accum_iter == 0,
+        )
+        if (data_iter_step + 1) % accum_iter == 0:
+            optimizer.zero_grad()
+
+        torch.cuda.synchronize()
+
+        present_mask = present_class_mask(label, args.num_classes_with_bg)
+        anchor_present = torch.gather(
+            present_mask, 1, anchor_classes.unsqueeze(1)
+        ).squeeze(1)
+        direct_mse = (
+            (pred_direct.detach() - target_direct).square().flatten(1).mean(dim=1)
+        )
+        context_mse = (
+            (pred_context.detach() - target_context).square().flatten(1).mean(dim=1)
+        )
+        plus_mse = (
+            (pred_plus.detach() - target_plus).square().flatten(1).mean(dim=1)
+        )
+        direct_energy = pred_direct.detach().square().flatten(1).mean(dim=1)
+        delta_energy = delta_stats["prediction"].detach().square().flatten(1).mean(dim=1)
+        absent_count = (~anchor_present).sum().item()
+
+        if data_iter_step == 0 and misc.is_main_process():
+            print(
+                "PSEM-v3 triplet first batch:",
+                f"anchors={anchor_classes.tolist()[:8]}",
+                f"anchor_present={anchor_present.tolist()[:8]}",
+                f"full_context={schedule['full_context'].tolist()[:8]}",
+                f"direct_kept={direct_mask.sum(dim=1).tolist()[:8]}",
+                f"context_kept={context_mask.sum(dim=1).tolist()[:8]}",
+                f"plus_kept={plus_mask.sum(dim=1).tolist()[:8]}",
+            )
+
+        metric_logger.update(
+            loss=loss_value,
+            branch_loss=branch_loss.item(),
+            global_recon_loss=middle_output["global_recon_loss"].item(),
+            positive_roi_loss=middle_output["positive_roi_loss"].item(),
+            removed_monitor_loss=middle_output["removed_monitor_loss"].item(),
+            delta_loss=delta_stats["loss"].item(),
+            delta_global_loss=delta_stats["global_loss"].item(),
+            delta_positive_roi_loss=delta_stats["positive_roi_loss"].item(),
+            direct_mse=direct_mse.mean().item(),
+            context_mse=context_mse.mean().item(),
+            plus_mse=plus_mse.mean().item(),
+            anchor_present_fraction=anchor_present.float().mean().item(),
+            full_context_fraction=schedule["full_context"].float().mean().item(),
+            direct_kept_classes=direct_mask.sum(dim=1).float().mean().item(),
+            context_kept_classes=context_mask.sum(dim=1).float().mean().item(),
+            plus_kept_classes=plus_mask.sum(dim=1).float().mean().item(),
+            padding_fraction=padding_fraction,
+            negative_direct_energy_sum=direct_energy[~anchor_present].sum().item(),
+            negative_delta_energy_sum=delta_energy[~anchor_present].sum().item(),
+            negative_anchor_count=absent_count,
+            lr=optimizer.param_groups[0]["lr"],
+        )
+        if "LPIPS" in args.loss_version:
+            metric_logger.update(p_loss=middle_output["p_loss"].item())
+
+        for class_id in range(1, args.num_classes_with_bg):
+            selected = anchor_classes == class_id
+            metric_logger.update(**{
+                f"anchor_c{class_id}_fraction": selected.float().mean().item(),
+                f"anchor_c{class_id}_present_fraction": (
+                    selected & anchor_present
+                ).float().mean().item(),
+            })
+
+        reduced_loss = misc.all_reduce_mean(loss_value)
+        if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
+            epoch_1000x = int(
+                (data_iter_step / len(data_loader) + epoch) * 1000
+            )
+            log_writer.add_scalar("train_loss", reduced_loss, epoch_1000x)
+            log_writer.add_scalar(
+                "triplet/delta_loss", delta_stats["loss"].item(), epoch_1000x
+            )
+            log_writer.add_scalar(
+                "triplet/anchor_present_fraction",
+                anchor_present.float().mean().item(),
+                epoch_1000x,
+            )
+            log_writer.add_scalar("lr", optimizer.param_groups[0]["lr"], epoch_1000x)
+
+    metric_logger.synchronize_between_processes()
+    print("Averaged stats:", metric_logger)
+    stats = {key: meter.global_avg for key, meter in metric_logger.meters.items()}
+    negative_count = stats.pop("negative_anchor_count")
+    stats["negative_direct_energy"] = (
+        stats.pop("negative_direct_energy_sum") / max(negative_count, 1e-12)
+    )
+    stats["negative_delta_energy"] = (
+        stats.pop("negative_delta_energy_sum") / max(negative_count, 1e-12)
+    )
+    stats["negative_anchor_count"] = negative_count
+    return stats

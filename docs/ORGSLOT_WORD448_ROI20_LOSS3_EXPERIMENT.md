@@ -52,7 +52,14 @@ Loss-v3 coefficient is zero, its per-mask computation is skipped.
 
 ## Jobs
 
-Job IDs and statuses are filled after Slurm submission. The full job uses an
-`afterok` dependency on a two-GPU smoke whose validator requires finite global,
-LPIPS, segmentation and positive ROI metrics, exercised ROI samples, and a
-checkpoint.
+Implementation commit: `a119677`. Both jobs use account
+`angelosstefanidis`, QoS `8a800`, and two A800 GPUs.
+
+| Job | Stage | Initial status |
+|---:|---|---|
+| 1651723 | ROI100 Loss-v3 smoke + validator | PENDING (Priority), estimated 2026-08-10 06:03 |
+| 1651724 | ROI20 Loss-v3 formal training | PENDING, `afterok:1651723` |
+
+The full job uses an `afterok` dependency on a two-GPU smoke whose validator
+requires finite global, LPIPS, segmentation and positive ROI metrics, exercised
+ROI samples, and a checkpoint.

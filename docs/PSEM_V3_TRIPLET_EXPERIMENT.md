@@ -5,8 +5,19 @@
 - Branch: `experiment/psem-v3-triplet-loss3-word-v0`
 - Base: `experiment/psem-v2-lossbalance-v3-word-v0` at `199f6d1`
 - Dataset: WORD Common8 2D, 224 preprocessing
-- Stage: implementation and CPU verification complete; GPU smoke pending
+- Stage: implementation and CPU verification complete; GPU smoke queued
 - Full training must not start until the smoke validator passes.
+
+## Slurm chain
+
+| Job | Stage | Dependency | Current submission state |
+|---:|---|---|---|
+| 1651604 | 2-GPU smoke | none | pending, Priority |
+| 1651606 | 1200-epoch WORD 2D training | afterok:1651604 | pending, Dependency |
+| 1651607 | common WORD 2D evaluation | afterok:1651606 | pending, Dependency |
+
+The smoke validator is the final command in job 1651604, so an `afterok`
+release requires the checkpoint and all required metrics to pass validation.
 
 ## Motivation
 

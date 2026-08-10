@@ -52,17 +52,20 @@ Loss-v3 coefficient is zero, its per-mask computation is skipped.
 
 ## Jobs
 
-Implementation commit: `a119677`. Both jobs use account
-`angelosstefanidis`, QoS `8a800`, and two A800 GPUs.
+Current retry implementation commit: `2231cd0`. The retry uses
+`sifansong/4a800` and two typed A800 GPUs.
 
-| Job | Stage | Initial status |
+| Job | Stage | Status at submission |
 |---:|---|---|
-| 1651723 | ROI100 Loss-v3 smoke + validator | PENDING (Priority), estimated 2026-08-10 06:03 |
-| 1651724 | ROI20 Loss-v3 formal training | PENDING, `afterok:1651723` |
+| 1651723 | Initial ROI100 Loss-v3 smoke | FAILED before Python: no devices |
+| 1651724 | Initial ROI20 Loss-v3 formal | CANCELLED: DependencyNeverSatisfied |
+| 1655555 | Corrected seg=0 ROI100 smoke + validator | PENDING (Priority), estimated 2026-08-11 09:33 |
+| 1655556 | Corrected seg=0 ROI20 formal training | PENDING, `afterok:1655555` |
 
 The full job uses an `afterok` dependency on a two-GPU smoke whose validator
-requires visible CUDA devices, finite global/LPIPS/positive ROI metrics, exercised
-ROI samples, and a checkpoint. The retry excludes `gpua800n2` and `gpua800n6`.
+requires visible CUDA devices, finite global/LPIPS/positive ROI metrics,
+exercised ROI samples, and a checkpoint. The retry excludes `gpua800n2` and
+`gpua800n6`.
 
 ## GPU visibility incident and retry
 

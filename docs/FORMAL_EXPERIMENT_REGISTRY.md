@@ -1,6 +1,6 @@
 # OWT 正式实验台账与指标排名
 
-最后核对：2026-08-03 CST
+最后核对：2026-08-10 CST
 维护位置：`experiment/psem-v1` worktree
 用途：集中记录已经完成训练和完整推理的 OWT 实验，作为后续横向比较和实验有效性判断的唯一入口。
 
@@ -243,7 +243,7 @@ CropMix 的数值不得用于论文表格、方法排名或“有效/无效”�
 
 ## 10. 尚未进入正式排名的候选任务
 
-以下是 2026-08-03 的队列与结果快照。状态会变化，只有训练和评估都完成后才能分配新的 E 编号。
+本节基础表始于 2026-08-03，后续状态按日期追加在表后。只有训练和完整评估都完成后才能分配新的 E 编号；审核时以最新日期记录为准。
 
 | 方法 / 数据 | 训练链 | 当时状态 | 进入正式表还缺什么 |
 |---|---|---|---|
@@ -255,7 +255,7 @@ CropMix 的数值不得用于论文表格、方法排名或“有效/无效”�
 | PSEM+LossBalance-v2 WORD 2D | smoke 1605962 -> train 1605963 -> eval 1634605 | 训练完成，评估等待 Priority | 完整统一推理 |
 | LossBalance-v3a WORD 2D | smoke 1627035 -> train 1627036 -> eval 1627039 | 训练和评估均完成 | 已具备完整结果，待纳入正式排名 |
 | PSEM-v2a WORD 2D | smoke 1629558 -> train 1629560 -> eval 1634604 | 训练完成，评估等待 Priority | 完整统一推理 |
-| PSEM-v2a AbdAutoPET 2D | smoke 1629559 -> train 1629561 -> eval 1629564 | 训练运行中，依赖评估等待 | 训练结束后自动启动统一推理 |
+| PSEM-v2a AbdAutoPET 2D | smoke 1629559 -> train 1629561 -> eval 1629564 | 训练和评估均完成 | checkpoint和完整评估已存在，待纳入正式排名 |
 
 ### 2026-08-03 补齐的评估任务
 
@@ -292,9 +292,64 @@ LossBalance-v2 WORD 2D 的统一评估 Job `1623976` 已于 2026-07-31 完成，
 ### 2026-08-10 GPU 可见性故障、无效评估与重提
 
 - LossBalance-v3a + VQ-CNN 训练 `1639883` 已完整完成，最终 Global L2 `0.001107`、Positive ROI `0.003376`、LPIPS `0.021574`、optimized total `0.023525`，并保存 `checkpoint-1199.pth`。旧评估 `1639884` 在 GPU 不可见时静默回退 CPU，6 小时超时，仅完成 14/24 病例；该目录的逐病例 CSV 属于不完整故障产物，不进入正式排名。修复 commit `31366b6` 强制 CUDA、使用新输出目录并校验 24 病例完整性；重提评估 `1655557`（1×typed A800、24 小时、排除 `gpua800n2/n6`）。
-- PSEM-v3 Triplet smoke `1651604` 因 `No CUDA GPUs are available` 失败；`1651606/1651607` 已取消，不恢复该方向。
+- PSEM-v3 Triplet 首次 smoke `1651604` 因 `No CUDA GPUs are available` 失败；`1651606/1651607` 已取消。该失败发生在模型运行前，后续已加入严格 CUDA preflight，并按下面的新任务链恢复。
 - OrganSlot 448+ROI20+Loss3 初始 smoke `1651723` 在 `gpua800n2` 于 Python 前因无设备失败，正式任务 `1651724` 已取消。初始任务还错误启用了 `lambda_seg=1.0`。修复 commit `2231cd0` 将其改为公平的纯 `lambda_seg=0.0`，加入 typed A800、真实 CUDA 张量 preflight 并排除 `gpua800n2/n6`；新 smoke `1655555`，新正式训练 `1655556`（`afterok:1655555`）。
 
+### 2026-08-10 PSEM-v3恢复与AbdAutoPET跨数据集验证
+
+本轮目标不是重复训练已经完成的PSEM-v2，而是用其AbdAutoPET正式结果作为对照，同时验证PSEM-v3 Triplet+Loss3能否：
+
+1. 在WORD上修复PSEM-v2+Loss3组合对Indirect分解不友好的问题；
+2. 在类别更少、器官出现率更高的AbdAutoPET上保持或提高PSEM-v2表现；
+3. 通过成对的`Context/Plus`监督，使`Prediction(Plus)-Prediction(Context)`稳定对应anchor器官。
+
+代码身份：
+
+- worktree：`/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/psem_v3_triplet`
+- branch：`experiment/psem-v3-triplet-loss3-word-v0`
+- 实验脚本提交：`ced65cc`
+- 专项记录：`docs/PSEM_V3_TRIPLET_EXPERIMENT.md`
+
+| 数据集 | 阶段 | Job | 资源 | 依赖 | 2026-08-10状态 |
+|---|---|---:|---|---|---|
+| WORD | smoke | 1655585 | 2×A800，`sifansong/4a800` | 无 | PENDING (Priority) |
+| WORD | 1200 epochs | 1655586 | 2×A800，`sifansong/4a800` | afterok:1655585 | PENDING (Dependency) |
+| WORD | 完整评估 | 1655587 | 1×A800，`angelosstefanidis/8a800` | afterok:1655586 | PENDING (Dependency) |
+| AbdAutoPET | smoke | 1655588 | 4×A800，`angelosstefanidis/8a800` | 无 | PENDING (Priority) |
+| AbdAutoPET | 1200 epochs | 1655589 | 4×A800，`angelosstefanidis/8a800` | afterok:1655588 | PENDING (Dependency) |
+| AbdAutoPET | 完整评估 | 1655590 | 1×A800，`angelosstefanidis/8a800` | afterok:1655589 | PENDING (Dependency) |
+
+公平性与关键配置：
+
+- WORD：8个前景类，`fixed_255`，每卡source batch 8、累积4次、2卡，有效source batch 64，与PSEM-v2+Loss3一致。
+- AbdAutoPET：4个前景类，`per_sample`，每卡source batch 12、累积4次、4卡，有效source batch `12×4×4=192`，与PSEM-v2的`96×2=192`一致。
+- AbdAutoPET 78,400张训练切片的阳性计数为`[59698, 43715, 34418, 30768]`，用于Loss3频率权重。
+- 两组均为224输入、20 tokens/class、1200 epochs、60 warmup epochs、`blr=1e-4`、`weight_decay=0.05`。
+- Triplet总目标为原Loss3三分支平均加`0.1×Delta Loss`；Delta Loss包含全局L2和`0.25×Positive ROI`，不额外计算LPIPS。
+- 所有smoke、正式训练和评估脚本均强制检查实际CUDA设备数，不允许静默退回CPU。
+
+已完成的AbdAutoPET PSEM-v2对照：
+
+- smoke `1629559`、训练`1629561`、评估`1629564`均为`COMPLETED`；
+- checkpoint：`/gpfs/work/aac/bolinren19/OD_OWT_psem_v2/Results/PSEM_v2/AbdAutoPet_2D/PSEM_v2a_Query20_Token_mae_vit_base_patch16-LA_1e-4_C4_224_T20_v11_v01_L2-LPIPS_GPU2_B96_E1200/checkpoint-1199.pth`；
+- 评估目录：`/gpfs/work/aac/bolinren19/OD_OWT_psem_v2/Results/PSEM_v2/Eval/AbdAutoPet_2D/ckpt1199`；
+- 不重复训练，后续直接与PSEM-v3采用同一评估口径比较。
+
+PSEM-v3输出入口：
+
+- WORD训练：`.worktrees/psem_v3_triplet/Results/PSEM_v3_Triplet_Loss3/WORD_2D/PSEMv3_TripletContext_Loss3_Delta01_Common8_WORD_2D_C8_T20_GPU2_B8A4_E1200`
+- WORD评估：`.worktrees/psem_v3_triplet/Results/PSEM_v3_Triplet_Loss3/Eval/WORD_2D/ckpt1199`
+- AbdAutoPET训练：`.worktrees/psem_v3_triplet/Results/PSEM_v3_Triplet_Loss3/AbdAutoPET_2D/PSEMv3_TripletContext_Loss3_Delta01_AbdAutoPET_2D_C4_T20_GPU4_B12A4_E1200`
+- AbdAutoPET评估：`.worktrees/psem_v3_triplet/Results/PSEM_v3_Triplet_Loss3/Eval/AbdAutoPET_2D/ckpt1199`
+
+下次审核顺序：
+
+1. 用`squeue -j 1655585,1655586,1655587,1655588,1655589,1655590`看当前阶段；
+2. 用`sacct -j 1655585,1655586,1655587,1655588,1655589,1655590 -X --format=JobID,JobName,State,ExitCode,Elapsed,Start,End,NodeList`核对历史状态；
+3. smoke只有在`checkpoint-0.pth`存在、validator打印passed、所有anchor有覆盖、present/absent均出现且所有loss有限时才算通过；
+4. 正式训练只有在`checkpoint-1199.pth`存在且无NaN/OOM/Traceback时才算完成；
+5. 评估必须核对`protocol.json`、完整测试病例数、Direct/Indirect raw/post、逐器官Dice/NSD和Step2重建，不以训练loss判断有效性；
+6. 两组完整评估前不得分配正式E编号，也不得写“有效/无效”的最终结论。
 
 ## 11. 已知数据质量问题
 

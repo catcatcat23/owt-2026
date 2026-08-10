@@ -16,7 +16,7 @@ loss-matched replacement for the existing OrganSlot 448 control.
 - Architecture: OrganSlotBank, 20 tokens/class, slot TG depth 1.
 - Fusion: `linear_sqrt`.
 - Mask: `legacy_batch`; an ROI focus slot is always retained.
-- Segmentation loss: `lambda_seg=1.0`, background weight 0.25.
+- Segmentation head supervision is disabled: `lambda_seg=0.0`.
 - Reconstruction: global L2 + LPIPS.
 - Loss-v3: present-and-kept foreground ROI-L2 only, weight 0.25.
 - Removed foreground ROI-L2 is monitoring only.
@@ -61,5 +61,15 @@ Implementation commit: `a119677`. Both jobs use account
 | 1651724 | ROI20 Loss-v3 formal training | PENDING, `afterok:1651723` |
 
 The full job uses an `afterok` dependency on a two-GPU smoke whose validator
-requires finite global, LPIPS, segmentation and positive ROI metrics, exercised
-ROI samples, and a checkpoint.
+requires visible CUDA devices, finite global/LPIPS/positive ROI metrics, exercised
+ROI samples, and a checkpoint. The retry excludes `gpua800n2` and `gpua800n6`.
+
+## GPU visibility incident and retry
+
+Jobs 1651723/1651724 are invalid: smoke 1651723 failed before Python with
+`No devices were found` on `gpua800n2`; formal 1651724 became
+`DependencyNeverSatisfied` and was cancelled. The initial scripts also used
+`lambda_seg=1.0`, which did not isolate the planned pure ROI20 + Loss-v3
+combination. Retry scripts use `lambda_seg=0.0`, typed A800 GRES, exclude the
+two nodes implicated in CUDA invisibility, and require both PyTorch CUDA
+discovery and a real CUDA tensor operation before training.

@@ -289,6 +289,13 @@ LossBalance-v2 WORD 2D 的统一评估 Job `1623976` 已于 2026-07-31 完成，
 
 资源说明：`sifansong/4a800` 已占满提交数后，LossBalance-v3a + VQ-CNN 的正式训练/评估改投 `angelosstefanidis/8a800`。两者均为 A800，脚本中的 GPU 数、batch、优化器与超参数未改变，因此不构成方法侧实验差异。
 
+### 2026-08-10 GPU 可见性故障、无效评估与重提
+
+- LossBalance-v3a + VQ-CNN 训练 `1639883` 已完整完成，最终 Global L2 `0.001107`、Positive ROI `0.003376`、LPIPS `0.021574`、optimized total `0.023525`，并保存 `checkpoint-1199.pth`。旧评估 `1639884` 在 GPU 不可见时静默回退 CPU，6 小时超时，仅完成 14/24 病例；该目录的逐病例 CSV 属于不完整故障产物，不进入正式排名。修复 commit `31366b6` 强制 CUDA、使用新输出目录并校验 24 病例完整性；重提评估 `1655557`（1×typed A800、24 小时、排除 `gpua800n2/n6`）。
+- PSEM-v3 Triplet smoke `1651604` 因 `No CUDA GPUs are available` 失败；`1651606/1651607` 已取消，不恢复该方向。
+- OrganSlot 448+ROI20+Loss3 初始 smoke `1651723` 在 `gpua800n2` 于 Python 前因无设备失败，正式任务 `1651724` 已取消。初始任务还错误启用了 `lambda_seg=1.0`。修复 commit `2231cd0` 将其改为公平的纯 `lambda_seg=0.0`，加入 typed A800、真实 CUDA 张量 preflight 并排除 `gpua800n2/n6`；新 smoke `1655555`，新正式训练 `1655556`（`afterok:1655555`）。
+
+
 ## 11. 已知数据质量问题
 
 原始 OWT AbdAutoPET 合并目录中的 `step3_segmentation_summary.csv` 被错误写成 `cases=0` 和 `inf`，但同目录的 `step3_segmentation_per_case.csv` 完整包含 200 个唯一病例、1,600 行结果，`Result.txt` 也记录了正确的合并结果。本文 E01 的所有 Step 3 数值均由逐病例 CSV 按统一口径重算，而不是读取这个损坏的 summary 文件。

@@ -4,20 +4,49 @@
 
 - Branch: `experiment/psem-v3-triplet-loss3-word-v0`
 - Base: `experiment/psem-v2-lossbalance-v3-word-v0` at `199f6d1`
-- Dataset: WORD Common8 2D, 224 preprocessing
-- Stage: implementation and CPU verification complete; GPU smoke queued
-- Full training must not start until the smoke validator passes.
+- Datasets: WORD Common8 2D and AbdAutoPET 2D, both at 224
+- Stage: recovery chains submitted on 2026-08-10
+- Both full training jobs are gated by their dataset-specific smoke validators.
 
-## Slurm chain
+## Original WORD chain
 
-| Job | Stage | Dependency | Current submission state |
+| Job | Stage | Final state | Cause |
 |---:|---|---|---|
-| 1651604 | 2-GPU smoke | none | pending, Priority |
-| 1651606 | 1200-epoch WORD 2D training | afterok:1651604 | pending, Dependency |
-| 1651607 | common WORD 2D evaluation | afterok:1651606 | pending, Dependency |
+| 1651604 | 2-GPU smoke | FAILED | Node exposed no CUDA GPU |
+| 1651606 | 1200-epoch WORD 2D training | CANCELLED | DependencyNeverSatisfied |
+| 1651607 | common WORD 2D evaluation | CANCELLED | DependencyNeverSatisfied |
 
-The smoke validator is the final command in job 1651604, so an `afterok`
-release requires the checkpoint and all required metrics to pass validation.
+This chain was superseded by the recovery submission below.
+
+## Recovery chains submitted 2026-08-10
+
+The original WORD chain failed before model training because job 1651604 saw
+no CUDA GPU. Its dependent jobs 1651606 and 1651607 were cancelled; this was
+not a model, memory, or Loss3 failure.
+
+| Dataset | Job | Stage | Resources | Dependency | State at submission |
+|---|---:|---|---|---|---|
+| WORD | 1655585 | smoke | 2 GPU, `sifansong/4a800` | none | PENDING (Priority) |
+| WORD | 1655586 | 1200-epoch training | 2 GPU, `sifansong/4a800` | afterok:1655585 | PENDING |
+| WORD | 1655587 | evaluation | 1 GPU, `angelosstefanidis/8a800` | afterok:1655586 | PENDING |
+| AbdAutoPET | 1655588 | smoke | 4 GPU, `angelosstefanidis/8a800` | none | PENDING (Priority) |
+| AbdAutoPET | 1655589 | 1200-epoch training | 4 GPU, `angelosstefanidis/8a800` | afterok:1655588 | PENDING |
+| AbdAutoPET | 1655590 | evaluation | 1 GPU, `angelosstefanidis/8a800` | afterok:1655589 | PENDING |
+
+Every stage has a strict CUDA device-count preflight. Each smoke validator is
+the final command in its job, so `afterok` release requires a valid
+`checkpoint-0.pth`, finite required metrics, complete anchor coverage, and
+both present and absent anchor cases.
+
+The AbdAutoPET Loss3 frequency counts computed from all 78,400 training slices
+are `[59698, 43715, 34418, 30768]`. Its four-GPU source batch is
+`12 x 4 x 4 = 192`, exactly matching the completed PSEM-v2 run's
+`96 x 2 = 192`. LR scaling and optimizer batch semantics therefore remain
+controlled while the triplet workload finishes within the QOS wall-time.
+
+The PSEM-v2 AbdAutoPET comparator is already complete: smoke 1629559, training
+1629561, and evaluation 1629564 all completed successfully. Its checkpoint and
+full evaluation output are present and will not be recomputed.
 
 ## Motivation
 
@@ -108,11 +137,14 @@ difference already provide negative-query and negative-addition supervision.
 - `slurm/psem_v3_triplet/smoke_word_2d.sbatch`
 - `slurm/psem_v3_triplet/pretrain_word_2d.sbatch`
 - `slurm/psem_v3_triplet/evaluate_word_2d.sbatch`
+- `slurm/psem_v3_triplet/smoke_abdautopet_2d.sbatch`
+- `slurm/psem_v3_triplet/pretrain_abdautopet_2d.sbatch`
+- `slurm/psem_v3_triplet/evaluate_abdautopet_2d.sbatch`
 
 ## Completion gate
 
-The GPU smoke must produce finite branch, LPIPS, delta-global, delta-positive,
+Each GPU smoke must produce finite branch, LPIPS, delta-global, delta-positive,
 negative Direct-energy, and negative Delta-energy metrics; cover all eight
-anchors plus present/absent cases; save `checkpoint-0.pth`; and pass
-`tools/validate_psem_v3_triplet_smoke.py`. Only then may the 1200-epoch WORD 2D
-training be submitted.
+WORD anchors or all four AbdAutoPET anchors plus present/absent cases; save
+`checkpoint-0.pth`; and pass `tools/validate_psem_v3_triplet_smoke.py`. Only
+then may the corresponding 1200-epoch training start.

@@ -5,6 +5,7 @@
 - Branch: `experiment/psem-v3-triplet-loss3-word-v0`
 - Base: `experiment/psem-v2-lossbalance-v3-word-v0` at `199f6d1`
 - Datasets: WORD Common8 2D and AbdAutoPET 2D, both at 224
+- Experiment scripts commit: `ced65cc`
 - Stage: recovery chains submitted on 2026-08-10
 - Both full training jobs are gated by their dataset-specific smoke validators.
 
@@ -140,6 +141,60 @@ difference already provide negative-query and negative-addition supervision.
 - `slurm/psem_v3_triplet/smoke_abdautopet_2d.sbatch`
 - `slurm/psem_v3_triplet/pretrain_abdautopet_2d.sbatch`
 - `slurm/psem_v3_triplet/evaluate_abdautopet_2d.sbatch`
+
+## Progress audit entry points
+
+Snapshot time: 2026-08-10 CST. Both smoke jobs are `PENDING (Priority)`;
+training and evaluation jobs are `PENDING (Dependency)`. No PSEM-v3
+performance result exists yet.
+
+### Queue and accounting
+
+```bash
+squeue -j 1655585,1655586,1655587,1655588,1655589,1655590 \
+  -o '%.18i %.28j %.10T %.18a %.10q %.10M %.30R'
+sacct -j 1655585,1655586,1655587,1655588,1655589,1655590 -X \
+  --format=JobID,JobName,State,ExitCode,Elapsed,Start,End,NodeList
+```
+
+### Smoke evidence
+
+- WORD Slurm stdout/stderr:
+  `slurm/logs/PSEM_v3/WORD_2D_Smoke/psemv3_triplet_smoke_1655585.{out,err}`
+- WORD smoke run:
+  `Results/PSEM_v3_Triplet_Loss3/_smoke/WORD_2D/PSEMv3_TripletContext_Loss3_Delta01_WORD_2D_C8_T20_GPU2_B8A4_E1_N256`
+- AbdAutoPET Slurm stdout/stderr:
+  `slurm/logs/PSEM_v3/AbdAutoPET_2D_Smoke/psemv3_auto_smoke_1655588.{out,err}`
+- AbdAutoPET smoke run:
+  `Results/PSEM_v3_Triplet_Loss3/_smoke/AbdAutoPET_2D/PSEMv3_TripletContext_Loss3_Delta01_AbdAutoPET_2D_C4_T20_GPU4_B12A4_E1_N512`
+
+A smoke passes only when the Slurm state is `COMPLETED`, `checkpoint-0.pth`
+and `log.txt` exist, the corresponding validator prints
+`PSEM-v3 triplet smoke validation passed`, and all required losses and
+negative energies are finite. A failed CUDA preflight is a cluster/device
+failure, not evidence about method quality.
+
+### Formal training and evaluation evidence
+
+- WORD training run:
+  `Results/PSEM_v3_Triplet_Loss3/WORD_2D/PSEMv3_TripletContext_Loss3_Delta01_Common8_WORD_2D_C8_T20_GPU2_B8A4_E1200`
+- WORD evaluation:
+  `Results/PSEM_v3_Triplet_Loss3/Eval/WORD_2D/ckpt1199`
+- AbdAutoPET training run:
+  `Results/PSEM_v3_Triplet_Loss3/AbdAutoPET_2D/PSEMv3_TripletContext_Loss3_Delta01_AbdAutoPET_2D_C4_T20_GPU4_B12A4_E1200`
+- AbdAutoPET evaluation:
+  `Results/PSEM_v3_Triplet_Loss3/Eval/AbdAutoPET_2D/ckpt1199`
+
+For each training job, review `Result.txt`, the final JSON line in `log.txt`,
+`checkpoint-1199.pth`, elapsed time, and maximum GPU memory. For each
+evaluation, verify `protocol.json`, expected test-case completeness, Step2
+reconstruction, and Step3 Direct/Indirect raw/post per-organ Dice and NSD.
+
+The final comparison must use PSEM-v2 on the same dataset as the primary mask
+baseline. WORD additionally compares with OWT and standalone LossBalance-v3a.
+AbdAutoPET additionally compares with OWT and PSEM-v1. Training losses across
+different objectives are diagnostics only and must not be used as performance
+rankings.
 
 ## Completion gate
 

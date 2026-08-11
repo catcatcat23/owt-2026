@@ -353,6 +353,32 @@ PSEM-v3输出入口：
 
 ## 11. 已知数据质量问题
 
+### 2026-08-11 GPU 分配异常与第二次重提
+
+2026-08-11 审核确认，smoke `1655555`、`1655585`、`1655588` 均在模型启动前失败：
+`CUDA_VISIBLE_DEVICES=None`、`torch.cuda.device_count()==0`，且 Slurm 的 `ReqTRES/AllocTRES`
+未保留脚本中声明的 GPU。该现象发生在 `gpua800n1`；此前同类异常还发生于
+`gpua800n2/n6`。失败不能用于评价方法效果。
+
+旧的失效依赖任务 `1655556/1655586/1655587/1655589/1655590` 已取消。第二次重提在
+`sbatch` 命令行显式指定 `gpu:a800:N`，并排除 `gpua800n1/n2/n6`，只允许在当前未发现
+同类异常的 `gpua800n4/n5` 上运行：
+
+| 数据集 / 方法 | 阶段 | 新 Job | GPU | 依赖 | 提交后状态 |
+|---|---|---:|---:|---|---|
+| OrganSlot WORD 448+ROI20+Loss3 | smoke | 1658405 | 2 | 无 | PENDING (Priority) |
+| OrganSlot WORD 448+ROI20+Loss3 | 正式训练 | 1658406 | 2 | afterok:1658405 | PENDING (Dependency) |
+| PSEM-v3 WORD | smoke | 1658407 | 2 | 无 | PENDING (Priority) |
+| PSEM-v3 WORD | 正式训练 | 1658408 | 2 | afterok:1658407 | PENDING (Dependency) |
+| PSEM-v3 WORD | 完整评估 | 1658409 | 1 | afterok:1658408 | PENDING (Dependency) |
+| PSEM-v3 AbdAutoPET | smoke | 1658410 | 4 | 无 | PENDING (Priority) |
+| PSEM-v3 AbdAutoPET | 正式训练 | 1658411 | 4 | afterok:1658410 | PENDING (Dependency) |
+| PSEM-v3 AbdAutoPET | 完整评估 | 1658412 | 1 | afterok:1658411 | PENDING (Dependency) |
+
+提交后逐项用 `scontrol show job` 验证：八个任务均包含 `ReqTRES=...gres/gpu=N`、
+`TresPerNode=gres:gpu:a800:N` 和 `ExcNodeList=gpua800n[1-2,6]`。调度估计仅供参考：
+OrganSlot smoke 约为 2026-08-17，WORD/PSEM smoke 约为 2026-08-23；实际时间会动态变化。
+
 原始 OWT AbdAutoPET 合并目录中的 `step3_segmentation_summary.csv` 被错误写成 `cases=0` 和 `inf`，但同目录的 `step3_segmentation_per_case.csv` 完整包含 200 个唯一病例、1,600 行结果，`Result.txt` 也记录了正确的合并结果。本文 E01 的所有 Step 3 数值均由逐病例 CSV 按统一口径重算，而不是读取这个损坏的 summary 文件。
 
 E01 的 LPIPS 在原始正式推理中通过 `skip_lpips=true` 跳过，因此表中标为“未计算”，不能把文件中的 `inf` 当成模型性能。

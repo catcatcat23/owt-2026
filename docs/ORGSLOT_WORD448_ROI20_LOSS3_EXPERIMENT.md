@@ -76,3 +76,21 @@ Jobs 1651723/1651724 are invalid: smoke 1651723 failed before Python with
 combination. Retry scripts use `lambda_seg=0.0`, typed A800 GRES, exclude the
 two nodes implicated in CUDA invisibility, and require both PyTorch CUDA
 discovery and a real CUDA tensor operation before training.
+
+## 2026-08-11 second retry
+
+Smoke `1655555` also started without an allocated GPU, this time on
+`gpua800n1`, and failed at the CUDA preflight before any model forward.
+Dependent formal job `1655556` was cancelled.
+
+The replacement chain is:
+
+| Stage | Job | Dependency | Initial state |
+|---|---:|---|---|
+| ROI100 smoke + validator | 1658405 | none | PENDING (Priority) |
+| ROI20 formal training | 1658406 | afterok:1658405 | PENDING (Dependency) |
+
+The `sbatch` command line explicitly requests `gpu:a800:2` and excludes
+`gpua800n1`, `gpua800n2`, and `gpua800n6`. Post-submission inspection confirmed
+`ReqTRES=...gres/gpu=2`, `TresPerNode=gres:gpu:a800:2`, and
+`ExcNodeList=gpua800n[1-2,6]` for both jobs.

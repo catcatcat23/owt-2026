@@ -397,3 +397,64 @@ HD95 在预测或 GT 为空时可能为 `inf`，宏平均会失去解释性，�
 6. 同时检查 Direct raw/post、Indirect raw/post、逐类别 Dice、NSD 和 Step 2，不以单一数字下结论；
 7. 有语义错误、错误类别配置或不完整测试集的任务移入“排除表”，不得删除证据；
 8. 单次小于 1 个百分点的变化默认标记为“有限/待复现”，至少补充重复种子后再升级为“有效”。
+
+## 13. 2026-08-11 第二账户 SIP 迁移与任务链
+
+为分担 `bolinren19` 账户的 Slurm 提交压力，在同一 SIP 集群的
+`antengcai23` 账户建立了独立代码、环境、数据、结果和日志空间。SIP 与 XEC
+使用不同 GPFS，本轮只迁移到 SIP；没有修改或取消旧账户现有实验。
+
+### 迁移身份与目录
+
+- 根目录：`/gpfs/work/aac/antengcai23`
+- Python 环境：`envs/abdpet`，由原 `conda-pack` 恢复
+- PSEM-v3 worktree：`worktrees/psem_v3_triplet`
+- OrganSlot worktree：`worktrees/orgslotbank`
+- 结果根目录：`Results/`
+- Slurm 日志根目录：`slurm/logs/`
+- 项目级 Torch 缓存：`artifacts/torch`
+
+精简 Git bundle 只包含 12 个本地实验分支，大小约 2.7 MB，SHA-256 为
+`65c342f2476b2d3c190477e508674466ef9bec30364e529f25378619986efb20`。
+环境包 SHA-256 为
+`2cdbd813b84f331ee9c99ec9fab5fb128840c16fe83ca5282f6e4061e0aa01e9`。
+
+新账户迁移提交：
+
+- PSEM-v3：`1107500`，父提交 `c560b7e`；
+- OrganSlotBank：`70bc324`，父提交 `3c985c5`。
+
+这些提交只增加新账户 Slurm 脚本、统一 WORD 评估工具和异常节点排除规则，
+没有改变模型、损失、mask、数据增强或训练超参数。
+
+### 数据与环境验收
+
+| 数据 | 文件数 | CSV 行数 | 缺失路径 |
+|---|---:|---:|---:|
+| WORD Common8 224 | 47,492 | 47,126 | 0 |
+| BTCV Common8 224 | 9,058 | 8,962 | 0 |
+| WORD 112-native | 71,160 | 70,792 | 0 |
+
+- PSEM-v3 真实 DataLoader 返回 `image=[3,224,224]`、`float32`、范围 `[0,1]`；
+- `tests/test_psem_triplet_loss3.py` 通过；
+- 9 个 OrganSlot 测试文件共 42 个测试全部通过；
+- VGG16 离线缓存 SHA-256 为
+  `397923af8e79cdbb6a7127f12361acd7a2f83e06b05044ddf496e83de57a5bf0`；
+- 四个 Slurm 脚本均通过 `bash -n` 和 `sbatch --test-only`。
+
+### 最终任务链
+
+首组任务 `1658504-1658507` 在运行前主动取消，因为复核历史台账后发现脚本
+还应排除曾出现 GPU 不可见的 `gpua800n1`。修正后所有任务均使用 typed A800，
+并排除 `gpua800n1/n2/n6`：
+
+| 方法 | 阶段 | Job | GPU | 依赖 | 提交后状态 |
+|---|---|---:|---:|---|---|
+| PSEM-v3 WORD | smoke | 1658513 | 2×A800 | 无 | PENDING (Priority) |
+| PSEM-v3 WORD | 1200 epochs | 1658514 | 2×A800 | afterok:1658513 | PENDING (Dependency) |
+| PSEM-v3 WORD | 完整评估 | 1658515 | 1×A800 | afterok:1658514 | PENDING (Dependency) |
+| OrganSlot WORD448 | smoke | 1658516 | 2×A800 | 无 | PENDING (Priority) |
+
+`scontrol` 已确认每个任务均保留正确的 `ReqTRES`、typed `TresPerNode`、依赖关系
+和 `ExcNodeList=gpua800n[1-2,6]`。只有 smoke validator 通过后，才允许保留对应
+正式训练或继续提交 OrganSlot 正式训练。

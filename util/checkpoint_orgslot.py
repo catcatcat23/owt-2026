@@ -48,6 +48,8 @@ def save_orgslot_checkpoint(
         "model": model.state_dict(),
         "slot_metadata": model.slot_bank.metadata(),
         "slot_names": model.slot_names,
+        "fusion_mode": model.fusion_mode,
+        "fusion_reference_count": model.fusion_reference_count,
         "epoch": epoch,
         "extra": extra or {},
     }
@@ -81,6 +83,25 @@ def load_orgslot_base_checkpoint(
         raise ValueError(
             f"checkpoint slots {expected_slots} != model slots {model.slot_names}"
         )
+    expected_fusion_mode = checkpoint.get("fusion_mode")
+    if (
+        expected_fusion_mode is not None
+        and expected_fusion_mode != model.fusion_mode
+    ):
+        raise ValueError(
+            f"checkpoint fusion_mode {expected_fusion_mode} "
+            f"!= model fusion_mode {model.fusion_mode}"
+        )
+    expected_reference_count = checkpoint.get("fusion_reference_count")
+    if (
+        expected_reference_count is not None
+        and int(expected_reference_count) != model.fusion_reference_count
+    ):
+        raise ValueError(
+            "checkpoint fusion_reference_count "
+            f"{expected_reference_count} != model fusion_reference_count "
+            f"{model.fusion_reference_count}"
+        )
     result = model.load_state_dict(checkpoint["model"], strict=True)
     if optimizer is not None and "optimizer" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer"])
@@ -91,6 +112,8 @@ def load_orgslot_base_checkpoint(
         "shape_mismatches": [],
         "slots_loaded": list(model.slot_names),
         "slots_intentionally_skipped": [],
+        "fusion_mode": model.fusion_mode,
+        "fusion_reference_count": model.fusion_reference_count,
     }
     _save_report(report, report_path)
     return checkpoint, report

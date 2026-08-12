@@ -22,7 +22,10 @@ from torch.utils.data import DataLoader
 from datasets.orgslot_highres import OrganSlotHighResTransform, TransformDataset
 from datasets.orgslot_manifest import OrganSlotManifestDataset
 import OWT_models
-from OWT_models_orgslot import mae_vit_base_patch16 as build_orgslot
+from OWT_models_orgslot import (
+    FUSION_MODES,
+    mae_vit_base_patch16 as build_orgslot,
+)
 from util.label_visibility import EvaluationVisibilityDataset, load_visibility_config
 
 
@@ -56,8 +59,13 @@ def parse_args():
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument(
         "--fusion-mode",
-        choices=("post_layernorm", "linear_sqrt"),
+        choices=FUSION_MODES,
         default="linear_sqrt",
+    )
+    parser.add_argument(
+        "--allow-fusion-override",
+        action="store_true",
+        help="diagnostic only: evaluate a checkpoint with a different fusion rule",
     )
     return parser.parse_args()
 
@@ -110,6 +118,8 @@ def model_args(token_factor, slot_count):
 
 
 def checkpoint_value(checkpoint, name, default=None):
+    if name in checkpoint:
+        return checkpoint[name]
     saved_args = checkpoint.get("args")
     if saved_args is None:
         return default
@@ -118,7 +128,14 @@ def checkpoint_value(checkpoint, name, default=None):
     return getattr(saved_args, name, default)
 
 
-def build_model(method, checkpoint_path, slot_specs, input_size, fusion_mode):
+def build_model(
+    method,
+    checkpoint_path,
+    slot_specs,
+    input_size,
+    fusion_mode,
+    allow_fusion_override=False,
+):
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     saved_input_size = checkpoint_value(checkpoint, "input_size")
     if saved_input_size is not None and int(saved_input_size) != int(input_size):
@@ -128,14 +145,24 @@ def build_model(method, checkpoint_path, slot_specs, input_size, fusion_mode):
             )
         )
     saved_fusion = checkpoint_value(checkpoint, "fusion_mode")
-    if method == "orgslot" and saved_fusion is not None and saved_fusion != fusion_mode:
+    fusion_overridden = (
+        method == "orgslot"
+        and saved_fusion is not None
+        and saved_fusion != fusion_mode
+    )
+    if fusion_overridden and not allow_fusion_override:
         raise ValueError(
-            "checkpoint fusion_mode {} != requested {}".format(
+            "checkpoint fusion_mode {} != requested {}; pass "
+            "--allow-fusion-override only for a diagnostic ablation".format(
                 saved_fusion, fusion_mode
             )
         )
+
     token_factor = int(checkpoint_value(checkpoint, "token_factor", 20))
     slot_tg_depth = int(checkpoint_value(checkpoint, "slot_tg_depth", 1))
+    fusion_reference_count = int(
+        checkpoint_value(checkpoint, "fusion_reference_count", len(slot_specs))
+    )
     args = model_args(token_factor, len(slot_specs))
     if method == "orgslot":
         model = build_orgslot(
@@ -145,6 +172,7 @@ def build_model(method, checkpoint_path, slot_specs, input_size, fusion_mode):
             slot_specs=slot_specs,
             slot_tg_depth=slot_tg_depth,
             fusion_mode=fusion_mode,
+            fusion_reference_count=fusion_reference_count,
         )
     else:
         model = OWT_models.mae_vit_base_patch16(
@@ -171,6 +199,11 @@ def build_model(method, checkpoint_path, slot_specs, input_size, fusion_mode):
         "input_size": int(input_size),
         "method": method,
         "fusion_mode": fusion_mode if method == "orgslot" else None,
+        "checkpoint_fusion_mode": saved_fusion,
+        "fusion_overridden": fusion_overridden,
+        "fusion_reference_count": (
+            fusion_reference_count if method == "orgslot" else None
+        ),
         "token_factor": token_factor,
         "slot_tg_depth": (
             slot_tg_depth if method == "orgslot" else len(model.blocks2)
@@ -442,7 +475,12 @@ def main():
 
     device = torch.device(args.device)
     model, load_report = build_model(
-        args.method, checkpoint_path, slot_specs, args.input_size, args.fusion_mode
+        args.method,
+        checkpoint_path,
+        slot_specs,
+        args.input_size,
+        args.fusion_mode,
+        allow_fusion_override=args.allow_fusion_override,
     )
     model.to(device).eval()
     atomic_json(output_dir / "checkpoint_load.json", load_report)

@@ -23,7 +23,10 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 import OWT_models
-from OWT_models_orgslot import mae_vit_base_patch16 as build_orgslot
+from OWT_models_orgslot import (
+    FUSION_MODES,
+    mae_vit_base_patch16 as build_orgslot,
+)
 
 
 CLASS_NAMES = {
@@ -54,7 +57,7 @@ def parse_args():
     parser.add_argument("--device", default="cuda")
     parser.add_argument(
         "--fusion-mode",
-        choices=("post_layernorm", "linear_sqrt"),
+        choices=FUSION_MODES,
         default="post_layernorm",
     )
     return parser.parse_args()
@@ -145,8 +148,30 @@ def model_args():
     )
 
 
+def checkpoint_value(checkpoint, name, default=None):
+    if name in checkpoint:
+        return checkpoint[name]
+    saved_args = checkpoint.get("args")
+    if saved_args is None:
+        return default
+    if isinstance(saved_args, dict):
+        return saved_args.get(name, default)
+    return getattr(saved_args, name, default)
+
+
 def build_model(method, checkpoint_path, fusion_mode="post_layernorm"):
     args = model_args()
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    saved_fusion = checkpoint_value(checkpoint, "fusion_mode")
+    if method == "orgslot" and saved_fusion is not None and saved_fusion != fusion_mode:
+        raise ValueError(
+            "checkpoint fusion_mode {} != requested {}".format(
+                saved_fusion, fusion_mode
+            )
+        )
+    fusion_reference_count = int(
+        checkpoint_value(checkpoint, "fusion_reference_count", len(CLASS_NAMES))
+    )
     if method == "owt":
         model = OWT_models.mae_vit_base_patch16(
             img_size=224,
@@ -165,8 +190,8 @@ def build_model(method, checkpoint_path, fusion_mode="post_layernorm"):
             slot_specs=slot_specs,
             slot_tg_depth=1,
             fusion_mode=fusion_mode,
+            fusion_reference_count=fusion_reference_count,
         )
-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
     full_state = checkpoint["model"]
     state = {
         key: value
@@ -182,6 +207,11 @@ def build_model(method, checkpoint_path, fusion_mode="post_layernorm"):
         "inference_tensor_count": len(state),
         "stripped_lpips_tensor_count": len(full_state) - len(state),
         "model_parameter_count": sum(p.numel() for p in model.parameters()),
+        "fusion_mode": fusion_mode if method == "orgslot" else None,
+        "checkpoint_fusion_mode": saved_fusion,
+        "fusion_reference_count": (
+            fusion_reference_count if method == "orgslot" else None
+        ),
     }
 
 

@@ -53,6 +53,35 @@ class CheckpointTests(unittest.TestCase):
             len(target_optimizer.state_dict()["state"]),
         )
 
+    def test_checkpoint_rejects_fusion_metadata_mismatch(self):
+        source = tiny_model(
+            fusion_mode="linear_fixed_sqrt", fusion_reference_count=3
+        )
+        wrong_mode = tiny_model(fusion_mode="linear_sqrt")
+        wrong_reference = tiny_model(
+            fusion_mode="linear_fixed_sqrt", fusion_reference_count=4
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = f"{directory}/fixed.pth"
+            checkpoint = save_orgslot_checkpoint(path, source)
+            self.assertEqual(checkpoint["fusion_mode"], "linear_fixed_sqrt")
+            self.assertEqual(checkpoint["fusion_reference_count"], 3)
+            with self.assertRaisesRegex(ValueError, "fusion_mode"):
+                load_orgslot_base_checkpoint(wrong_mode, path)
+            with self.assertRaisesRegex(ValueError, "fusion_reference_count"):
+                load_orgslot_base_checkpoint(wrong_reference, path)
+
+    def test_legacy_checkpoint_without_fusion_metadata_still_loads(self):
+        source = tiny_model()
+        target = tiny_model()
+        checkpoint = {
+            "model": source.state_dict(),
+            "slot_names": source.slot_names,
+        }
+        _, report = load_orgslot_base_checkpoint(target, checkpoint)
+        self.assertFalse(report["missing_keys"])
+        self.assertFalse(report["unexpected_keys"])
+
     def test_incremental_checkpoint_resume(self):
         source = tiny_model()
         target = tiny_model()

@@ -22,6 +22,7 @@ ROI_FREQUENCY_DATASET_SIZE=${ROI_FREQUENCY_DATASET_SIZE:?Set training manifest s
 FUSION_MODE=${FUSION_MODE:-linear_sqrt}
 LAMBDA_SEG=${LAMBDA_SEG:-0.0}
 POSITIVE_ROI_LOSS_WEIGHT=${POSITIVE_ROI_LOSS_WEIGHT:-0.25}
+FUSION_REFERENCE_COUNT=${FUSION_REFERENCE_COUNT:-9}
 ROI_FREQUENCY_ALPHA=${ROI_FREQUENCY_ALPHA:-0.5}
 ROI_MAX_WEIGHT_RATIO=${ROI_MAX_WEIGHT_RATIO:-4.0}
 ORGAN_ROI_PROBABILITY=${ORGAN_ROI_PROBABILITY:-0.2}
@@ -105,6 +106,7 @@ COMMAND=(
   --loss_version L2-LPIPS
   --lambda_lpips 1.0
   --lpips_state "${LPIPS_STATE}"
+  --fusion_reference_count "${FUSION_REFERENCE_COUNT}"
   --lambda_seg "${LAMBDA_SEG}"
   --positive_roi_loss_weight "${POSITIVE_ROI_LOSS_WEIGHT}"
   --roi_positive_sample_counts "${ROI_COUNTS_ARRAY[@]}"
@@ -137,7 +139,7 @@ fi
   echo "spacing=${EXPECTED_SPACING}"
   echo "input=${INPUT_SIZE} global_crop=${GLOBAL_CROP_SIZE} roi_crop=${ROI_CROP_SIZE}"
   echo "cuda_visible_devices=${CUDA_VISIBLE_DEVICES:-<unset>}"
-  echo "fusion_mode=${FUSION_MODE} lambda_seg=${LAMBDA_SEG}"
+  echo "fusion_mode=${FUSION_MODE} fusion_reference_count=${FUSION_REFERENCE_COUNT} lambda_seg=${LAMBDA_SEG}"
   echo "positive_roi_loss_weight=${POSITIVE_ROI_LOSS_WEIGHT}"
   echo "roi_counts=${ROI_POSITIVE_SAMPLE_COUNTS}"
   echo "micro_batch=${MICRO_BATCH} accum_iter=${ACCUM_ITER} effective_batch=${EFFECTIVE_BATCH}"

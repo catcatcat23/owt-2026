@@ -9,6 +9,8 @@ import time
 
 import numpy as np
 import torch
+
+from OWT_models_orgslot import FUSION_MODES
 from torch.utils.data import DataLoader
 
 from eval_orgslot import calibrated_multiclass_prediction
@@ -38,7 +40,7 @@ def parse_args():
     parser.add_argument("--device", default="cuda")
     parser.add_argument(
         "--fusion-mode",
-        choices=("post_layernorm", "linear_sqrt"),
+        choices=FUSION_MODES,
         default="post_layernorm",
     )
     return parser.parse_args()

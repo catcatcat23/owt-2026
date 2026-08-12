@@ -19,6 +19,7 @@ ROI_INDEX=${ROI_INDEX:-${PROCESSED_ROOT}/metadata/small_organ_roi_index.json}
 LPIPS_STATE=${LPIPS_STATE:-${DATA_ROOT}/pretrained/owt_lpips_vgg16.pth}
 
 FUSION_MODE=${FUSION_MODE:?Set FUSION_MODE after the current AutoPET evaluations}
+FUSION_REFERENCE_COUNT=${FUSION_REFERENCE_COUNT:-9}
 LAMBDA_SEG=${LAMBDA_SEG:?Set LAMBDA_SEG after the current AutoPET evaluations}
 POSITIVE_ROI_LOSS_WEIGHT=${POSITIVE_ROI_LOSS_WEIGHT:-0}
 ROI_POSITIVE_SAMPLE_COUNTS=${ROI_POSITIVE_SAMPLE_COUNTS:-}
@@ -26,7 +27,7 @@ ROI_FREQUENCY_DATASET_SIZE=${ROI_FREQUENCY_DATASET_SIZE:-}
 ROI_FREQUENCY_ALPHA=${ROI_FREQUENCY_ALPHA:-0.5}
 ROI_MAX_WEIGHT_RATIO=${ROI_MAX_WEIGHT_RATIO:-4.0}
 ORGAN_ROI_PROBABILITY=${ORGAN_ROI_PROBABILITY:-0.2}
-GPU_IDS=${GPU_IDS:-0,1}
+GPU_IDS=${GPU_IDS:-}
 N_GPU=${N_GPU:-2}
 MASTER_PORT=${MASTER_PORT:-25741}
 MICRO_BATCH=${MICRO_BATCH:-8}
@@ -83,6 +84,7 @@ COMMAND=(
   --token_factor 20
   --slot_tg_depth 1
   --fusion_mode "${FUSION_MODE}"
+  --fusion_reference_count "${FUSION_REFERENCE_COUNT}"
   --loss_version L2-LPIPS
   --lambda_lpips 1.0
   --lpips_state "${LPIPS_STATE}"
@@ -131,8 +133,8 @@ fi
   echo "arm=${ARM}"
   echo "data_root=${DATA_ROOT}"
   echo "train_csv=${TRAIN_CSV}"
-  echo "gpu_ids=${GPU_IDS}"
-  echo "fusion_mode=${FUSION_MODE} lambda_seg=${LAMBDA_SEG}"
+  echo "cuda_visible_devices=${CUDA_VISIBLE_DEVICES:-<unset>} gpu_ids_override=${GPU_IDS:-<unset>}"
+  echo "fusion_mode=${FUSION_MODE} fusion_reference_count=${FUSION_REFERENCE_COUNT} lambda_seg=${LAMBDA_SEG}"
   echo "positive_roi_loss_weight=${POSITIVE_ROI_LOSS_WEIGHT} frequency_alpha=${ROI_FREQUENCY_ALPHA} max_weight_ratio=${ROI_MAX_WEIGHT_RATIO}"
   echo "organ_roi_probability=${ORGAN_ROI_PROBABILITY}"
   echo "micro_batch=${MICRO_BATCH} accum_iter=${ACCUM_ITER} effective_batch=${EFFECTIVE_BATCH}"
@@ -143,6 +145,8 @@ fi
 } | tee "${OUTPUT_DIR}/launcher.log"
 
 cd "${REPO_ROOT}"
-export CUDA_VISIBLE_DEVICES="${GPU_IDS}"
+if [[ -n "${GPU_IDS}" ]]; then
+  export CUDA_VISIBLE_DEVICES="${GPU_IDS}"
+fi
 export OMP_NUM_THREADS=1
 "${COMMAND[@]}" 2>&1 | tee -a "${OUTPUT_DIR}/train.log"

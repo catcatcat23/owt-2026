@@ -18,6 +18,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from datasets.orgslot_manifest import OrganSlotManifestDataset
 from OWT_models_orgslot import (
+    FUSION_MODES,
     OrganSlotMaskedAutoencoderViT,
     mae_vit_base_patch16,
     mae_vit_basefix16_patch16,
@@ -111,6 +112,8 @@ def build_model(args, slot_specs):
         "model_args": model_args,
         "slot_specs": slot_specs,
         "slot_tg_depth": args.slot_tg_depth,
+        "fusion_mode": args.fusion_mode,
+        "fusion_reference_count": args.fusion_reference_count,
     }
     if args.model_size == "base":
         factory = (
@@ -162,6 +165,10 @@ def parse_args():
     parser.add_argument("--embed-dim", type=int, default=32)
     parser.add_argument("--token-factor", type=int)
     parser.add_argument("--slot-tg-depth", type=int, default=1)
+    parser.add_argument(
+        "--fusion-mode", choices=FUSION_MODES, default="post_layernorm"
+    )
+    parser.add_argument("--fusion-reference-count", type=int)
     parser.add_argument("--loss-version", default="L2")
     parser.add_argument("--intensity-norm", choices=("per_sample", "fixed_255"), default="per_sample")
     parser.add_argument("--max-train-samples", type=int)
@@ -271,7 +278,6 @@ def main():
     seed_everything(args.seed)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    _write_json(output_dir / "resolved_config.json", vars(args))
     _write_git_provenance(output_dir)
     shutil.copyfile(args.visibility_config, output_dir / "class_map.json")
     (output_dir / "command.txt").write_text(
@@ -293,6 +299,9 @@ def main():
         {"name": name, "raw_class_id": class_by_name[name].raw_id}
         for name in base_stage.visible_slots
     ]
+    if args.fusion_reference_count is None:
+        args.fusion_reference_count = len(base_specs)
+    _write_json(output_dir / "resolved_config.json", vars(args))
     model = build_model(args, base_specs)
     load_report = None
     if args.stage == "base":

@@ -11,6 +11,13 @@ import OWT_models
 from OrganSlotEmbed import OrganSlot, OrganSlotBank
 
 
+FUSION_MODES = (
+    "post_layernorm",
+    "linear_sqrt",
+    "linear_fixed_sqrt",
+)
+
+
 class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
     def __init__(
         self,
@@ -30,6 +37,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         slot_specs=None,
         slot_tg_depth=1,
         fusion_mode="post_layernorm",
+        fusion_reference_count=None,
     ):
         if slot_specs is None:
             raise ValueError("slot_specs are required")
@@ -92,15 +100,18 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                 init_from=None,
             )
 
-        if fusion_mode not in {"post_layernorm", "linear_sqrt"}:
-            raise ValueError(
-                "fusion_mode must be post_layernorm or linear_sqrt"
-            )
+        if fusion_mode not in FUSION_MODES:
+            raise ValueError(f"fusion_mode must be one of {FUSION_MODES}")
         self.fusion_mode = fusion_mode
+        if fusion_reference_count is None:
+            fusion_reference_count = len(self.slot_names)
+        self.fusion_reference_count = int(fusion_reference_count)
+        if self.fusion_reference_count <= 0:
+            raise ValueError("fusion_reference_count must be positive")
         # Keep this module in both variants so checkpoints remain structurally
-        # compatible. The linear-sqrt ablation bypasses and freezes it.
+        # compatible. Linear fusion ablations bypass and freeze it.
         self.fusion_norm = norm_layer(decoder_embed_dim)
-        if self.fusion_mode == "linear_sqrt":
+        if self.fusion_mode != "post_layernorm":
             for parameter in self.fusion_norm.parameters():
                 parameter.requires_grad = False
 
@@ -182,9 +193,12 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                 raise ValueError("all slot canvases must share a shape")
             weight = slot_keep_mask[:, index, None, None].to(canvas.dtype)
             canvas_sum = canvas_sum + canvas * weight
-        fused = canvas_sum / retained_count.sqrt()[:, None, None].to(
-            canvas_sum.dtype
-        )
+        if self.fusion_mode == "linear_fixed_sqrt":
+            fused = canvas_sum / math.sqrt(self.fusion_reference_count)
+        else:
+            fused = canvas_sum / retained_count.sqrt()[:, None, None].to(
+                canvas_sum.dtype
+            )
         if self.fusion_mode == "post_layernorm":
             return self.fusion_norm(fused)
         return fused
@@ -348,6 +362,9 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         """Enable the controlled sequential-finetuning baseline."""
         for parameter in self.parameters():
             parameter.requires_grad = True
+        if self.fusion_mode != "post_layernorm":
+            for parameter in self.fusion_norm.parameters():
+                parameter.requires_grad = False
         return self.parameter_report()
 
     def parameter_report(self):
@@ -370,6 +387,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             "total": total,
             "trainable": trainable,
             "fusion_mode": self.fusion_mode,
+            "fusion_reference_count": self.fusion_reference_count,
             "per_slot": per_slot,
         }
 

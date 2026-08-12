@@ -26,7 +26,7 @@ from datasets.orgslot_highres import (
 )
 from datasets.orgslot_manifest import OrganSlotManifestDataset
 from engine_pretrain_orgslot_common8_a100 import train_one_epoch
-from OWT_models_orgslot import mae_vit_base_patch16
+from OWT_models_orgslot import FUSION_MODES, mae_vit_base_patch16
 from VQ.lpips import LPIPS
 import timm.optim.optim_factory as optim_factory
 import util.misc as misc
@@ -50,9 +50,10 @@ def get_args_parser():
     parser.add_argument("--slot_tg_depth", default=1, type=int)
     parser.add_argument(
         "--fusion_mode",
-        choices=("post_layernorm", "linear_sqrt"),
+        choices=FUSION_MODES,
         default="linear_sqrt",
     )
+    parser.add_argument("--fusion_reference_count", type=int)
 
     parser.add_argument("--weight_decay", default=0.05, type=float)
     parser.add_argument("--lr", default=None, type=float)
@@ -281,6 +282,8 @@ def main(args):
     ]
     if len(slot_specs) != 9:
         raise ValueError("Common8 requires eight foreground slots plus background")
+    if args.fusion_reference_count is None:
+        args.fusion_reference_count = len(slot_specs)
 
     train_raw, dataset_train = _build_dataset(
         args,
@@ -335,6 +338,7 @@ def main(args):
         slot_specs=slot_specs,
         slot_tg_depth=args.slot_tg_depth,
         fusion_mode=args.fusion_mode,
+        fusion_reference_count=args.fusion_reference_count,
     )
     if args.lambda_lpips:
         perceptual_loss = LPIPS(vgg_pretrained=False).eval()

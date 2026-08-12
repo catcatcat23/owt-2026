@@ -31,6 +31,7 @@ def tiny_model(
     specs=None,
     slot_tg_depth=1,
     fusion_mode="post_layernorm",
+    fusion_reference_count=None,
 ):
     if specs is None:
         specs = [
@@ -54,6 +55,7 @@ def tiny_model(
         slot_specs=specs,
         slot_tg_depth=slot_tg_depth,
         fusion_mode=fusion_mode,
+        fusion_reference_count=fusion_reference_count,
     )
 
 
@@ -85,6 +87,21 @@ class OrganSlotModelTests(unittest.TestCase):
             self.assertEqual(logits.shape, (1, 1, 4, 32, 32))
         output["reconstruction"].mean().backward()
         self.assertIsNotNone(model.patch_embed.proj.weight.grad)
+
+    def test_fixed_fusion_2d_and_3d_forward_backward(self):
+        for dataset_type in ("2D", "3D"):
+            with self.subTest(dataset_type=dataset_type):
+                model = tiny_model(
+                    dataset_type, fusion_mode="linear_fixed_sqrt"
+                )
+                shape = (1, 3, 32, 32)
+                if dataset_type == "3D":
+                    shape = (1, 3, 4, 32, 32)
+                images = torch.rand(*shape)
+                output = model(images)
+                self.assertEqual(output["reconstruction"].shape, images.shape)
+                output["reconstruction"].mean().backward()
+                self.assertIsNotNone(model.patch_embed.proj.weight.grad)
 
     def test_per_sample_fusion_is_exact_and_isolated(self):
         model = tiny_model()
@@ -126,6 +143,48 @@ class OrganSlotModelTests(unittest.TestCase):
         self.assertTrue(all(
             not parameter.requires_grad
             for parameter in model.fusion_norm.parameters()
+        ))
+
+    def test_linear_fixed_sqrt_uses_stable_reference_count(self):
+        model = tiny_model(
+            fusion_mode="linear_fixed_sqrt", fusion_reference_count=3
+        )
+        canvases = {
+            "background": torch.randn(2, 4, 32),
+            "kidney": torch.randn(2, 4, 32),
+            "spleen": torch.randn(2, 4, 32),
+        }
+        keep_all = torch.ones(2, 3, dtype=torch.bool)
+        keep_without_kidney = keep_all.clone()
+        keep_without_kidney[:, 1] = False
+        fused_all = model.fuse_canvases(canvases, keep_all)
+        fused_without = model.fuse_canvases(canvases, keep_without_kidney)
+        expected_delta = canvases["kidney"] / (3 ** 0.5)
+        self.assertTrue(torch.allclose(
+            fused_all - fused_without, expected_delta, rtol=1e-6, atol=1e-6
+        ))
+
+        reference_count = model.fusion_reference_count
+        model.append_slot("liver", 4, init_from="background")
+        self.assertEqual(model.fusion_reference_count, reference_count)
+        self.assertEqual(model.parameter_report()["fusion_reference_count"], 3)
+
+    def test_fixed_fusion_does_not_change_slot_head_logits(self):
+        dynamic = tiny_model(fusion_mode="linear_sqrt").eval()
+        fixed = tiny_model(fusion_mode="linear_fixed_sqrt").eval()
+        fixed.load_state_dict(dynamic.state_dict(), strict=True)
+        images = torch.rand(2, 3, 32, 32)
+        keep = torch.tensor([[1, 0, 1], [1, 1, 1]], dtype=torch.bool)
+        with torch.no_grad():
+            dynamic_output = dynamic(images, keep)
+            fixed_output = fixed(images, keep)
+        for name in dynamic.slot_names:
+            self.assertTrue(torch.equal(
+                dynamic_output["slot_logits"][name],
+                fixed_output["slot_logits"][name],
+            ))
+        self.assertFalse(torch.equal(
+            dynamic_output["canvas"], fixed_output["canvas"]
         ))
 
     def test_append_copy_preserves_all_existing_tensors(self):

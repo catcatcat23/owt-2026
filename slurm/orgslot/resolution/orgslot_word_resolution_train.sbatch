@@ -16,9 +16,10 @@ set -euo pipefail
 WORKDIR=${WORKDIR:-/gpfs/work/aac/sifansong/worktrees/orgslot_resolution}
 DATA_ROOT=${DATA_ROOT:-/gpfs/work/aac/sifansong/data}
 PYTHON=${PYTHON:-/gpfs/work/aac/sifansong/envs/abdpet/bin/python}
+PROCESSED_DATA_ROOT=${PROCESSED_DATA_ROOT:-${DATA_ROOT}}
 cd "${WORKDIR}"
 source scripts/orgslot/configure_word_resolution_arm.sh
-export WORKDIR DATA_ROOT PYTHON
+export WORKDIR DATA_ROOT PROCESSED_DATA_ROOT PYTHON
 export LPIPS_STATE=${LPIPS_STATE:-${DATA_ROOT}/assets/owt_lpips_vgg16.pth}
 export RUN_NAME=OrgSlot_${EXPERIMENT_TAG}_Loss3_ROI20_${SLURM_JOB_ID}
 export OUTPUT_DIR=${WORKDIR}/Results/OrganSlotBank/Common8/WORD_2D/${RUN_NAME}

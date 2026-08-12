@@ -123,6 +123,8 @@ def get_args_parser():
     parser.add_argument('--save_video', type=int, default=0, help='0=False, 1=True')
     parser.add_argument('--thre', type=float, default=0.1, help='0.1')
     parser.add_argument('--id_index', type=int, default=0, help='id_index')
+    parser.add_argument('--save_only', action='store_true',
+                        help='save visualizations without LPIPS/SSIM metrics')
 
     parser.add_argument('--text_encoding', type=str, default="None", help='None or path of text_encoding')
 
@@ -132,7 +134,13 @@ def prepare_model(chkpt_dir, arch, args=None, img_size=None):
     import OWT_models
     model = OWT_models.__dict__[args.model](img_size=args.input_size, norm_pix_loss=args.norm_pix_loss, model_args=args)
     checkpoint = torch.load(chkpt_dir, map_location='cpu')
-    msg = model.load_state_dict(checkpoint['model'], strict=True)
+    state = checkpoint['model']
+    if args.save_only:
+        state = {
+            key: value for key, value in state.items()
+            if not key.startswith('perceptual_loss.')
+        }
+    msg = model.load_state_dict(state, strict=True)
     print(msg)
     return model
 
@@ -228,6 +236,9 @@ def gen_one_image(input_img, model, case_id=0, perceptual_loss=None):
         save_tensor_3D(preds, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_pred_image_'+class_+'_'+str(args.reverse)+'.png', save_video = args.save_video)
         save_tensor_3D(preds_thresholded, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_pred_image_thresholded_'+str(args.thre)+'_'+class_+'_'+str(args.reverse)+'.png', save_video = args.save_video)
         save_tensor_3D(image_target_thresholded, args.output_vis+'/masked_results/'+args.load_csv_type+'/'+case_id+'_test1_image_target_thresholded_'+str(args.thre)+'_'+class_+'_'+str(args.reverse)+'.png', save_video = args.save_video)
+
+    if args.save_only:
+        return None
 
     metrics = {}
     
@@ -335,8 +346,10 @@ if __name__ == '__main__':
     model_mae.eval()
     
     print('Model loaded.')
-    from VQ.lpips import LPIPS
-    perceptual_loss = LPIPS().to(device).eval()
+    perceptual_loss = None
+    if not args.save_only:
+        from VQ.lpips import LPIPS
+        perceptual_loss = LPIPS().to(device).eval()
     
     torch.manual_seed(3)
     random.seed(3)
@@ -387,11 +400,16 @@ if __name__ == '__main__':
         input_img.append(sample)
     
         metrics = gen_one_image(input_img, model_mae, case_id=img, perceptual_loss=perceptual_loss)
-        metrics_list.append(metrics)
+        if metrics is not None:
+            metrics_list.append(metrics)
 
         break_id +=1
         if break_id == args.id_index:
             break
+
+    if args.save_only:
+        print("Saved visualization outputs without reconstruction metrics.")
+        sys.exit(0)
 
     print("\nOriginal Predictions Metrics:")
     print("Average L1 Loss:", np.mean([m['original']['loss_l1'] for m in metrics_list]))

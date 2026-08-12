@@ -235,13 +235,20 @@ def write_case(
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        "Preprocess WORD/BTCV to native-matrix Common8 at 1x1x2 mm"
+        "Preprocess WORD/BTCV to native-matrix Common8 at configurable spacing"
     )
     parser.add_argument("--dataset", choices=("WORD", "BTCV"), required=True)
     parser.add_argument("--source-root", type=Path, required=True)
     parser.add_argument("--split-json", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--spacing", nargs=3, type=float, default=(1.0, 1.0, 2.0))
+    parser.add_argument(
+        "--runtime-input-size",
+        type=int,
+        default=None,
+        help="Optional intended runtime square input size recorded in metadata.",
+    )
+    parser.add_argument("--manifest-tag", default="native112")
     parser.add_argument("--hu-clip", nargs=2, type=float, default=(-175.0, 250.0))
     parser.add_argument("--image-order", choices=(1, 3), type=int, default=3)
     parser.add_argument("--jpeg-quality", type=int, default=95)
@@ -254,6 +261,10 @@ def main() -> None:
     args = parse_args()
     if not all(value > 0 for value in args.spacing):
         raise ValueError("spacing values must be positive")
+    if args.runtime_input_size is not None and args.runtime_input_size <= 0:
+        raise ValueError("runtime-input-size must be positive")
+    if not args.manifest_tag or any(char.isspace() for char in args.manifest_tag):
+        raise ValueError("manifest-tag must be non-empty and contain no whitespace")
     dataset_output_root = args.output_root / args.dataset
     if (
         dataset_output_root.exists()
@@ -295,7 +306,12 @@ def main() -> None:
             "spacing_mm": list(args.spacing),
             "offline_spatial_matrix": "native_after_resampling",
             "offline_resize": None,
-            "runtime_final_input_xy": [448, 448],
+            "runtime_final_input_xy": (
+                [args.runtime_input_size, args.runtime_input_size]
+                if args.runtime_input_size is not None
+                else None
+            ),
+            "manifest_tag": args.manifest_tag,
             "hu_clip": list(args.hu_clip),
             "normalization": [0.0, 1.0],
             "image_interpolation_order": args.image_order,
@@ -337,11 +353,11 @@ def main() -> None:
     csv_dir = args.output_root / args.dataset / "csv"
     for split, rows in rows_by_split.items():
         _write_csv(
-            csv_dir / "{}_{}_2D_native112.csv".format(args.dataset, split),
+            csv_dir / "{}_{}_2D_{}.csv".format(args.dataset, split, args.manifest_tag),
             rows["2d"],
         )
         _write_csv(
-            csv_dir / "{}_{}_Fixfr4_native112.csv".format(args.dataset, split),
+            csv_dir / "{}_{}_Fixfr4_{}.csv".format(args.dataset, split, args.manifest_tag),
             rows["fixfr4"],
         )
     geometry_report["splits"] = {

@@ -1,4 +1,4 @@
-"""DDP trainer for Common8 native-resample crop to 448 experiments."""
+"""DDP trainer for Common8 native-resample OrganSlot resolution experiments."""
 
 import argparse
 import datetime
@@ -41,7 +41,7 @@ from util.orgslot_lossbalance_v3 import build_class_frequency_weights
 
 def get_args_parser():
     parser = argparse.ArgumentParser(
-        "OrganSlotBank Common8 1x1x2/448 pre-training", add_help=False
+        "OrganSlotBank Common8 native-resample pre-training", add_help=False
     )
     parser.add_argument("--batch_size", default=8, type=int)
     parser.add_argument("--epochs", default=798, type=int)
@@ -61,6 +61,14 @@ def get_args_parser():
     parser.add_argument("--min_lr", default=0.0, type=float)
     parser.add_argument("--warmup_epochs", default=40, type=int)
     parser.add_argument("--max_optimizer_updates", default=118800, type=int)
+    parser.add_argument(
+        "--expected_spacing",
+        nargs=3,
+        type=float,
+        default=(1.0, 1.0, 2.0),
+        metavar=("SX", "SY", "SZ"),
+        help="Required preprocessing spacing recorded in the summary.",
+    )
     parser.add_argument("--warmup_updates", default=5940, type=int)
 
     parser.add_argument("--data_path", required=True)
@@ -261,12 +269,23 @@ def main(args):
     with open(args.preprocess_summary, "r", encoding="utf-8") as handle:
         preprocess = json.load(handle)
     expected_preprocess = preprocess.get("config", {})
-    if expected_preprocess.get("spacing_mm") != [1.0, 1.0, 2.0]:
-        raise ValueError("preprocessing spacing must be exactly 1x1x2 mm")
+    recorded_spacing = expected_preprocess.get("spacing_mm")
+    if recorded_spacing is None or not np.allclose(
+        recorded_spacing, args.expected_spacing, rtol=0.0, atol=1e-6
+    ):
+        raise ValueError(
+            "preprocessing spacing {} != expected {}".format(
+                recorded_spacing, list(args.expected_spacing)
+            )
+        )
     if expected_preprocess.get("offline_spatial_matrix") != "native_after_resampling":
         raise ValueError("preprocessing must retain the native resampled matrix")
-    if args.input_size != 448 or args.global_crop_size != 448:
-        raise ValueError("this experiment requires 448 crop and 448 model input")
+    if args.input_size <= 0 or args.input_size % 16 != 0:
+        raise ValueError("input_size must be positive and divisible by patch size 16")
+    if args.global_crop_size <= 0 or args.roi_crop_size <= 0:
+        raise ValueError("crop sizes must be positive")
+    if args.roi_crop_size > args.global_crop_size:
+        raise ValueError("roi_crop_size must not exceed global_crop_size")
     if args.organ_roi_aug:
         with open(args.roi_index, "r", encoding="utf-8") as handle:
             roi_metadata = json.load(handle)

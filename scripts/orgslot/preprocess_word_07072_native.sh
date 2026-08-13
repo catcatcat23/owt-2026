@@ -47,12 +47,12 @@ PREPROCESS_ARGS=(
 if [[ "${REUSE_GEOMETRY_PREFLIGHT}" == "1" ]]; then
   PREPROCESS_ARGS+=(--reuse-geometry-preflight)
 fi
-"${PYTHON}" tools/preprocess_common8_112_448.py "${PREPROCESS_ARGS[@]}"
-
-"${PYTHON}" tools/build_small_organ_roi_index.py   --manifest "${TRAIN_CSV}"   --output "${ROI_INDEX}"   --focus-class-ids 4,5,6
 if [[ "${REUSE_COMPLETE_CASES}" == "1" ]]; then
   PREPROCESS_ARGS+=(--reuse-complete-cases)
 fi
+"${PYTHON}" tools/preprocess_common8_112_448.py "${PREPROCESS_ARGS[@]}"
+
+"${PYTHON}" tools/build_small_organ_roi_index.py   --manifest "${TRAIN_CSV}"   --output "${ROI_INDEX}"   --focus-class-ids 4,5,6
 
 "${PYTHON}" tools/audit_small_organ_roi_policy.py   --manifest "${TRAIN_CSV}"   --roi-index "${ROI_INDEX}"   --output "${ROI_AUDIT}"   --trials-per-slice 4   --seed 0
 

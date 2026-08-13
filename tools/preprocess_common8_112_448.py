@@ -406,23 +406,23 @@ def main() -> None:
         for index, (record, result) in enumerate(zip(records, results), start=1):
             rows_2d, rows_fixfr4 = result
             rows_by_split[record.split]["2d"].extend(rows_2d)
-    if args.reuse_complete_cases:
-        for index, (record, detail) in enumerate(zip(records, details), start=1):
-            result = existing_case_rows(
-                record, args.dataset, args.output_root, detail["resampled_shape"][2]
-            )
-            rows_2d, rows_fixfr4 = result
-            rows_by_split[record.split]["2d"].extend(rows_2d)
-            rows_by_split[record.split]["fixfr4"].extend(rows_fixfr4)
-            print(
-                "reuse {}/{} {} slices={}".format(
-                    index, len(records), record.case_id, len(rows_2d)
-                ),
-                flush=True,
-            )
             rows_by_split[record.split]["fixfr4"].extend(rows_fixfr4)
             print(
                 "write {}/{} {} slices={} windows={}".format(
+                    index, len(records), record.case_id, len(rows_2d), len(rows_fixfr4)
+                ),
+                flush=True,
+            )
+
+    if args.reuse_complete_cases:
+        for index, (record, detail) in enumerate(zip(records, details), start=1):
+            rows_2d, rows_fixfr4 = existing_case_rows(
+                record, args.dataset, args.output_root, detail["resampled_shape"][2]
+            )
+            rows_by_split[record.split]["2d"].extend(rows_2d)
+            rows_by_split[record.split]["fixfr4"].extend(rows_fixfr4)
+            print(
+                "reuse {}/{} {} slices={} windows={}".format(
                     index, len(records), record.case_id, len(rows_2d), len(rows_fixfr4)
                 ),
                 flush=True,

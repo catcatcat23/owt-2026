@@ -5,9 +5,11 @@ No fixed canvas or offline resize is applied.  The paired runtime transform
 crops the resampled native matrix and performs the only resize, to 448x448.
 """
 
+from concurrent.futures import ProcessPoolExecutor
 import argparse
 import csv
 from dataclasses import dataclass
+from functools import partial
 import json
 from pathlib import Path
 from typing import Iterable, List, Mapping, Sequence, Tuple
@@ -225,12 +227,48 @@ def write_case(
         image_paths.append(image_path)
         mask_paths.append(mask_path)
         rows_2d.append((str(image_path), str(mask_path)))
-
     rows_fixfr4 = [
         (str(image_paths[index]), str(mask_paths[index]))
         for index in range(max(0, len(image_paths) - 3))
     ]
     return rows_2d, rows_fixfr4
+
+
+def existing_case_rows(
+    record: CaseRecord,
+    dataset: str,
+    output_root: Path,
+    expected_slices: int,
+) -> Tuple[List[Tuple[str, str]], List[Tuple[str, str]]]:
+    """Validate a fully written case and recover its deterministic CSV rows."""
+    image_dir = output_root / dataset / record.split / "image" / record.case_id
+    mask_dir = output_root / dataset / record.split / "mask" / record.case_id
+    expected_slices = int(expected_slices)
+    if expected_slices <= 0:
+        raise ValueError("expected_slices must be positive")
+    rows_2d = []
+    for index in range(expected_slices):
+        image_path = image_dir / "{}_{}.jpg".format(record.case_id, index)
+        mask_path = mask_dir / "{}_{}.png".format(record.case_id, index)
+        if not image_path.is_file() or not mask_path.is_file():
+            raise FileNotFoundError(
+                "incomplete existing case {} at slice {}".format(
+                    record.case_id, index
+                )
+            )
+        rows_2d.append((str(image_path), str(mask_path)))
+    image_count = sum(path.is_file() for path in image_dir.glob("*.jpg"))
+    mask_count = sum(path.is_file() for path in mask_dir.glob("*.png"))
+    if image_count != expected_slices or mask_count != expected_slices:
+        raise ValueError(
+            "existing case {} has unexpected file counts image={} mask={} expected={}".format(
+                record.case_id, image_count, mask_count, expected_slices
+            )
+        )
+    rows_fixfr4 = rows_2d[: max(0, expected_slices - 3)]
+    return rows_2d, rows_fixfr4
+
+
 
 
 def parse_args():
@@ -250,10 +288,13 @@ def parse_args():
     )
     parser.add_argument("--manifest-tag", default="native112")
     parser.add_argument("--hu-clip", nargs=2, type=float, default=(-175.0, 250.0))
+    parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--image-order", choices=(1, 3), type=int, default=3)
     parser.add_argument("--jpeg-quality", type=int, default=95)
     parser.add_argument("--max-cases", type=int)
     parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument("--reuse-geometry-preflight", action="store_true")
+    parser.add_argument("--reuse-complete-cases", action="store_true")
     return parser.parse_args()
 
 
@@ -266,10 +307,12 @@ def main() -> None:
     if not args.manifest_tag or any(char.isspace() for char in args.manifest_tag):
         raise ValueError("manifest-tag must be non-empty and contain no whitespace")
     dataset_output_root = args.output_root / args.dataset
+    if args.workers < 1:
+        raise ValueError("workers must be at least one")
     if (
         dataset_output_root.exists()
         and any(dataset_output_root.iterdir())
-        and not args.validate_only
+        and not (args.validate_only or args.reuse_geometry_preflight or args.reuse_complete_cases)
     ):
         raise FileExistsError(
             "refusing to write into non-empty dataset root: {}".format(
@@ -285,19 +328,37 @@ def main() -> None:
     )
     print("Resolved {} {} cases".format(len(records), args.dataset), flush=True)
 
-    details = []
-    for index, record in enumerate(records, start=1):
-        detail = validate_case_geometry(record, args.dataset, args.spacing)
-        details.append(detail)
-        print(
-            "geometry {}/{} {} native_resampled_shape={}".format(
-                index,
-                len(records),
-                record.case_id,
-                detail["resampled_shape"],
-            ),
-            flush=True,
-        )
+    report_path = dataset_output_root / "metadata" / "geometry_preflight.json"
+    if args.reuse_geometry_preflight:
+        if not report_path.is_file():
+            raise FileNotFoundError(report_path)
+        with open(report_path, "r", encoding="utf-8") as handle:
+            previous_report = json.load(handle)
+        previous_ids = [item["case_id"] for item in previous_report["case_details"]]
+        if previous_report.get("dataset") != args.dataset:
+            raise ValueError("geometry preflight dataset mismatch")
+        if not np.allclose(
+            previous_report.get("config", {}).get("spacing_mm", ()),
+            args.spacing,
+            rtol=0.0,
+            atol=1e-6,
+        ):
+            raise ValueError("geometry preflight spacing mismatch")
+        if previous_ids != [record.case_id for record in records]:
+            raise ValueError("geometry preflight case order mismatch")
+        details = previous_report["case_details"]
+        print("Reusing verified geometry preflight: {}".format(report_path), flush=True)
+    else:
+        details = []
+        for index, record in enumerate(records, start=1):
+            detail = validate_case_geometry(record, args.dataset, args.spacing)
+            details.append(detail)
+            print(
+                "geometry {}/{} {} native_resampled_shape={}".format(
+                    index, len(records), record.case_id, detail["resampled_shape"]
+                ),
+                flush=True,
+            )
 
     geometry_report = {
         "dataset": args.dataset,
@@ -311,6 +372,7 @@ def main() -> None:
                 if args.runtime_input_size is not None
                 else None
             ),
+            "case_write_workers": args.workers,
             "manifest_tag": args.manifest_tag,
             "hu_clip": list(args.hu_clip),
             "normalization": [0.0, 1.0],
@@ -322,7 +384,6 @@ def main() -> None:
         "source_to_common8": SOURCE_TO_COMMON8[args.dataset],
         "case_details": details,
     }
-    report_path = args.output_root / args.dataset / "metadata" / "geometry_preflight.json"
     _json_dump(report_path, geometry_report)
     if args.validate_only:
         print("Geometry validation passed; report: {}".format(report_path))
@@ -331,24 +392,47 @@ def main() -> None:
     rows_by_split = {
         split: {"2d": [], "fixfr4": []} for split in sorted({r.split for r in records})
     }
-    for index, record in enumerate(records, start=1):
-        rows_2d, rows_fixfr4 = write_case(
-            record,
-            args.dataset,
-            args.output_root,
-            args.spacing,
-            args.hu_clip,
-            args.image_order,
-            args.jpeg_quality,
-        )
-        rows_by_split[record.split]["2d"].extend(rows_2d)
-        rows_by_split[record.split]["fixfr4"].extend(rows_fixfr4)
-        print(
-            "write {}/{} {} slices={} windows={}".format(
-                index, len(records), record.case_id, len(rows_2d), len(rows_fixfr4)
-            ),
-            flush=True,
-        )
+    worker = partial(
+        write_case,
+        dataset=args.dataset,
+        output_root=args.output_root,
+        spacing=args.spacing,
+        hu_clip=args.hu_clip,
+        image_order=args.image_order,
+        jpeg_quality=args.jpeg_quality,
+    )
+
+    def collect(results):
+        for index, (record, result) in enumerate(zip(records, results), start=1):
+            rows_2d, rows_fixfr4 = result
+            rows_by_split[record.split]["2d"].extend(rows_2d)
+    if args.reuse_complete_cases:
+        for index, (record, detail) in enumerate(zip(records, details), start=1):
+            result = existing_case_rows(
+                record, args.dataset, args.output_root, detail["resampled_shape"][2]
+            )
+            rows_2d, rows_fixfr4 = result
+            rows_by_split[record.split]["2d"].extend(rows_2d)
+            rows_by_split[record.split]["fixfr4"].extend(rows_fixfr4)
+            print(
+                "reuse {}/{} {} slices={}".format(
+                    index, len(records), record.case_id, len(rows_2d)
+                ),
+                flush=True,
+            )
+            rows_by_split[record.split]["fixfr4"].extend(rows_fixfr4)
+            print(
+                "write {}/{} {} slices={} windows={}".format(
+                    index, len(records), record.case_id, len(rows_2d), len(rows_fixfr4)
+                ),
+                flush=True,
+            )
+
+    elif args.workers == 1:
+        collect(map(worker, records))
+    else:
+        with ProcessPoolExecutor(max_workers=args.workers) as executor:
+            collect(executor.map(worker, records))
 
     csv_dir = args.output_root / args.dataset / "csv"
     for split, rows in rows_by_split.items():

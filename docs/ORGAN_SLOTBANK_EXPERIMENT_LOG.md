@@ -101,3 +101,31 @@ The real-data checks above are engineering smokes, not accuracy results. They
 use debug-width models and only one training batch. The assumed raw-ID semantic
 mapping in `owt_legacy_debug.json` still needs independent dataset evidence
 before formal organ-named claims or long training.
+
+## 2026-08-15 WORD448 JointSeg Focal v2
+
+目的：在 ROI20 reconstruction baseline 上加入每个 slot 独立的二分类 Focal
+监督，替代出现前景全背景塌缩风险的 Dice+BCE tiny 目标；不启用融合后 Loss3。
+
+固定配置：
+
+- 分支 `experiment/orgslot-jointseg-focal-v0`，提交 `7d8343e`；
+- XEC账号 `antengcai23`，Slurm account `sifansong`；
+- WORD 2D，448输入，ROI20使用384 crop resize到448；
+- `L = global L2 + LPIPS + 0.1 * slot focal`；
+- `focal_alpha=0.75`，`focal_gamma=2.0`；
+- `seg_supervision=all`，`lambda_bg_seg=0.25`；
+- 真实keep/drop继续控制reconstruction target和fusion；
+- 118800 optimizer updates，有效batch 192，2张A800。
+
+验证：本地53项OrganSlot回归测试和15项Focal/TGR目标测试通过；XEC同环境15项
+目标测试通过。逐slot日志新增预测体积、GT体积和阳性像素概率，防止仅凭总loss
+误判全背景输出为成功。
+
+任务链：
+
+- smoke `117005`；
+- 正式训练 `117006`，依赖smoke成功；
+- reconstruction Direct/Indirect评估 `117007`；
+- head训练集阈值校准 `117008`；
+- 固定0.5及冻结校准阈值head测试 `117009`。

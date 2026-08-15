@@ -170,3 +170,15 @@ Focal 的原始数值约为 Dice+BCE 的十分之一，因此使用 0.1 而不�
 `positive_probability`。smoke 必须验证这些字段有限，正式判断还必须依赖固定
 0.5 threshold 的逐 head Dice/预测体积，以及相同 0.02 threshold 的
 reconstruction Direct/Indirect Dice。
+
+XEC `antengcai23` 任务链（2026-08-15）：
+
+| 阶段 | Job ID | 依赖/状态 |
+|---|---:|---|
+| ROI100 Focal smoke | 117005 | 已提交，等待调度 |
+| ROI20正式训练 | 117006 | `afterok:117005` |
+| reconstruction评估 | 117007 | `afterok:117006` |
+| head train calibration | 117008 | `afterok:117006` |
+| head test | 117009 | `afterok:117008` |
+
+代码分支：`experiment/orgslot-jointseg-focal-v0`；提交：`7d8343e`。

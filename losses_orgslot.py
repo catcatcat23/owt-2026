@@ -29,6 +29,45 @@ def dice_bce_loss(logits, target):
     )
 
 
+def sigmoid_focal_loss(logits, target, alpha=0.75, gamma=2.0):
+    """Standard binary focal loss with ``alpha`` weighting the positive class."""
+    if not 0.0 <= float(alpha) <= 1.0:
+        raise ValueError("focal alpha must be in [0, 1]")
+    if float(gamma) < 0.0:
+        raise ValueError("focal gamma must be non-negative")
+    target = target.to(device=logits.device, dtype=logits.dtype)
+    cross_entropy = F.binary_cross_entropy_with_logits(
+        logits, target, reduction="none"
+    )
+    probabilities = torch.sigmoid(logits)
+    probability_target = probabilities * target + (1.0 - probabilities) * (
+        1.0 - target
+    )
+    alpha_target = float(alpha) * target + (1.0 - float(alpha)) * (
+        1.0 - target
+    )
+    return (
+        alpha_target
+        * (1.0 - probability_target).pow(float(gamma))
+        * cross_entropy
+    ).mean()
+
+
+def binary_segmentation_loss(
+    logits, target, loss_type, focal_alpha, focal_gamma
+):
+    if loss_type == "dice_bce":
+        return dice_bce_loss(logits, target)
+    if loss_type == "focal":
+        return sigmoid_focal_loss(
+            logits,
+            target,
+            alpha=focal_alpha,
+            gamma=focal_gamma,
+        )
+    raise ValueError("unknown segmentation loss type: {}".format(loss_type))
+
+
 def base_reconstruction_loss(reconstruction, target):
     return F.mse_loss(reconstruction, target)
 
@@ -40,6 +79,9 @@ def base_segmentation_loss(
     slot_keep_mask,
     background_name="background",
     background_weight=0.25,
+    loss_type="dice_bce",
+    focal_alpha=0.75,
+    focal_gamma=2.0,
 ):
     """Average losses selected by an explicit per-sample/per-slot mask."""
     batch_size = slot_keep_mask.shape[0]
@@ -53,9 +95,12 @@ def base_segmentation_loss(
         for sample_index in range(batch_size):
             if bool(slot_keep_mask[sample_index, slot_index]):
                 sample_losses.append(
-                    dice_bce_loss(
+                    binary_segmentation_loss(
                         logits[sample_index:sample_index + 1],
                         target[sample_index:sample_index + 1],
+                        loss_type,
+                        focal_alpha,
+                        focal_gamma,
                     )
                 )
         if not sample_losses:

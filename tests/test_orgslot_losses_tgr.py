@@ -13,6 +13,7 @@ from test_orgslot_model import tiny_model
 from losses_orgslot import (
     base_segmentation_loss,
     new_region_reconstruction_loss,
+    sigmoid_focal_loss,
     old_confidence_suppression_loss,
 )
 from util.slot_tgr import (
@@ -79,8 +80,51 @@ class LossAndTGRTests(unittest.TestCase):
             logits, targets, ["a", "b"], supervision
         )
         loss.backward()
+
         self.assertGreater(retained.grad.abs().sum(), 0)
         self.assertGreater(dropped.grad.abs().sum(), 0)
+    def test_focal_loss_prefers_correct_confident_predictions(self):
+        target = torch.tensor([[[[1.0, 0.0]]]])
+        correct = torch.tensor([[[[8.0, -8.0]]]])
+        incorrect = -correct
+        correct_loss = sigmoid_focal_loss(
+            correct, target, alpha=0.75, gamma=2.0
+        )
+        incorrect_loss = sigmoid_focal_loss(
+            incorrect, target, alpha=0.75, gamma=2.0
+        )
+        self.assertLess(float(correct_loss), float(incorrect_loss))
+
+    def test_focal_all_supervision_gives_dropped_slot_gradient(self):
+        retained = torch.zeros(2, 1, 4, 4, requires_grad=True)
+        dropped = torch.zeros(2, 1, 4, 4, requires_grad=True)
+        logits = {"a": retained, "b": dropped}
+        targets = {
+            "a": torch.ones_like(retained),
+            "b": torch.zeros_like(dropped),
+        }
+        keep = torch.tensor([[1, 0], [1, 0]], dtype=torch.bool)
+        supervision = _segmentation_supervision_mask("all", keep)
+        loss, _ = base_segmentation_loss(
+            logits,
+            targets,
+            ["a", "b"],
+            supervision,
+            loss_type="focal",
+            focal_alpha=0.75,
+            focal_gamma=2.0,
+        )
+        loss.backward()
+        self.assertGreater(retained.grad.abs().sum(), 0)
+        self.assertGreater(dropped.grad.abs().sum(), 0)
+
+    def test_focal_parameters_are_validated(self):
+        logits = torch.zeros(1, 1, 2, 2)
+        target = torch.zeros_like(logits)
+        with self.assertRaisesRegex(ValueError, "alpha"):
+            sigmoid_focal_loss(logits, target, alpha=1.1)
+        with self.assertRaisesRegex(ValueError, "gamma"):
+            sigmoid_focal_loss(logits, target, gamma=-1.0)
 
     def test_segmentation_mode_does_not_change_reconstruction_target(self):
         image = torch.ones(2, 3, 4, 4)

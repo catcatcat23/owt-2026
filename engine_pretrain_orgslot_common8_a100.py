@@ -120,22 +120,35 @@ def train_one_epoch(
             for name, mask in batch["visible_masks"].items()
         }
         batch["image"] = image
-        keep = _slot_keep_mask(args, batch, epoch, len(slot_names), device)
-        keep, roi = _force_focus_slots(model_without_ddp, batch, keep, device)
-        target = build_base_reconstruction_target(
-            image, visible_masks, slot_names, keep
-        )
+        if args.training_scope == "head_only":
+            keep = torch.ones(
+                image.shape[0],
+                len(slot_names),
+                dtype=torch.bool,
+                device=device,
+            )
+            roi = batch.get("roi_applied")
+            if roi is None:
+                roi = torch.zeros(image.shape[0], dtype=torch.bool, device=device)
+            else:
+                roi = roi.to(device=device, dtype=torch.bool)
+                if roi.shape != (image.shape[0],):
+                    raise ValueError("roi_applied must have shape [B]")
+            target = None
+        else:
+            keep = _slot_keep_mask(args, batch, epoch, len(slot_names), device)
+            keep, roi = _force_focus_slots(model_without_ddp, batch, keep, device)
+            target = build_base_reconstruction_target(
+                image, visible_masks, slot_names, keep
+            )
 
         with torch.cuda.amp.autocast():
-            output = model(image, slot_keep_mask=keep)
-            reconstruction_loss = base_reconstruction_loss(
-                output["reconstruction"], target
-            )
-            perceptual_loss = perceptual_reconstruction_loss(
-                model_without_ddp, output["reconstruction"], target
-            )
-            segmentation_loss = reconstruction_loss.detach() * 0.0
-            if args.lambda_seg != 0:
+            if args.training_scope == "head_only":
+                output = model(
+                    image,
+                    slot_keep_mask=keep,
+                    decode_reconstruction=False,
+                )
                 segmentation_loss, _ = base_segmentation_loss(
                     output["calibrated_logits"],
                     visible_masks,
@@ -143,11 +156,31 @@ def train_one_epoch(
                     keep,
                     background_weight=args.lambda_bg_seg,
                 )
-            total_loss = (
-                reconstruction_loss
-                + args.lambda_lpips * perceptual_loss
-                + args.lambda_seg * segmentation_loss
-            )
+                reconstruction_loss = segmentation_loss.detach() * 0.0
+                perceptual_loss = segmentation_loss.detach() * 0.0
+                total_loss = args.lambda_seg * segmentation_loss
+            else:
+                output = model(image, slot_keep_mask=keep)
+                reconstruction_loss = base_reconstruction_loss(
+                    output["reconstruction"], target
+                )
+                perceptual_loss = perceptual_reconstruction_loss(
+                    model_without_ddp, output["reconstruction"], target
+                )
+                segmentation_loss = reconstruction_loss.detach() * 0.0
+                if args.lambda_seg != 0:
+                    segmentation_loss, _ = base_segmentation_loss(
+                        output["calibrated_logits"],
+                        visible_masks,
+                        slot_names,
+                        keep,
+                        background_weight=args.lambda_bg_seg,
+                    )
+                total_loss = (
+                    reconstruction_loss
+                    + args.lambda_lpips * perceptual_loss
+                    + args.lambda_seg * segmentation_loss
+                )
 
         if not torch.isfinite(total_loss):
             raise FloatingPointError(

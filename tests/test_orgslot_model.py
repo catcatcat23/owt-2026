@@ -103,6 +103,30 @@ class OrganSlotModelTests(unittest.TestCase):
                 output["reconstruction"].mean().backward()
                 self.assertIsNotNone(model.patch_embed.proj.weight.grad)
 
+    def test_all_head_probe_skips_decoder_and_freezes_feature_path(self):
+        model = tiny_model()
+        report = model.freeze_for_all_heads(train_calibration=True)
+        expected = 0
+        for name in model.slot_names:
+            slot = model.slot_bank.get_slot(name)
+            expected += sum(parameter.numel() for parameter in slot.head.parameters())
+            expected += slot.calibration_scale.numel()
+            expected += slot.calibration_bias.numel()
+        self.assertEqual(report["trainable"], expected)
+
+        images = torch.rand(2, 3, 32, 32)
+        output = model(images, decode_reconstruction=False)
+        self.assertNotIn("reconstruction", output)
+        loss = sum(
+            logits.mean() for logits in output["calibrated_logits"].values()
+        )
+        loss.backward()
+        for name, parameter in model.named_parameters():
+            if parameter.requires_grad:
+                self.assertIsNotNone(parameter.grad, name)
+            else:
+                self.assertIsNone(parameter.grad, name)
+
     def test_per_sample_fusion_is_exact_and_isolated(self):
         model = tiny_model()
         canvases = {

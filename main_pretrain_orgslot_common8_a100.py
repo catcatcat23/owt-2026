@@ -54,6 +54,12 @@ def get_args_parser():
         default="linear_sqrt",
     )
     parser.add_argument("--fusion_reference_count", type=int)
+    parser.add_argument(
+        "--training_scope",
+        choices=("reconstruction", "head_only"),
+        default="reconstruction",
+    )
+    parser.add_argument("--init_checkpoint", default="")
 
     parser.add_argument("--weight_decay", default=0.05, type=float)
     parser.add_argument("--lr", default=None, type=float)
@@ -82,6 +88,7 @@ def get_args_parser():
     parser.set_defaults(pin_mem=True)
 
     parser.add_argument("--organ_roi_aug", action="store_true")
+    parser.add_argument("--disable_train_augmentation", action="store_true")
     parser.add_argument("--organ_roi_probability", default=0.2, type=float)
     parser.add_argument("--global_crop_size", default=448, type=int)
     parser.add_argument("--roi_crop_size", default=384, type=int)
@@ -186,6 +193,53 @@ def _model_args(args, slot_count):
     )
 
 
+def _checkpoint_value(checkpoint, name, default=None):
+    if name in checkpoint:
+        return checkpoint[name]
+    saved_args = checkpoint.get("args")
+    if saved_args is None:
+        return default
+    if isinstance(saved_args, dict):
+        return saved_args.get(name, default)
+    return getattr(saved_args, name, default)
+
+
+def _load_initial_checkpoint(model, path, args):
+    checkpoint = torch.load(path, map_location="cpu")
+    for name, requested in (
+        ("input_size", args.input_size),
+        ("token_factor", args.token_factor),
+        ("slot_tg_depth", args.slot_tg_depth),
+        ("fusion_mode", args.fusion_mode),
+        ("fusion_reference_count", args.fusion_reference_count),
+    ):
+        saved = _checkpoint_value(checkpoint, name)
+        if saved is not None and saved != requested:
+            raise ValueError(
+                "initial checkpoint {} {} != requested {}".format(
+                    name, saved, requested
+                )
+            )
+    full_state = checkpoint["model"]
+    state = {
+        key: value
+        for key, value in full_state.items()
+        if not key.startswith("perceptual_loss.")
+    }
+    result = model.load_state_dict(state, strict=True)
+    if result.missing_keys or result.unexpected_keys:
+        raise RuntimeError("initial checkpoint load was not exact: {}".format(result))
+    return {
+        "path": str(Path(path).resolve()),
+        "sha256": _sha256(path),
+        "source_epoch": int(checkpoint.get("epoch", -1)),
+        "source_tensor_count": len(full_state),
+        "loaded_tensor_count": len(state),
+        "stripped_lpips_tensor_count": len(full_state) - len(state),
+        "exact": True,
+    }
+
+
 def _seed_worker(worker_id):
     del worker_id
     worker_seed = torch.initial_seed() % (2 ** 32)
@@ -203,7 +257,7 @@ def _build_dataset(args, csv_path, classes, stage, training, max_samples):
     )
     transform = OrganSlotHighResTransform(
         output_size=args.input_size,
-        training=training,
+        training=training and not args.disable_train_augmentation,
         global_crop_size=args.global_crop_size,
         roi_crop_size=args.roi_crop_size,
         roi_center_jitter=args.roi_center_jitter,
@@ -241,6 +295,17 @@ def main(args):
         raise ValueError("the formal A100 entry point requires --device cuda")
     if args.lambda_lpips and "LPIPS" not in args.loss_version.split("-"):
         raise ValueError("lambda_lpips > 0 requires LPIPS in --loss_version")
+    if args.training_scope == "head_only":
+        if not args.init_checkpoint:
+            raise ValueError("head_only requires --init_checkpoint")
+        if args.resume:
+            raise ValueError("head_only init and --resume are mutually exclusive")
+        if args.lambda_lpips != 0:
+            raise ValueError("head_only requires --lambda_lpips 0")
+        if args.lambda_seg <= 0:
+            raise ValueError("head_only requires --lambda_seg > 0")
+    if args.disable_train_augmentation and args.organ_roi_aug:
+        raise ValueError("disabled augmentation cannot be combined with ROI augmentation")
     for path in (
         args.data_path,
         args.val_data_path,
@@ -251,6 +316,8 @@ def main(args):
             raise FileNotFoundError(path)
     if args.organ_roi_aug and (args.roi_index is None or not Path(args.roi_index).is_file()):
         raise FileNotFoundError(args.roi_index)
+    if args.init_checkpoint and not Path(args.init_checkpoint).is_file():
+        raise FileNotFoundError(args.init_checkpoint)
     if args.lambda_lpips and not Path(args.lpips_state).is_file():
         raise FileNotFoundError(args.lpips_state)
     with open(args.preprocess_summary, "r", encoding="utf-8") as handle:
@@ -340,6 +407,11 @@ def main(args):
         fusion_mode=args.fusion_mode,
         fusion_reference_count=args.fusion_reference_count,
     )
+    initial_checkpoint_report = None
+    if args.init_checkpoint:
+        initial_checkpoint_report = _load_initial_checkpoint(
+            model, args.init_checkpoint, args
+        )
     if args.lambda_lpips:
         perceptual_loss = LPIPS(vgg_pretrained=False).eval()
         lpips_state = torch.load(args.lpips_state, map_location="cpu")
@@ -347,7 +419,19 @@ def main(args):
         if result.missing_keys or result.unexpected_keys:
             raise RuntimeError("LPIPS state did not load exactly: {}".format(result))
         model.perceptual_loss = perceptual_loss
-    if args.lambda_seg == 0:
+    if args.training_scope == "head_only":
+        model.freeze_for_all_heads(train_calibration=True)
+        unexpected = [
+            name
+            for name, parameter in model.named_parameters()
+            if parameter.requires_grad
+            and ".head." not in name
+            and not name.endswith("calibration_scale")
+            and not name.endswith("calibration_bias")
+        ]
+        if unexpected:
+            raise RuntimeError("head_only exposed unexpected parameters: {}".format(unexpected))
+    elif args.lambda_seg == 0:
         for slot_name in model.slot_names:
             slot = model.slot_bank.get_slot(slot_name)
             for parameter in slot.head.parameters():
@@ -370,6 +454,10 @@ def main(args):
     print("max optimizer updates: {}".format(args.max_optimizer_updates))
     print("warmup updates: {}".format(args.warmup_updates))
     print("slots: {}".format(model.slot_names))
+    print("training scope: {}".format(args.training_scope))
+    print("trainable parameters: {}".format(
+        sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
+    ))
     print("organ ROI augmentation: {}".format(args.organ_roi_aug))
 
     if args.distributed:
@@ -401,6 +489,13 @@ def main(args):
             json.dump(model_without_ddp.parameter_report(), handle, indent=2)
         with open(output_dir / "slot_metadata.json", "w", encoding="utf-8") as handle:
             json.dump(model_without_ddp.slot_bank.metadata(), handle, indent=2)
+        if initial_checkpoint_report is not None:
+            with open(
+                output_dir / "initial_checkpoint_load.json",
+                "w",
+                encoding="utf-8",
+            ) as handle:
+                json.dump(initial_checkpoint_report, handle, indent=2, sort_keys=True)
 
     log_writer = None
     if misc.is_main_process() and args.log_dir is not None:

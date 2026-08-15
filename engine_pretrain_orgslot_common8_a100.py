@@ -28,9 +28,19 @@ def _legacy_batch_keep_mask(batch_size, slot_count, device):
 def _slot_keep_mask(args, batch, epoch, slot_count, device):
     if args.tgr_mode == "legacy_batch":
         return _legacy_batch_keep_mask(batch["image"].shape[0], slot_count, device)
+    if args.tgr_mode == "fixed_per_sample":
+        epoch = 0
     return sample_base_slot_keep_mask(
         batch["sample_index"].to(device), epoch, slot_count, seed=args.seed
     )
+
+
+def _segmentation_supervision_mask(mode, keep):
+    if mode == "retained":
+        return keep
+    if mode == "all":
+        return torch.ones_like(keep)
+    raise ValueError("unknown segmentation supervision mode: {}".format(mode))
 
 
 def _force_focus_slots(model_without_ddp, batch, keep, device):
@@ -149,11 +159,14 @@ def train_one_epoch(
                     slot_keep_mask=keep,
                     decode_reconstruction=False,
                 )
-                segmentation_loss, _ = base_segmentation_loss(
+                segmentation_keep = _segmentation_supervision_mask(
+                    args.seg_supervision, keep
+                )
+                segmentation_loss, per_slot_segmentation = base_segmentation_loss(
                     output["calibrated_logits"],
                     visible_masks,
                     slot_names,
-                    keep,
+                    segmentation_keep,
                     background_weight=args.lambda_bg_seg,
                 )
                 reconstruction_loss = segmentation_loss.detach() * 0.0
@@ -168,12 +181,16 @@ def train_one_epoch(
                     model_without_ddp, output["reconstruction"], target
                 )
                 segmentation_loss = reconstruction_loss.detach() * 0.0
+                segmentation_keep = _segmentation_supervision_mask(
+                    args.seg_supervision, keep
+                )
+                per_slot_segmentation = {}
                 if args.lambda_seg != 0:
-                    segmentation_loss, _ = base_segmentation_loss(
+                    segmentation_loss, per_slot_segmentation = base_segmentation_loss(
                         output["calibrated_logits"],
                         visible_masks,
                         slot_names,
-                        keep,
+                        segmentation_keep,
                         background_weight=args.lambda_bg_seg,
                     )
                 total_loss = (
@@ -206,10 +223,22 @@ def train_one_epoch(
             "reconstruction_loss": float(reconstruction_loss.detach()),
             "p_loss": float(perceptual_loss.detach()),
             "segmentation_loss": float(segmentation_loss.detach()),
+            "weighted_segmentation_loss": float(
+                (args.lambda_seg * segmentation_loss).detach()
+            ),
             "retained_slots": float(keep.sum(dim=1).float().mean()),
             "roi_fraction": float(roi.float().mean()),
             "lr": optimizer.param_groups[0]["lr"],
         }
+        for slot_index, slot_name in enumerate(slot_names):
+            if slot_name not in per_slot_segmentation:
+                continue
+            values["seg_{}_loss".format(slot_name)] = float(
+                per_slot_segmentation[slot_name].detach()
+            )
+            values["seg_{}_supervised_samples".format(slot_name)] = float(
+                segmentation_keep[:, slot_index].sum()
+            )
         if "focus_class_id" in batch:
             focus = batch["focus_class_id"].to(device=device, dtype=torch.long)
             for class_id in focus_class_ids:

@@ -72,6 +72,7 @@ COMMAND=(
   --lambda_lpips 0
   --lambda_seg 1
   --lambda_bg_seg 0.25
+  --seg_supervision all
   --tgr_mode legacy_batch
   --data_path "${TRAIN_CSV}"
   --val_data_path "${VAL_CSV}"

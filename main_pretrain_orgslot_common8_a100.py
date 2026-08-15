@@ -101,12 +101,18 @@ def get_args_parser():
     parser.add_argument("--lambda_seg", default=0.0, type=float)
     parser.add_argument("--lambda_bg_seg", default=0.25, type=float)
     parser.add_argument(
+        "--seg_supervision",
+        choices=("retained", "all"),
+        default="retained",
+        help="slots receiving Dice+BCE; reconstruction always uses the real keep mask",
+    )
+    parser.add_argument(
         "--lpips_state",
         default="/mnt/DATA-4/anteng/pretrained/owt_lpips_vgg16.pth",
     )
     parser.add_argument(
         "--tgr_mode",
-        choices=("legacy_batch", "per_sample"),
+        choices=("legacy_batch", "per_sample", "fixed_per_sample"),
         default="legacy_batch",
     )
     parser.add_argument("--save_freq", default=100, type=int)
@@ -295,6 +301,8 @@ def main(args):
         raise ValueError("the formal A100 entry point requires --device cuda")
     if args.lambda_lpips and "LPIPS" not in args.loss_version.split("-"):
         raise ValueError("lambda_lpips > 0 requires LPIPS in --loss_version")
+    if args.lambda_seg < 0:
+        raise ValueError("lambda_seg must be non-negative")
     if args.training_scope == "head_only":
         if not args.init_checkpoint:
             raise ValueError("head_only requires --init_checkpoint")
@@ -455,6 +463,7 @@ def main(args):
     print("warmup updates: {}".format(args.warmup_updates))
     print("slots: {}".format(model.slot_names))
     print("training scope: {}".format(args.training_scope))
+    print("segmentation supervision: {}".format(args.seg_supervision))
     print("trainable parameters: {}".format(
         sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
     ))

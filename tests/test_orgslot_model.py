@@ -5,6 +5,7 @@ import unittest
 import torch
 import torch.nn as nn
 
+from losses_orgslot import base_segmentation_loss
 from OWT_models_orgslot import OrganSlotMaskedAutoencoderViT
 from util.checkpoint_orgslot import (
     compare_parameter_hashes,
@@ -126,6 +127,67 @@ class OrganSlotModelTests(unittest.TestCase):
                 self.assertIsNotNone(parameter.grad, name)
             else:
                 self.assertIsNone(parameter.grad, name)
+
+    def test_all_slot_segmentation_updates_dropped_slot_and_backbone(self):
+        model = tiny_model()
+        images = torch.rand(2, 3, 32, 32)
+        keep = torch.tensor([[1, 0, 1], [1, 0, 1]], dtype=torch.bool)
+        output = model(
+            images,
+            slot_keep_mask=keep,
+            decode_reconstruction=False,
+        )
+        masks = {
+            name: torch.zeros(2, 1, 32, 32)
+            for name in model.slot_names
+        }
+        masks["background"].fill_(1)
+        masks["kidney"][:, :, :16] = 1
+        masks["spleen"][:, :, 16:] = 1
+        supervision = torch.ones_like(keep)
+        loss, _ = base_segmentation_loss(
+            output["calibrated_logits"],
+            masks,
+            model.slot_names,
+            supervision,
+        )
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+        dropped_head = model.slot_bank.get_slot("kidney").head.proj.weight
+        before = dropped_head.detach().clone()
+        optimizer.zero_grad()
+        loss.backward()
+        self.assertGreater(dropped_head.grad.abs().sum(), 0)
+        dropped_aher = model.slot_bank.get_slot("kidney").aher
+        self.assertTrue(any(
+            parameter.grad is not None and parameter.grad.abs().sum() > 0
+            for parameter in dropped_aher.parameters()
+        ))
+        self.assertGreater(model.patch_embed.proj.weight.grad.abs().sum(), 0)
+        self.assertIsNone(model.decoder_pred.weight.grad)
+        optimizer.step()
+        self.assertFalse(torch.equal(before, dropped_head.detach()))
+
+    def test_retained_segmentation_does_not_update_dropped_head(self):
+        model = tiny_model()
+        images = torch.rand(2, 3, 32, 32)
+        keep = torch.tensor([[1, 0, 1], [1, 0, 1]], dtype=torch.bool)
+        output = model(
+            images,
+            slot_keep_mask=keep,
+            decode_reconstruction=False,
+        )
+        masks = {
+            name: torch.zeros(2, 1, 32, 32)
+            for name in model.slot_names
+        }
+        loss, _ = base_segmentation_loss(
+            output["calibrated_logits"], masks, model.slot_names, keep
+        )
+        loss.backward()
+        gradient = model.slot_bank.get_slot("kidney").head.proj.weight.grad
+        self.assertTrue(
+            gradient is None or gradient.abs().sum().item() == 0
+        )
 
     def test_per_sample_fusion_is_exact_and_isolated(self):
         model = tiny_model()

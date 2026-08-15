@@ -21,7 +21,14 @@ LPIPS_STATE=${LPIPS_STATE:-${DATA_ROOT}/pretrained/owt_lpips_vgg16.pth}
 FUSION_MODE=${FUSION_MODE:?Set FUSION_MODE after the current AutoPET evaluations}
 FUSION_REFERENCE_COUNT=${FUSION_REFERENCE_COUNT:-9}
 LAMBDA_SEG=${LAMBDA_SEG:?Set LAMBDA_SEG after the current AutoPET evaluations}
-GPU_IDS=${GPU_IDS:-0,1}
+LAMBDA_BG_SEG=${LAMBDA_BG_SEG:-0.25}
+SEG_SUPERVISION=${SEG_SUPERVISION:-retained}
+ORGAN_ROI_PROBABILITY=${ORGAN_ROI_PROBABILITY:-0.2}
+TGR_MODE=${TGR_MODE:-legacy_batch}
+DISABLE_TRAIN_AUGMENTATION=${DISABLE_TRAIN_AUGMENTATION:-0}
+MAX_TRAIN_SAMPLES=${MAX_TRAIN_SAMPLES:-}
+MAX_VAL_SAMPLES=${MAX_VAL_SAMPLES:-}
+GPU_IDS=${GPU_IDS:-}
 N_GPU=${N_GPU:-2}
 MASTER_PORT=${MASTER_PORT:-25741}
 MICRO_BATCH=${MICRO_BATCH:-8}
@@ -30,10 +37,24 @@ TARGET_EFFECTIVE_BATCH=${TARGET_EFFECTIVE_BATCH:-192}
 MAX_UPDATES=${MAX_UPDATES:-118800}
 WARMUP_UPDATES=${WARMUP_UPDATES:-5940}
 BASE_LR=${BASE_LR:-1e-4}
+WEIGHT_DECAY=${WEIGHT_DECAY:-0.05}
 WORKERS=${WORKERS:-10}
 SAVE_FREQ=${SAVE_FREQ:-100}
 MAX_STEPS_PER_EPOCH=${MAX_STEPS_PER_EPOCH:-}
 NO_SAVE=${NO_SAVE:-0}
+
+if [[ -n "${SLURM_JOB_ID:-}" ]]; then
+  if [[ -z "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+    echo "Slurm job ${SLURM_JOB_ID} did not provide CUDA_VISIBLE_DEVICES" >&2
+    exit 2
+  fi
+  GPU_BINDING_SOURCE=slurm
+elif [[ -n "${GPU_IDS}" ]]; then
+  export CUDA_VISIBLE_DEVICES="${GPU_IDS}"
+  GPU_BINDING_SOURCE=manual_gpu_ids
+else
+  GPU_BINDING_SOURCE=inherited_environment
+fi
 
 EFFECTIVE_BATCH=$((MICRO_BATCH * ACCUM_ITER * N_GPU))
 if [[ "${EFFECTIVE_BATCH}" -ne "${TARGET_EFFECTIVE_BATCH}" ]]; then
@@ -74,7 +95,7 @@ COMMAND=(
   --max_optimizer_updates "${MAX_UPDATES}"
   --warmup_updates "${WARMUP_UPDATES}"
   --blr "${BASE_LR}"
-  --weight_decay 0.05
+  --weight_decay "${WEIGHT_DECAY}"
   --token_factor 20
   --slot_tg_depth 1
   --fusion_mode "${FUSION_MODE}"
@@ -83,7 +104,9 @@ COMMAND=(
   --lambda_lpips 1.0
   --lpips_state "${LPIPS_STATE}"
   --lambda_seg "${LAMBDA_SEG}"
-  --tgr_mode legacy_batch
+  --lambda_bg_seg "${LAMBDA_BG_SEG}"
+  --seg_supervision "${SEG_SUPERVISION}"
+  --tgr_mode "${TGR_MODE}"
   --data_path "${TRAIN_CSV}"
   --val_data_path "${VAL_CSV}"
   --preprocess_summary "${PREPROCESS_SUMMARY}"
@@ -98,9 +121,18 @@ COMMAND=(
 if [[ "${ARM}" == "roi20" ]]; then
   COMMAND+=(
     --organ_roi_aug
-    --organ_roi_probability 0.2
+    --organ_roi_probability "${ORGAN_ROI_PROBABILITY}"
     --roi_index "${ROI_INDEX}"
   )
+fi
+if [[ "${DISABLE_TRAIN_AUGMENTATION}" == "1" ]]; then
+  COMMAND+=(--disable_train_augmentation)
+fi
+if [[ -n "${MAX_TRAIN_SAMPLES}" ]]; then
+  COMMAND+=(--max_train_samples "${MAX_TRAIN_SAMPLES}")
+fi
+if [[ -n "${MAX_VAL_SAMPLES}" ]]; then
+  COMMAND+=(--max_val_samples "${MAX_VAL_SAMPLES}")
 fi
 if [[ -n "${MAX_STEPS_PER_EPOCH}" ]]; then
   COMMAND+=(--max_steps_per_epoch "${MAX_STEPS_PER_EPOCH}")
@@ -113,9 +145,13 @@ fi
   echo "arm=${ARM}"
   echo "data_root=${DATA_ROOT}"
   echo "train_csv=${TRAIN_CSV}"
-  echo "gpu_ids=${GPU_IDS}"
+  echo "gpu_binding_source=${GPU_BINDING_SOURCE}"
+  echo "cuda_visible_devices=${CUDA_VISIBLE_DEVICES:-<unset>}"
   echo "fusion_mode=${FUSION_MODE} fusion_reference_count=${FUSION_REFERENCE_COUNT} lambda_seg=${LAMBDA_SEG}"
+  echo "seg_supervision=${SEG_SUPERVISION} lambda_bg_seg=${LAMBDA_BG_SEG}"
+  echo "organ_roi_probability=${ORGAN_ROI_PROBABILITY} tgr_mode=${TGR_MODE}"
   echo "micro_batch=${MICRO_BATCH} accum_iter=${ACCUM_ITER} effective_batch=${EFFECTIVE_BATCH}"
+  echo "base_lr=${BASE_LR} weight_decay=${WEIGHT_DECAY}"
   echo "max_updates=${MAX_UPDATES} warmup_updates=${WARMUP_UPDATES}"
   printf 'command='
   printf '%q ' "${COMMAND[@]}"
@@ -123,6 +159,5 @@ fi
 } | tee "${OUTPUT_DIR}/launcher.log"
 
 cd "${REPO_ROOT}"
-export CUDA_VISIBLE_DEVICES="${GPU_IDS}"
 export OMP_NUM_THREADS=1
 "${COMMAND[@]}" 2>&1 | tee -a "${OUTPUT_DIR}/train.log"

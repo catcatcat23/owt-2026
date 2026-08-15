@@ -1,9 +1,14 @@
 import unittest
+from types import SimpleNamespace
 
 import torch
 
 from engine_pretrain_orgslot import compute_incremental_minimal_objective
 from engine_pretrain_orgslot import compute_base_objective
+from engine_pretrain_orgslot_common8_a100 import (
+    _segmentation_supervision_mask,
+    _slot_keep_mask,
+)
 from test_orgslot_model import tiny_model
 from losses_orgslot import (
     base_segmentation_loss,
@@ -62,6 +67,46 @@ class LossAndTGRTests(unittest.TestCase):
         self.assertTrue(
             dropped.grad is None or dropped.grad.abs().sum().item() == 0
         )
+
+    def test_all_supervision_gives_dropped_logits_gradient(self):
+        retained = torch.zeros(2, 1, 4, 4, requires_grad=True)
+        dropped = torch.ones(2, 1, 4, 4, requires_grad=True)
+        logits = {"a": retained, "b": dropped}
+        targets = {"a": torch.ones_like(retained), "b": torch.zeros_like(dropped)}
+        keep = torch.tensor([[1, 0], [1, 0]], dtype=torch.bool)
+        supervision = _segmentation_supervision_mask("all", keep)
+        loss, _ = base_segmentation_loss(
+            logits, targets, ["a", "b"], supervision
+        )
+        loss.backward()
+        self.assertGreater(retained.grad.abs().sum(), 0)
+        self.assertGreater(dropped.grad.abs().sum(), 0)
+
+    def test_segmentation_mode_does_not_change_reconstruction_target(self):
+        image = torch.ones(2, 3, 4, 4)
+        organ = torch.zeros(2, 1, 4, 4)
+        organ[:, :, :2, :2] = 1
+        masks = {"background": 1 - organ, "organ": organ}
+        keep = torch.tensor([[1, 0], [0, 1]], dtype=torch.bool)
+        expected = build_base_reconstruction_target(
+            image, masks, ["background", "organ"], keep
+        )
+        for mode in ("retained", "all"):
+            _segmentation_supervision_mask(mode, keep)
+            actual = build_base_reconstruction_target(
+                image, masks, ["background", "organ"], keep
+            )
+            self.assertTrue(torch.equal(actual, expected), mode)
+
+    def test_fixed_per_sample_mask_does_not_change_with_epoch(self):
+        args = SimpleNamespace(tgr_mode="fixed_per_sample", seed=7)
+        batch = {
+            "image": torch.zeros(8, 3, 4, 4),
+            "sample_index": torch.arange(8),
+        }
+        first = _slot_keep_mask(args, batch, 0, 4, torch.device("cpu"))
+        later = _slot_keep_mask(args, batch, 99, 4, torch.device("cpu"))
+        self.assertTrue(torch.equal(first, later))
 
     def test_new_region_reconstruction_ignores_outside(self):
         image = torch.zeros(1, 3, 4, 4)

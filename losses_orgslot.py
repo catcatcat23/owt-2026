@@ -41,7 +41,7 @@ def base_segmentation_loss(
     background_name="background",
     background_weight=0.25,
 ):
-    """Average retained per-sample/per-slot losses; dropped slots contribute 0."""
+    """Average losses selected by an explicit per-sample/per-slot mask."""
     batch_size = slot_keep_mask.shape[0]
     total = next(iter(slot_logits.values())).sum() * 0.0
     weight_total = 0.0

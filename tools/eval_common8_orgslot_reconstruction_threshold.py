@@ -323,6 +323,10 @@ def summarize(counters, class_ids, class_names, method_name):
                     "intersection_voxels": counter["intersection"],
                     "case_dice": dice,
                     "case_iou": iou,
+                    "prediction_to_target_volume_ratio": (
+                        float(counter["prediction"]) / counter["target"]
+                        if counter["target"] else float("nan")
+                    ),
                 }
                 rows.append(row)
                 records.append({
@@ -372,6 +376,10 @@ def summarize(counters, class_ids, class_names, method_name):
                 ),
                 "prediction_voxels": totals["prediction"],
                 "target_voxels": totals["target"],
+                "prediction_to_target_volume_ratio": (
+                    float(totals["prediction"]) / totals["target"]
+                    if totals["target"] else float("nan")
+                ),
             }
         for metric_name in (
             "case_dice_presence_mean",

@@ -1,9 +1,9 @@
-import math
 import os
 import sys
 from typing import Iterable
 
 import torch
+import torch.distributed as dist
 
 import util.lr_sched as lr_sched
 import util.misc as misc
@@ -13,6 +13,50 @@ from util.per_sample_mask_schedule import (
 )
 from util.triplet_query_loss import triplet_delta_loss
 from util.triplet_query_schedule import triplet_query_schedule
+
+
+def _nonfinite_component_names(loss_components):
+    """Return scalar/tensor loss names containing NaN or Inf."""
+    return [
+        name
+        for name, value in loss_components.items()
+        if not bool(torch.isfinite(torch.as_tensor(value).detach()).all())
+    ]
+
+
+def _check_losses_finite(
+    loss_components,
+    device,
+    epoch,
+    data_iter_step,
+    sample_indices,
+):
+    """Fail every DDP rank with useful diagnostics if any rank is non-finite."""
+    nonfinite = _nonfinite_component_names(loss_components)
+    all_finite = torch.tensor(
+        0.0 if nonfinite else 1.0,
+        device=device,
+        dtype=torch.float32,
+    )
+    if misc.is_dist_avail_and_initialized():
+        dist.all_reduce(all_finite, op=dist.ReduceOp.MIN)
+    if bool(all_finite.item()):
+        return
+
+    rank = misc.get_rank()
+    values = {
+        name: float(torch.as_tensor(value).detach().float().cpu())
+        for name, value in loss_components.items()
+    }
+    diagnostic = (
+        "non-finite loss detected: "
+        f"rank={rank} epoch={epoch} step={data_iter_step} "
+        f"sample_indices={sample_indices.detach().cpu().tolist()} "
+        f"nonfinite_components={nonfinite} values={values}"
+    )
+    sys.stderr.write(diagnostic + "\n")
+    sys.stderr.flush()
+    raise FloatingPointError(diagnostic)
 
 
 def train_one_epoch(
@@ -119,9 +163,25 @@ def train_one_epoch(
             if "LPIPS" in args.loss_version:
                 loss = loss + args.lpips_loss_weight * middle_output["p_loss"]
 
-        if not math.isfinite(loss.item()):
-            print(f"Loss is {loss.item()}, stopping training")
-            sys.exit(1)
+        loss_components = {
+            "total_loss": loss,
+            "branch_loss": branch_loss,
+            "global_recon_loss": middle_output["global_recon_loss"],
+            "positive_roi_loss": middle_output["positive_roi_loss"],
+            "removed_monitor_loss": middle_output["removed_monitor_loss"],
+            "delta_loss": delta_stats["loss"],
+            "delta_global_loss": delta_stats["global_loss"],
+            "delta_positive_roi_loss": delta_stats["positive_roi_loss"],
+        }
+        if "LPIPS" in args.loss_version:
+            loss_components["p_loss"] = middle_output["p_loss"]
+        _check_losses_finite(
+            loss_components,
+            device,
+            epoch,
+            data_iter_step,
+            sample_indices,
+        )
 
         loss_value = loss.item()
         loss = loss / accum_iter

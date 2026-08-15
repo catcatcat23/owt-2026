@@ -35,18 +35,26 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--num-foreground-classes", type=int, required=True)
+    parser.add_argument("--expected-epoch", type=int, default=0)
     args = parser.parse_args()
 
     run_dir = Path(args.run_dir)
     log_path = run_dir / "log.txt"
-    checkpoint_path = run_dir / "checkpoint-0.pth"
+    checkpoint_path = run_dir / f"checkpoint-{args.expected_epoch}.pth"
     if not log_path.is_file() or not checkpoint_path.is_file():
-        raise RuntimeError("smoke did not create log.txt and checkpoint-0.pth")
+        raise RuntimeError(
+            f"smoke did not create log.txt and checkpoint-{args.expected_epoch}.pth"
+        )
 
     lines = [line for line in log_path.read_text().splitlines() if line.strip()]
     if not lines:
         raise RuntimeError("smoke log.txt is empty")
     metrics = json.loads(lines[-1])
+    if metrics.get("epoch") != args.expected_epoch:
+        raise RuntimeError(
+            f"unexpected smoke epoch: {metrics.get('epoch')} "
+            f"(expected {args.expected_epoch})"
+        )
     missing = [key for key in REQUIRED_METRICS if key not in metrics]
     if missing:
         raise RuntimeError(f"missing smoke metrics: {missing}")

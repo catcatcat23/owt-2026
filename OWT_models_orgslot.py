@@ -288,6 +288,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         images,
         slot_keep_mask=None,
         return_diagnostics=False,
+        decode_reconstruction=True,
     ):
         z, _ = self.forward_encoder(images)
         output_size = tuple(images.shape[2:])
@@ -297,9 +298,10 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             slot_keep_mask=slot_keep_mask,
             return_diagnostics=return_diagnostics,
         )
-        slot_output["reconstruction"] = self.forward_decoder(
-            slot_output["canvas"]
-        )
+        if decode_reconstruction:
+            slot_output["reconstruction"] = self.forward_decoder(
+                slot_output["canvas"]
+            )
         return slot_output
 
     def freeze_for_incremental(
@@ -356,6 +358,19 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         if train_calibration:
             slot.calibration_scale.requires_grad = True
             slot.calibration_bias.requires_grad = True
+        return self.parameter_report()
+
+    def freeze_for_all_heads(self, train_calibration=True):
+        """Freeze the feature/reconstruction path and train every binary head."""
+        for parameter in self.parameters():
+            parameter.requires_grad = False
+        for name in self.slot_names:
+            slot = self.slot_bank.get_slot(name)
+            for parameter in slot.head.parameters():
+                parameter.requires_grad = True
+            if train_calibration:
+                slot.calibration_scale.requires_grad = True
+                slot.calibration_bias.requires_grad = True
         return self.parameter_report()
 
     def unfreeze_all(self):

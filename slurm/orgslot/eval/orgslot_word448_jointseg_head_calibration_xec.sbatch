@@ -17,7 +17,8 @@ set -euo pipefail
 ROOT=/gpfs/work/aac/antengcai23
 WORKDIR=${ROOT}/worktrees/orgslotbank_slotseg
 ENV=${ROOT}/envs/abdpet
-RUN=OrgSlot_WORD448_ROI20_JointSegAll_L0.01_${TRAIN_JOB_ID}
+RUN_TAG=${RUN_TAG:-OrgSlot_WORD448_ROI20_JointSegAll_L0.01}
+RUN=${RUN_TAG}_${TRAIN_JOB_ID}
 CHECKPOINT=${WORKDIR}/Results/OrganSlotBank/Common8/WORD_2D/${RUN}/checkpoint-802.pth
 OUTPUT=${WORKDIR}/Results/OrganSlotBank/evaluation/Common8/WORD_2D/${RUN}_heads_train_calibration
 cd "${WORKDIR}"

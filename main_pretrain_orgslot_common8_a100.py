@@ -101,10 +101,25 @@ def get_args_parser():
     parser.add_argument("--lambda_seg", default=0.0, type=float)
     parser.add_argument("--lambda_bg_seg", default=0.25, type=float)
     parser.add_argument(
+        "--seg_loss_type",
+        choices=("dice_bce", "focal"),
+        default="dice_bce",
+        help="independent binary loss used by every supervised slot head",
+    )
+    parser.add_argument(
+        "--focal_alpha", default=0.75, type=float,
+        help="positive-class alpha for binary focal loss",
+    )
+    parser.add_argument(
+        "--focal_gamma", default=2.0, type=float,
+        help="hard-example exponent for binary focal loss",
+    )
+
+    parser.add_argument(
         "--seg_supervision",
         choices=("retained", "all"),
         default="retained",
-        help="slots receiving Dice+BCE; reconstruction always uses the real keep mask",
+        help="slots receiving segmentation loss; reconstruction always uses the real keep mask",
     )
     parser.add_argument(
         "--lpips_state",
@@ -303,6 +318,12 @@ def main(args):
         raise ValueError("lambda_lpips > 0 requires LPIPS in --loss_version")
     if args.lambda_seg < 0:
         raise ValueError("lambda_seg must be non-negative")
+    if not 0.0 <= args.focal_alpha <= 1.0:
+        raise ValueError("focal_alpha must be in [0, 1]")
+    if args.focal_gamma < 0.0:
+        raise ValueError("focal_gamma must be non-negative")
+    if args.seg_loss_type == "focal" and args.lambda_seg == 0:
+        raise ValueError("focal segmentation requires --lambda_seg > 0")
     if args.training_scope == "head_only":
         if not args.init_checkpoint:
             raise ValueError("head_only requires --init_checkpoint")
@@ -467,6 +488,11 @@ def main(args):
     print("trainable parameters: {}".format(
         sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
     ))
+    print(
+        "segmentation loss: {} (focal alpha={}, gamma={})".format(
+            args.seg_loss_type, args.focal_alpha, args.focal_gamma
+        )
+    )
     print("organ ROI augmentation: {}".format(args.organ_roi_aug))
 
     if args.distributed:

@@ -168,6 +168,9 @@ def train_one_epoch(
                     slot_names,
                     segmentation_keep,
                     background_weight=args.lambda_bg_seg,
+                    loss_type=args.seg_loss_type,
+                    focal_alpha=args.focal_alpha,
+                    focal_gamma=args.focal_gamma,
                 )
                 reconstruction_loss = segmentation_loss.detach() * 0.0
                 perceptual_loss = segmentation_loss.detach() * 0.0
@@ -192,6 +195,9 @@ def train_one_epoch(
                         slot_names,
                         segmentation_keep,
                         background_weight=args.lambda_bg_seg,
+                        loss_type=args.seg_loss_type,
+                        focal_alpha=args.focal_alpha,
+                        focal_gamma=args.focal_gamma,
                     )
                 total_loss = (
                     reconstruction_loss
@@ -238,6 +244,23 @@ def train_one_epoch(
             )
             values["seg_{}_supervised_samples".format(slot_name)] = float(
                 segmentation_keep[:, slot_index].sum()
+            )
+            probabilities = torch.sigmoid(
+                output["calibrated_logits"][slot_name].detach()
+            )
+            target_mask = visible_masks[slot_name].bool()
+            values["seg_{}_predicted_fraction".format(slot_name)] = float(
+                probabilities.ge(0.5).float().mean()
+            )
+            values["seg_{}_target_fraction".format(slot_name)] = float(
+                target_mask.float().mean()
+            )
+            if torch.any(target_mask):
+                positive_probability = probabilities[target_mask].mean()
+            else:
+                positive_probability = probabilities.sum() * 0.0
+            values["seg_{}_positive_probability".format(slot_name)] = float(
+                positive_probability
             )
         if "focus_class_id" in batch:
             focus = batch["focus_class_id"].to(device=device, dtype=torch.long)

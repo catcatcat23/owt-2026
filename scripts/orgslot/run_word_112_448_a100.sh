@@ -23,6 +23,9 @@ FUSION_REFERENCE_COUNT=${FUSION_REFERENCE_COUNT:-9}
 LAMBDA_SEG=${LAMBDA_SEG:?Set LAMBDA_SEG after the current AutoPET evaluations}
 LAMBDA_BG_SEG=${LAMBDA_BG_SEG:-0.25}
 SEG_SUPERVISION=${SEG_SUPERVISION:-retained}
+SEG_LOSS_TYPE=${SEG_LOSS_TYPE:-dice_bce}
+FOCAL_ALPHA=${FOCAL_ALPHA:-0.75}
+FOCAL_GAMMA=${FOCAL_GAMMA:-2.0}
 ORGAN_ROI_PROBABILITY=${ORGAN_ROI_PROBABILITY:-0.2}
 TGR_MODE=${TGR_MODE:-legacy_batch}
 DISABLE_TRAIN_AUGMENTATION=${DISABLE_TRAIN_AUGMENTATION:-0}
@@ -106,6 +109,9 @@ COMMAND=(
   --lambda_seg "${LAMBDA_SEG}"
   --lambda_bg_seg "${LAMBDA_BG_SEG}"
   --seg_supervision "${SEG_SUPERVISION}"
+  --seg_loss_type "${SEG_LOSS_TYPE}"
+  --focal_alpha "${FOCAL_ALPHA}"
+  --focal_gamma "${FOCAL_GAMMA}"
   --tgr_mode "${TGR_MODE}"
   --data_path "${TRAIN_CSV}"
   --val_data_path "${VAL_CSV}"
@@ -150,6 +156,7 @@ fi
   echo "fusion_mode=${FUSION_MODE} fusion_reference_count=${FUSION_REFERENCE_COUNT} lambda_seg=${LAMBDA_SEG}"
   echo "seg_supervision=${SEG_SUPERVISION} lambda_bg_seg=${LAMBDA_BG_SEG}"
   echo "organ_roi_probability=${ORGAN_ROI_PROBABILITY} tgr_mode=${TGR_MODE}"
+  echo "seg_loss_type=${SEG_LOSS_TYPE} focal_alpha=${FOCAL_ALPHA} focal_gamma=${FOCAL_GAMMA}"
   echo "micro_batch=${MICRO_BATCH} accum_iter=${ACCUM_ITER} effective_batch=${EFFECTIVE_BATCH}"
   echo "base_lr=${BASE_LR} weight_decay=${WEIGHT_DECAY}"
   echo "max_updates=${MAX_UPDATES} warmup_updates=${WARMUP_UPDATES}"

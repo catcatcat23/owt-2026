@@ -38,6 +38,8 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         slot_tg_depth=1,
         fusion_mode="post_layernorm",
         fusion_reference_count=None,
+        slot_head_type="linear",
+        slot_head_channels=128,
     ):
         if slot_specs is None:
             raise ValueError("slot_specs are required")
@@ -92,6 +94,8 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             "norm_layer": norm_layer,
             "dataset_type": model_args.dataset_type,
             "model_args": model_args,
+            "head_type": slot_head_type,
+            "head_channels": slot_head_channels,
         }
         for spec in slot_specs:
             self.append_slot(
@@ -208,6 +212,8 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         z,
         output_size,
         slot_keep_mask=None,
+        head_compute_mask=None,
+        decode_heads=True,
         return_diagnostics=False,
     ):
         slot_names = self.slot_names
@@ -223,6 +229,11 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             raise ValueError("slot_keep_mask has incompatible shape")
         if torch.any(slot_keep_mask.sum(dim=1) == 0):
             raise ValueError("every sample must retain at least one slot")
+        if head_compute_mask is None:
+            head_compute_mask = torch.ones_like(slot_keep_mask)
+        if head_compute_mask.shape != slot_keep_mask.shape:
+            raise ValueError("head_compute_mask has incompatible shape")
+        head_compute_mask = head_compute_mask.to(device=z.device, dtype=torch.bool)
 
         slot_logits = {}
         calibrated_logits = {}
@@ -233,23 +244,75 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             "collector_attention": {},
             "aher_attention": {},
         }
-        for name in slot_names:
-            result = self.slot_bank(
-                name,
-                z,
-                output_size,
-                return_attention=return_diagnostics,
-            )
-            slot_logits[name] = result["logits"]
-            calibrated_logits[name] = result["calibrated_logits"]
-            canvases_for_fusion[name] = result["canvas"]
+        slot_compute_mask = slot_keep_mask.clone()
+        if decode_heads:
+            slot_compute_mask |= head_compute_mask
+
+        for slot_index, name in enumerate(slot_names):
+            slot = self.slot_bank.get_slot(name)
+            active_slot_rows = torch.nonzero(
+                slot_compute_mask[:, slot_index], as_tuple=False
+            ).flatten()
+            if active_slot_rows.numel():
+                active_canvas, active_tokens, active_collector, active_aher = (
+                    slot.forward_canvas(z.index_select(0, active_slot_rows))
+                )
+                canvas = active_canvas.new_zeros(
+                    (batch_size,) + tuple(active_canvas.shape[1:])
+                ).index_copy(0, active_slot_rows, active_canvas)
+                tokens = active_tokens.new_zeros(
+                    (batch_size,) + tuple(active_tokens.shape[1:])
+                ).index_copy(0, active_slot_rows, active_tokens)
+                collector_attention = active_collector.new_zeros(
+                    (batch_size,) + tuple(active_collector.shape[1:])
+                ).index_copy(0, active_slot_rows, active_collector)
+                aher_attention = active_aher.new_zeros(
+                    (batch_size,) + tuple(active_aher.shape[1:])
+                ).index_copy(0, active_slot_rows, active_aher)
+            else:
+                decoder_dim = slot.aher.sp_linear2.out_features
+                canvas = z.new_zeros(
+                    batch_size, slot.output_patch_count, decoder_dim
+                )
+                tokens = z.new_zeros(
+                    batch_size, slot.token_factor, z.shape[-1]
+                )
+                collector_attention = z.new_zeros(
+                    batch_size, slot.token_factor, z.shape[1]
+                )
+                aher_attention = z.new_zeros(
+                    batch_size, slot.output_patch_count, slot.token_factor
+                )
+            canvases_for_fusion[name] = canvas
+
+            if decode_heads:
+                active_head_rows = torch.nonzero(
+                    head_compute_mask[:, slot_index], as_tuple=False
+                ).flatten()
+                if active_head_rows.numel():
+                    active_raw, active_calibrated = slot.forward_head(
+                        canvas.index_select(0, active_head_rows), output_size
+                    )
+                    full_shape = (batch_size,) + tuple(active_raw.shape[1:])
+                    raw = active_raw.new_zeros(full_shape).index_copy(
+                        0, active_head_rows, active_raw
+                    )
+                    calibrated = active_calibrated.new_zeros(full_shape).index_copy(
+                        0, active_head_rows, active_calibrated
+                    )
+                else:
+                    full_shape = (
+                        batch_size, 1, *tuple(int(v) for v in output_size)
+                    )
+                    raw = canvas.new_zeros(full_shape)
+                    calibrated = canvas.new_zeros(full_shape)
+                slot_logits[name] = raw
+                calibrated_logits[name] = calibrated
             if return_diagnostics:
-                diagnostics["slot_tokens"][name] = result["tokens"]
-                diagnostics["slot_canvases"][name] = result["canvas"]
-                diagnostics["collector_attention"][name] = result[
-                    "collector_attention"
-                ]
-                diagnostics["aher_attention"][name] = result["aher_attention"]
+                diagnostics["slot_tokens"][name] = tokens
+                diagnostics["slot_canvases"][name] = canvas
+                diagnostics["collector_attention"][name] = collector_attention
+                diagnostics["aher_attention"][name] = aher_attention
 
         fused = self.fuse_canvases(
             canvases_for_fusion, slot_keep_mask, slot_names
@@ -259,6 +322,8 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             "slot_logits": slot_logits,
             "calibrated_logits": calibrated_logits,
             "slot_keep_mask": slot_keep_mask,
+            "slot_compute_mask": slot_compute_mask,
+            "head_compute_mask": head_compute_mask,
         }
         if return_diagnostics:
             output.update(diagnostics)
@@ -289,6 +354,8 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         slot_keep_mask=None,
         return_diagnostics=False,
         decode_reconstruction=True,
+        head_compute_mask=None,
+        decode_heads=True,
     ):
         z, _ = self.forward_encoder(images)
         output_size = tuple(images.shape[2:])
@@ -296,6 +363,8 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             z,
             output_size,
             slot_keep_mask=slot_keep_mask,
+            head_compute_mask=head_compute_mask,
+            decode_heads=decode_heads,
             return_diagnostics=return_diagnostics,
         )
         if decode_reconstruction:
@@ -403,6 +472,8 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             "trainable": trainable,
             "fusion_mode": self.fusion_mode,
             "fusion_reference_count": self.fusion_reference_count,
+            "slot_head_type": self._slot_factory["head_type"],
+            "slot_head_channels": self._slot_factory["head_channels"],
             "per_slot": per_slot,
         }
 

@@ -12,6 +12,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--expected-seg-loss", default="dice_bce")
+    parser.add_argument(
+        "--expected-seg-supervision", choices=("retained", "all"), default="all"
+    )
+    parser.add_argument("--expected-slot-head-type", default="linear")
+    parser.add_argument("--expected-background-weight", default=0.25, type=float)
     parser.add_argument("--expected-lambda-seg", default=0.01, type=float)
     parser.add_argument("--expected-focal-alpha", default=0.75, type=float)
     parser.add_argument("--expected-focal-gamma", default=2.0, type=float)
@@ -20,8 +25,12 @@ def main():
     config = json.loads((run_dir / "resolved_config.json").read_text())
     if not config.get("organ_roi_aug"):
         raise RuntimeError("ROI augmentation was not enabled")
-    if config.get("seg_supervision") != "all":
-        raise RuntimeError("seg_supervision must be all")
+    if config.get("seg_supervision") != args.expected_seg_supervision:
+        raise RuntimeError("unexpected seg_supervision")
+    if config.get("slot_head_type") != args.expected_slot_head_type:
+        raise RuntimeError("unexpected slot_head_type")
+    if float(config.get("lambda_bg_seg")) != args.expected_background_weight:
+        raise RuntimeError("unexpected lambda_bg_seg")
     if config.get("seg_loss_type") != args.expected_seg_loss:
         raise RuntimeError("unexpected segmentation loss type")
     if float(config.get("lambda_seg")) != args.expected_lambda_seg:
@@ -57,16 +66,22 @@ def main():
         raise RuntimeError("ROI path was not exercised")
     if any("positive_roi_loss" in name for name in latest):
         raise RuntimeError("legacy fused Loss3 metrics unexpectedly exist")
+    observed_slots = []
     for slot in (
         "background", "spleen", "right_kidney", "left_kidney",
         "gallbladder", "esophagus", "pancreas", "liver", "stomach",
     ):
         loss_name = "train_seg_{}_loss".format(slot)
         count_name = "train_seg_{}_supervised_samples".format(slot)
+        if loss_name not in latest:
+            if slot == "background" and args.expected_background_weight == 0:
+                continue
+            continue
         if not math.isfinite(float(latest[loss_name])):
             raise RuntimeError("non-finite {}".format(loss_name))
         if float(latest[count_name]) <= 0:
             raise RuntimeError("{} received no supervision".format(slot))
+        observed_slots.append(slot)
         for suffix in (
             "predicted_fraction", "target_fraction", "positive_probability"
         ):
@@ -75,6 +90,8 @@ def main():
                 raise RuntimeError(
                     "missing or non-finite {}".format(metric)
                 )
+    if not set(("gallbladder", "esophagus", "pancreas")) & set(observed_slots):
+        raise RuntimeError("smoke did not supervise a small-organ focus slot")
     checkpoints = glob.glob(str(run_dir / "checkpoint-*.pth"))
     if not checkpoints:
         raise RuntimeError("smoke produced no checkpoint")

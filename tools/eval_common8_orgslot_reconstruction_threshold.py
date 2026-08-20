@@ -160,6 +160,10 @@ def build_model(
 
     token_factor = int(checkpoint_value(checkpoint, "token_factor", 20))
     slot_tg_depth = int(checkpoint_value(checkpoint, "slot_tg_depth", 1))
+    slot_head_type = checkpoint_value(checkpoint, "slot_head_type", "linear")
+    slot_head_channels = int(
+        checkpoint_value(checkpoint, "slot_head_channels", 128)
+    )
     fusion_reference_count = int(
         checkpoint_value(checkpoint, "fusion_reference_count", len(slot_specs))
     )
@@ -173,6 +177,8 @@ def build_model(
             slot_tg_depth=slot_tg_depth,
             fusion_mode=fusion_mode,
             fusion_reference_count=fusion_reference_count,
+            slot_head_type=slot_head_type,
+            slot_head_channels=slot_head_channels,
         )
     else:
         model = OWT_models.mae_vit_base_patch16(
@@ -208,6 +214,8 @@ def build_model(
         "slot_tg_depth": (
             slot_tg_depth if method == "orgslot" else len(model.blocks2)
         ),
+        "slot_head_type": slot_head_type if method == "orgslot" else None,
+        "slot_head_channels": slot_head_channels if method == "orgslot" else None,
         "exact": True,
     }
     return model, report

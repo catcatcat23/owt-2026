@@ -46,6 +46,69 @@ class PatchBinaryHead(nn.Module):
         )
 
 
+def _group_count(channels):
+    """Use the largest small GroupNorm divisor for tiny and full models."""
+    for groups in (8, 4, 2, 1):
+        if channels % groups == 0:
+            return groups
+    return 1
+
+
+class MultiScaleBinaryHead2D(nn.Module):
+    """Lightweight local decoder for a retained 2D slot canvas."""
+
+    def __init__(self, dim, grid_size, channels=128, upsample_stages=4):
+        super().__init__()
+        self.grid_size = tuple(int(value) for value in grid_size)
+        if len(self.grid_size) != 2:
+            raise ValueError("MultiScaleBinaryHead2D requires a 2D grid")
+        self.channels = min(int(channels), int(dim))
+        if self.channels <= 0:
+            raise ValueError("head channels must be positive")
+        self.upsample_stages = int(upsample_stages)
+        if self.upsample_stages < 1:
+            raise ValueError("upsample_stages must be positive")
+        self.norm = nn.LayerNorm(dim)
+        self.input_proj = nn.Linear(dim, self.channels)
+        blocks = []
+        current_channels = self.channels
+        for _ in range(self.upsample_stages):
+            next_channels = max(16, current_channels // 2)
+            blocks.append(nn.Sequential(
+                nn.Conv2d(current_channels, current_channels, 3, padding=1,
+                          groups=current_channels, bias=False),
+                nn.Conv2d(current_channels, next_channels, 1, bias=False),
+                nn.GroupNorm(_group_count(next_channels), next_channels),
+                nn.GELU(),
+            ))
+            current_channels = next_channels
+        self.blocks = nn.ModuleList(blocks)
+        self.proj = nn.Conv2d(current_channels, 1, kernel_size=1)
+
+    def forward(self, canvas, output_size):
+        batch_size, patch_count, _ = canvas.shape
+        if patch_count != int(torch.tensor(self.grid_size).prod().item()):
+            raise ValueError("canvas patch count does not match head grid")
+        output_size = tuple(int(value) for value in output_size)
+        if len(output_size) != 2:
+            raise ValueError("MultiScaleBinaryHead2D output must be 2D")
+        features = self.input_proj(self.norm(canvas))
+        features = features.transpose(1, 2).reshape(
+            batch_size, self.channels, *self.grid_size
+        )
+        for block in self.blocks:
+            features = F.interpolate(
+                features, scale_factor=2.0, mode="bilinear", align_corners=False
+            )
+            features = block(features)
+        logits = self.proj(features)
+        if tuple(logits.shape[-2:]) != output_size:
+            logits = F.interpolate(
+                logits, size=output_size, mode="bilinear", align_corners=False
+            )
+        return logits
+
+
 class OrganSlot(nn.Module):
     """One collector, local TGEnc, AHER, head, and calibration pair."""
 
@@ -64,6 +127,8 @@ class OrganSlot(nn.Module):
         norm_layer,
         dataset_type,
         model_args,
+        head_type="linear",
+        head_channels=128,
     ):
         super().__init__()
         self.semantic_name = str(name)
@@ -109,7 +174,17 @@ class OrganSlot(nn.Module):
             self.token_factor,
             self.output_patch_count,
         )
-        self.head = PatchBinaryHead(decoder_dim, grid_size)
+        self.head_type = str(head_type)
+        if self.head_type == "linear":
+            self.head = PatchBinaryHead(decoder_dim, grid_size)
+        elif self.head_type == "multiscale_conv":
+            if dataset_type != "2D":
+                raise ValueError("multiscale_conv head currently supports 2D only")
+            self.head = MultiScaleBinaryHead2D(
+                decoder_dim, grid_size, channels=head_channels
+            )
+        else:
+            raise ValueError("unsupported slot head type: {}".format(head_type))
         self.calibration_scale = nn.Parameter(torch.ones(()))
         self.calibration_bias = nn.Parameter(torch.zeros(()))
 
@@ -127,14 +202,18 @@ class OrganSlot(nn.Module):
         canvas, aher_attention = self.aher(tokens)
         return canvas, tokens, collector_attention, aher_attention
 
-    def forward(self, z, output_size, return_attention=False):
-        canvas, tokens, collector_attention, aher_attention = (
-            self.forward_canvas(z)
-        )
+    def forward_head(self, canvas, output_size):
         raw_logits = self.head(canvas, output_size)
         calibrated_logits = (
             self.calibration_scale * raw_logits + self.calibration_bias
         )
+        return raw_logits, calibrated_logits
+
+    def forward(self, z, output_size, return_attention=False):
+        canvas, tokens, collector_attention, aher_attention = (
+            self.forward_canvas(z)
+        )
+        raw_logits, calibrated_logits = self.forward_head(canvas, output_size)
         output = {
             "tokens": tokens,
             "canvas": canvas,

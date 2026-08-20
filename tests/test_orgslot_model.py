@@ -33,6 +33,8 @@ def tiny_model(
     slot_tg_depth=1,
     fusion_mode="post_layernorm",
     fusion_reference_count=None,
+    slot_head_type="linear",
+    slot_head_channels=128,
 ):
     if specs is None:
         specs = [
@@ -57,6 +59,8 @@ def tiny_model(
         slot_tg_depth=slot_tg_depth,
         fusion_mode=fusion_mode,
         fusion_reference_count=fusion_reference_count,
+        slot_head_type=slot_head_type,
+        slot_head_channels=slot_head_channels,
     )
 
 
@@ -77,6 +81,74 @@ class OrganSlotModelTests(unittest.TestCase):
         loss.backward()
         self.assertTrue(torch.isfinite(loss))
         self.assertIsNotNone(model.patch_embed.proj.weight.grad)
+
+    def test_multiscale_head_runs_only_selected_rows(self):
+        model = tiny_model(
+            slot_head_type="multiscale_conv", slot_head_channels=32
+        )
+        images = torch.rand(2, 3, 32, 32)
+        keep = torch.tensor([[1, 0, 1], [0, 1, 1]], dtype=torch.bool)
+        seen_batch_sizes = {}
+        seen_slot_batch_sizes = {}
+        handles = []
+        for index, name in enumerate(model.slot_names):
+            def record(_module, inputs, _output, slot_name=name):
+                seen_batch_sizes[slot_name] = inputs[0].shape[0]
+            def record_slot(_module, inputs, _output, slot_name=name):
+                seen_slot_batch_sizes[slot_name] = inputs[0].shape[0]
+            slot = model.slot_bank.get_slot(name)
+            handles.append(slot.head.register_forward_hook(record))
+            handles.append(slot.collector.register_forward_hook(record_slot))
+        output = model(
+            images,
+            slot_keep_mask=keep,
+            head_compute_mask=keep,
+            decode_reconstruction=False,
+        )
+        for handle in handles:
+            handle.remove()
+        for index, name in enumerate(model.slot_names):
+            expected = int(keep[:, index].sum())
+            self.assertEqual(seen_batch_sizes[name], expected)
+            self.assertEqual(seen_slot_batch_sizes[name], expected)
+            dropped_rows = ~keep[:, index]
+            self.assertTrue(torch.equal(
+                output["calibrated_logits"][name][dropped_rows],
+                torch.zeros_like(output["calibrated_logits"][name][dropped_rows]),
+            ))
+            self.assertEqual(
+                output["calibrated_logits"][name].shape, (2, 1, 32, 32)
+            )
+
+        masks = {
+            name: torch.zeros(2, 1, 32, 32)
+            for name in model.slot_names
+        }
+        masks["background"].fill_(1)
+        loss, _ = base_segmentation_loss(
+            output["calibrated_logits"],
+            masks,
+            model.slot_names,
+            keep,
+            background_weight=0,
+            loss_type="focal",
+        )
+        loss.backward()
+        self.assertTrue(torch.isfinite(loss))
+        self.assertIsNotNone(
+            model.slot_bank.get_slot("kidney").head.proj.weight.grad
+        )
+
+    def test_decode_heads_false_skips_every_head(self):
+        model = tiny_model(slot_head_type="multiscale_conv")
+        output = model(
+            torch.rand(1, 3, 32, 32),
+            decode_heads=False,
+            decode_reconstruction=True,
+        )
+        self.assertEqual(output["slot_logits"], {})
+        self.assertEqual(output["calibrated_logits"], {})
+        self.assertIn("reconstruction", output)
 
     def test_3d_forward_backward_shapes(self):
         torch.manual_seed(2)

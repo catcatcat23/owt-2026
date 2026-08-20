@@ -26,6 +26,8 @@ SEG_SUPERVISION=${SEG_SUPERVISION:-retained}
 SEG_LOSS_TYPE=${SEG_LOSS_TYPE:-dice_bce}
 FOCAL_ALPHA=${FOCAL_ALPHA:-0.75}
 FOCAL_GAMMA=${FOCAL_GAMMA:-2.0}
+SLOT_HEAD_TYPE=${SLOT_HEAD_TYPE:-linear}
+SLOT_HEAD_CHANNELS=${SLOT_HEAD_CHANNELS:-128}
 ORGAN_ROI_PROBABILITY=${ORGAN_ROI_PROBABILITY:-0.2}
 TGR_MODE=${TGR_MODE:-legacy_batch}
 DISABLE_TRAIN_AUGMENTATION=${DISABLE_TRAIN_AUGMENTATION:-0}
@@ -101,6 +103,8 @@ COMMAND=(
   --weight_decay "${WEIGHT_DECAY}"
   --token_factor 20
   --slot_tg_depth 1
+  --slot_head_type "${SLOT_HEAD_TYPE}"
+  --slot_head_channels "${SLOT_HEAD_CHANNELS}"
   --fusion_mode "${FUSION_MODE}"
   --fusion_reference_count "${FUSION_REFERENCE_COUNT}"
   --loss_version L2-LPIPS
@@ -157,6 +161,7 @@ fi
   echo "seg_supervision=${SEG_SUPERVISION} lambda_bg_seg=${LAMBDA_BG_SEG}"
   echo "organ_roi_probability=${ORGAN_ROI_PROBABILITY} tgr_mode=${TGR_MODE}"
   echo "seg_loss_type=${SEG_LOSS_TYPE} focal_alpha=${FOCAL_ALPHA} focal_gamma=${FOCAL_GAMMA}"
+  echo "slot_head_type=${SLOT_HEAD_TYPE} slot_head_channels=${SLOT_HEAD_CHANNELS}"
   echo "micro_batch=${MICRO_BATCH} accum_iter=${ACCUM_ITER} effective_batch=${EFFECTIVE_BATCH}"
   echo "base_lr=${BASE_LR} weight_decay=${WEIGHT_DECAY}"
   echo "max_updates=${MAX_UPDATES} warmup_updates=${WARMUP_UPDATES}"

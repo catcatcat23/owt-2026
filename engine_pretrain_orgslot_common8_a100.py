@@ -43,6 +43,14 @@ def _segmentation_supervision_mask(mode, keep):
     raise ValueError("unknown segmentation supervision mode: {}".format(mode))
 
 
+def _head_compute_mask(slot_names, segmentation_keep, background_weight):
+    """Run expensive heads only where their loss can be non-zero."""
+    mask = segmentation_keep.clone()
+    if float(background_weight) == 0 and "background" in slot_names:
+        mask[:, slot_names.index("background")] = False
+    return mask
+
+
 def _force_focus_slots(model_without_ddp, batch, keep, device):
     focus = batch.get("focus_class_id")
     roi = batch.get("roi_applied")
@@ -152,15 +160,22 @@ def train_one_epoch(
                 image, visible_masks, slot_names, keep
             )
 
+        segmentation_keep = _segmentation_supervision_mask(
+            args.seg_supervision, keep
+        )
+        decode_heads = args.training_scope == "head_only" or args.lambda_seg != 0
+        head_compute_mask = _head_compute_mask(
+            slot_names, segmentation_keep, args.lambda_bg_seg
+        )
+
         with torch.cuda.amp.autocast():
             if args.training_scope == "head_only":
                 output = model(
                     image,
                     slot_keep_mask=keep,
+                    head_compute_mask=head_compute_mask,
+                    decode_heads=True,
                     decode_reconstruction=False,
-                )
-                segmentation_keep = _segmentation_supervision_mask(
-                    args.seg_supervision, keep
                 )
                 segmentation_loss, per_slot_segmentation = base_segmentation_loss(
                     output["calibrated_logits"],
@@ -176,7 +191,12 @@ def train_one_epoch(
                 perceptual_loss = segmentation_loss.detach() * 0.0
                 total_loss = args.lambda_seg * segmentation_loss
             else:
-                output = model(image, slot_keep_mask=keep)
+                output = model(
+                    image,
+                    slot_keep_mask=keep,
+                    head_compute_mask=head_compute_mask,
+                    decode_heads=decode_heads,
+                )
                 reconstruction_loss = base_reconstruction_loss(
                     output["reconstruction"], target
                 )
@@ -184,9 +204,6 @@ def train_one_epoch(
                     model_without_ddp, output["reconstruction"], target
                 )
                 segmentation_loss = reconstruction_loss.detach() * 0.0
-                segmentation_keep = _segmentation_supervision_mask(
-                    args.seg_supervision, keep
-                )
                 per_slot_segmentation = {}
                 if args.lambda_seg != 0:
                     segmentation_loss, per_slot_segmentation = base_segmentation_loss(

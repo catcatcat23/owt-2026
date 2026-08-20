@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=xec_os448_rmcf
 #SBATCH --partition=gpua800,gpua8001t
-#SBATCH --account=antengcai23
+#SBATCH --account=sifansong
 #SBATCH --qos=4gpus
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1

@@ -61,3 +61,24 @@ Submission audit:
 - Commit ad98843 restores a distinct four-update ROI100 smoke and adds shell
   assertions for MAX_UPDATES=4, ACCUM_ITER=1, ROI probability 1.0 and a unique
   smoke tag before launching Python.
+
+
+## Smoke acceptance and formal start
+
+Corrected smoke 119640 completed on xgpua800n6 in 28 seconds with exit code 0.
+It used two A800 GPUs, microbatch 8/GPU, accumulation 1, ROI probability 1.0
+and exactly four optimizer updates. The real-data validator passed and saved
+checkpoint-0.pth. Averaged finite metrics were:
+
+- total loss: 1.0856;
+- reconstruction L2: 0.2633;
+- LPIPS: 0.8160;
+- focal segmentation: 0.0632;
+- weighted focal term: 0.0063;
+- peak GPU memory: about 16.3 GiB on the first logged step.
+
+All three focus classes were exercised and FP32 probability monitoring remained
+finite. The afterok dependency released formal job 119641, which started on
+xgpua800n6. Its first logged batches are finite, use ROI probability 0.2,
+effective batch 192 and peak memory about 18.3 GiB. Jobs 119642-119644 remain
+blocked behind the formal training/evaluation dependencies.

@@ -263,7 +263,7 @@ def train_one_epoch(
                 segmentation_keep[:, slot_index].sum()
             )
             probabilities = torch.sigmoid(
-                output["calibrated_logits"][slot_name].detach()
+                output["calibrated_logits"][slot_name].detach().float()
             )
             target_mask = visible_masks[slot_name].bool()
             values["seg_{}_predicted_fraction".format(slot_name)] = float(

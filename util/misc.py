@@ -250,8 +250,8 @@ def init_distributed_mode(args):
 class NativeScalerWithGradNormCount:
     state_dict_key = "amp_scaler"
 
-    def __init__(self):
-        self._scaler = torch.cuda.amp.GradScaler() ## only for SLURM and H100 mae2
+    def __init__(self, enabled=True):
+        self._scaler = torch.cuda.amp.GradScaler(enabled=enabled) ## only for SLURM and H100 mae2
         # self._scaler = torch.amp.GradScaler('cuda') ## only for H100 mae, not for mae2
 
     def __call__(self, loss, optimizer, clip_grad=None, parameters=None, create_graph=False, update_grad=True):
@@ -260,7 +260,9 @@ class NativeScalerWithGradNormCount:
             if clip_grad is not None:
                 assert parameters is not None
                 self._scaler.unscale_(optimizer)  # unscale the gradients of optimizer's assigned params in-place
-                norm = torch.nn.utils.clip_grad_norm_(parameters, clip_grad)
+                norm = torch.nn.utils.clip_grad_norm_(
+                    parameters, clip_grad, error_if_nonfinite=True
+                )
             else:
                 self._scaler.unscale_(optimizer)
                 norm = get_grad_norm_(parameters)

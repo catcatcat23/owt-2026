@@ -22,8 +22,8 @@ TORCH_HOME=${ROOT}/artifacts/torch
 TMPDIR=${ROOT}/artifacts/tmp/${SLURM_JOB_ID}
 POSITIVE_COUNTS="59698 43715 34418 30768"
 SOURCE_RUN=PSEMv3_TripletContext_Loss3_Delta01_AbdAutoPET_2D_C4_T20_GPU4_B12A4_E1200
-RESUME_CHECKPOINT=${ROOT}/Results/PSEM_v3_Triplet_Loss3/AbdAutoPET_2D/${SOURCE_RUN}/checkpoint-400.pth
-RUN_NAME=PSEMv3_TripletContext_Loss3_Delta01_AbdAutoPET_2D_C4_T20_GPU4_B12A4_E1200_RESUME_CKPT400_FP32FIX
+RESUME_CHECKPOINT=${ROOT}/Results/PSEM_v3_Triplet_Loss3/AbdAutoPET_2D/${SOURCE_RUN}/checkpoint-475.pth
+RUN_NAME=PSEMv3_TripletContext_Loss3_Delta01_AbdAutoPET_2D_C4_T20_GPU4_B12A4_E1200_RESUME_CKPT475_BF16_CLIP1
 OUT_DIR=${ROOT}/Results/PSEM_v3_Triplet_Loss3/AbdAutoPET_2D/${RUN_NAME}
 RANK_LOG_DIR=${OUT_DIR}/rank_logs/${SLURM_JOB_ID}
 
@@ -32,7 +32,7 @@ mkdir -p "${OUT_DIR}" "${RANK_LOG_DIR}" "${TMPDIR}"
 cd "${WORKDIR}"
 git rev-parse HEAD
 git status --short
-sha256sum VQ/lpips.py engine_pretrain_psem_triplet_loss3.py
+sha256sum VQ/lpips.py engine_pretrain_psem_triplet_loss3.py main_pretrain_psem_triplet_loss3.py util/misc.py
 export PATH=${CONDA_ENV}/bin:${PATH}
 export LD_LIBRARY_PATH=${CONDA_ENV}/lib:/gpfs/spack/opt/spack/linux-icelake/mesa-25.0.5-zygiclacf7ay3uqqvqizl3lsvuzkk4od/lib:${LD_LIBRARY_PATH:-}
 export OMP_NUM_THREADS=1
@@ -46,7 +46,7 @@ test -r "${TRAIN_CSV}"
 test -r "${TORCH_HOME}/hub/checkpoints/vgg16-397923af.pth"
 test -r "${RESUME_CHECKPOINT}"
 python -c "import os, torch; expected=4; count=torch.cuda.device_count(); print('CUDA_VISIBLE_DEVICES=', os.environ.get('CUDA_VISIBLE_DEVICES')); print('torch_cuda=', torch.__version__, torch.version.cuda, 'count=', count); assert torch.cuda.is_available() and count == expected; x=torch.ones(1, device='cuda'); assert x.item() == 1"
-python -c "import torch; c=torch.load('${RESUME_CHECKPOINT}', map_location='cpu'); assert int(c['epoch']) == 400; assert all(k in c for k in ('model', 'optimizer', 'scaler', 'args')); print('resume checkpoint metadata validated')"
+python -c "import torch; c=torch.load('${RESUME_CHECKPOINT}', map_location='cpu'); assert int(c['epoch']) == 475; assert all(k in c for k in ('model', 'optimizer', 'scaler', 'args')); print('resume checkpoint metadata validated')"
 python -c "import torch; from VQ.lpips import normalize_tensor; x=torch.zeros(2,4,3,3,device='cuda',dtype=torch.float16); y=normalize_tensor(x); assert y.dtype == torch.float32 and torch.isfinite(y).all(); print('LPIPS FP32 normalization validated')"
 PYTHONPATH=.:tests python -m unittest discover -s tests -p 'test_psem_numeric_stability.py'
 
@@ -61,6 +61,6 @@ python -m torch.distributed.run \
   --positive_roi_loss_weight 0.25 --delta_loss_weight 0.1 \
   --roi_positive_sample_counts ${POSITIVE_COUNTS} --roi_frequency_alpha 0.5 \
   --roi_max_weight_ratio 4.0 --lpips_loss_weight 1.0 \
-  --intensity_norm per_sample --resume "${RESUME_CHECKPOINT}" \
+  --intensity_norm per_sample --amp_dtype bf16 --clip_grad 1.0 --finite_check_interval 50 --resume "${RESUME_CHECKPOINT}" \
   --data_path "${TRAIN_CSV}" --output_dir "${OUT_DIR}/" --log_dir "${OUT_DIR}/" \
   --num_workers 6 --save_freq 25 > "${OUT_DIR}/Resume_Result_${SLURM_JOB_ID}.txt" 2>&1

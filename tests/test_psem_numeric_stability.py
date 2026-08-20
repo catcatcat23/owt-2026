@@ -6,9 +6,13 @@ import torch
 
 from VQ.lpips import normalize_tensor
 from engine_pretrain_psem_triplet_loss3 import (
+    _autocast_context,
     _check_losses_finite,
+    _check_model_parameters_finite,
+    _check_training_tensors_finite,
     _nonfinite_component_names,
 )
+from util.misc import NativeScalerWithGradNormCount
 
 
 class PsemNumericStabilityTests(unittest.TestCase):
@@ -38,6 +42,65 @@ class PsemNumericStabilityTests(unittest.TestCase):
             data_iter_step=7,
             sample_indices=torch.tensor([11, 13]),
         )
+
+    def test_cpu_autocast_policy_is_noop(self):
+        value = torch.ones(2, dtype=torch.float32)
+        with _autocast_context(torch.device("cpu"), "bf16"):
+            result = value * 2
+        self.assertEqual(result.dtype, torch.float32)
+
+    def test_nonfinite_input_check_reports_sample_indices(self):
+        with self.assertRaisesRegex(
+            FloatingPointError, "nonfinite_tensors=\['image'\]"
+        ):
+            _check_training_tensors_finite(
+                {"image": torch.tensor([float("inf")])},
+                torch.device("cpu"),
+                epoch=500,
+                data_iter_step=1296,
+                sample_indices=torch.tensor([50370]),
+            )
+
+    def test_nonfinite_parameter_check_names_parameter(self):
+        model = torch.nn.Linear(2, 1)
+        with torch.no_grad():
+            model.weight.fill_(float("nan"))
+        with self.assertRaisesRegex(FloatingPointError, "weight"):
+            _check_model_parameters_finite(
+                model,
+                torch.device("cpu"),
+                epoch=500,
+                data_iter_step=1296,
+                sample_indices=torch.tensor([50370]),
+            )
+
+    def test_disabled_scaler_clips_finite_gradients(self):
+        parameter = torch.nn.Parameter(torch.tensor([2.0]))
+        optimizer = torch.optim.SGD([parameter], lr=0.1)
+        scaler = NativeScalerWithGradNormCount(enabled=False)
+        norm = scaler(
+            parameter.square().sum(),
+            optimizer,
+            clip_grad=1.0,
+            parameters=[parameter],
+            update_grad=True,
+        )
+        self.assertTrue(torch.isfinite(norm))
+        self.assertLess(float(parameter), 2.0)
+        self.assertEqual(scaler.state_dict(), {})
+
+    def test_gradient_clip_rejects_nonfinite_gradient(self):
+        parameter = torch.nn.Parameter(torch.tensor([1.0]))
+        optimizer = torch.optim.SGD([parameter], lr=0.1)
+        scaler = NativeScalerWithGradNormCount(enabled=False)
+        with self.assertRaisesRegex(RuntimeError, "non-finite"):
+            scaler(
+                parameter * torch.tensor(float("inf")),
+                optimizer,
+                clip_grad=1.0,
+                parameters=[parameter],
+                update_grad=True,
+            )
 
     def test_nonfinite_loss_check_reports_context(self):
         stderr = io.StringIO()

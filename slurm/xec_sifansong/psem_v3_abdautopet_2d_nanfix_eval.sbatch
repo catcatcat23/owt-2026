@@ -19,9 +19,9 @@ WORKDIR=${ROOT}/worktrees/psem_v3_triplet_nanfix
 CONDA_ENV=${ROOT}/envs/abdpet
 TEST_CSV=${ROOT}/csv/AbdAutoPET/Test_A100_Final112_xec.csv
 TMPDIR=${ROOT}/artifacts/tmp/${SLURM_JOB_ID}
-RUN_NAME=PSEMv3_TripletContext_Loss3_Delta01_AbdAutoPET_2D_C4_T20_GPU4_B12A4_E1200_RESUME_CKPT400_FP32FIX
+RUN_NAME=PSEMv3_TripletContext_Loss3_Delta01_AbdAutoPET_2D_C4_T20_GPU4_B12A4_E1200_RESUME_CKPT475_BF16_CLIP1
 RUN_DIR=${ROOT}/Results/PSEM_v3_Triplet_Loss3/AbdAutoPET_2D/${RUN_NAME}
-OUTPUT_DIR=${ROOT}/Results/PSEM_v3_Triplet_Loss3/Eval/AbdAutoPET_2D/ckpt1199_resume400_fp32fix
+OUTPUT_DIR=${ROOT}/Results/PSEM_v3_Triplet_Loss3/Eval/AbdAutoPET_2D/ckpt1199_resume475_bf16_clip1
 
 mkdir -p "${OUTPUT_DIR}" "${TMPDIR}"
 cd "${WORKDIR}"

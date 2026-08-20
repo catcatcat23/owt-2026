@@ -116,3 +116,38 @@ negative Direct-energy, and negative Delta-energy metrics; cover all eight
 anchors plus present/absent cases; save `checkpoint-0.pth`; and pass
 `tools/validate_psem_v3_triplet_smoke.py`. Only then may the 1200-epoch WORD 2D
 training be submitted.
+
+
+## AutoPET NaN incident and numeric-stability repair (2026-08-20)
+
+The resumed AutoPET run failed in job 116874 at epoch 500, step 1296. Rank 2
+reported NaN for every loss component, while the other ranks were still finite
+before the synchronized failure. The offending raw images and labels were
+finite, the Direct/Context/Plus masks were valid, and checkpoints 400, 425, 450
+and 475 contained finite model and optimizer tensors.
+
+The GradScaler scale fell repeatedly (1024, 512, 1024, then 256 at those saved
+checkpoints), which is evidence of recurring backward overflow before the final
+forward became NaN. This does not prove one exact layer is solely responsible.
+The concrete implementation defects were the unsafe combination of whole-model
+FP16 autocast, no gradient clipping, no deterministic seeding, and no checks
+between input loading and final scalar loss.
+
+The repair on branch fix/psem-v3-numeric-stability is:
+
+- A100 forward autocast uses BF16, whose exponent range is much larger than
+  FP16; LPIPS remains explicitly FP32.
+- GradScaler is disabled for BF16 and old scaler state can still be loaded.
+- Global gradient norm is clipped to 1.0 with non-finite gradients rejected
+  before optimizer.step.
+- image, label, reconstruction targets, loss components and periodically all
+  model parameters are checked for NaN/Inf with rank/epoch/step/sample context.
+- Python, NumPy, Torch, CUDA, DistributedSampler, DataLoader and transform RNGs
+  receive deterministic seeds for the diagnostic smoke.
+- The diagnostic resumes from checkpoint 475 rather than restarting from
+  checkpoint 400, so it tests close to the observed failure boundary.
+
+The local test gate contains 23 PSEM tests, including nine dedicated numeric
+tests, and all pass. The updated XEC smoke is intentionally separate from the
+formal run; formal training must not start until the BF16 checkpoint-475 smoke
+passes.

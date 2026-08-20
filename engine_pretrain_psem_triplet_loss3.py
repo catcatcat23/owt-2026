@@ -1,3 +1,4 @@
+import contextlib
 import os
 import sys
 from typing import Iterable
@@ -59,6 +60,64 @@ def _check_losses_finite(
     raise FloatingPointError(diagnostic)
 
 
+def _autocast_context(device, amp_dtype):
+    if device.type != "cuda" or amp_dtype == "fp32":
+        return contextlib.nullcontext()
+    dtype = torch.float16 if amp_dtype == "fp16" else torch.bfloat16
+    return torch.cuda.amp.autocast(dtype=dtype)
+
+
+def _check_training_tensors_finite(
+    tensors, device, epoch, data_iter_step, sample_indices
+):
+    nonfinite = [
+        name for name, value in tensors.items()
+        if not bool(torch.isfinite(value.detach()).all())
+    ]
+    all_finite = torch.tensor(
+        0.0 if nonfinite else 1.0, device=device, dtype=torch.float32
+    )
+    if misc.is_dist_avail_and_initialized():
+        dist.all_reduce(all_finite, op=dist.ReduceOp.MIN)
+    if bool(all_finite.item()):
+        return
+    diagnostic = (
+        "non-finite training tensor detected: "
+        f"rank={misc.get_rank()} epoch={epoch} step={data_iter_step} "
+        f"sample_indices={sample_indices.detach().cpu().tolist()} "
+        f"nonfinite_tensors={nonfinite}"
+    )
+    sys.stderr.write(diagnostic + "\n")
+    sys.stderr.flush()
+    raise FloatingPointError(diagnostic)
+
+
+def _check_model_parameters_finite(
+    model, device, epoch, data_iter_step, sample_indices
+):
+    model_without_ddp = model.module if hasattr(model, "module") else model
+    nonfinite = [
+        name for name, parameter in model_without_ddp.named_parameters()
+        if not bool(torch.isfinite(parameter.detach()).all())
+    ]
+    all_finite = torch.tensor(
+        0.0 if nonfinite else 1.0, device=device, dtype=torch.float32
+    )
+    if misc.is_dist_avail_and_initialized():
+        dist.all_reduce(all_finite, op=dist.ReduceOp.MIN)
+    if bool(all_finite.item()):
+        return
+    diagnostic = (
+        "non-finite model parameter detected: "
+        f"rank={misc.get_rank()} epoch={epoch} step={data_iter_step} "
+        f"sample_indices={sample_indices.detach().cpu().tolist()} "
+        f"parameters={nonfinite[:20]}"
+    )
+    sys.stderr.write(diagnostic + "\n")
+    sys.stderr.flush()
+    raise FloatingPointError(diagnostic)
+
+
 def train_one_epoch(
     model: torch.nn.Module,
     data_loader: Iterable,
@@ -99,6 +158,13 @@ def train_one_epoch(
         label = batch["label"].to(device, non_blocking=True)
         sample_indices = batch["sample_index"].to(device, non_blocking=True)
         source_batch_size = image.shape[0]
+        _check_training_tensors_finite(
+            {"image": image, "label": label},
+            device,
+            epoch,
+            data_iter_step,
+            sample_indices,
+        )
 
         schedule = triplet_query_schedule(
             sample_indices,
@@ -122,6 +188,17 @@ def train_one_epoch(
         triplet_keep_mask = torch.cat(
             (direct_mask, context_mask, plus_mask), dim=0
         )
+        _check_training_tensors_finite(
+            {
+                "target_direct": target_direct,
+                "target_context": target_context,
+                "target_plus": target_plus,
+            },
+            device,
+            epoch,
+            data_iter_step,
+            sample_indices,
+        )
 
         kept_count = triplet_keep_mask.sum(dim=1)
         dropped_count = args.num_classes_with_bg - kept_count
@@ -143,7 +220,7 @@ def train_one_epoch(
                 triplet_image.shape[0], -1, -1
             )
 
-        with torch.cuda.amp.autocast():
+        with _autocast_context(device, args.amp_dtype):
             branch_loss, triplet_pred, middle_output = model(
                 triplet_image,
                 mask_ratio=mask_ratio,
@@ -185,13 +262,39 @@ def train_one_epoch(
 
         loss_value = loss.item()
         loss = loss / accum_iter
-        loss_scaler(
-            loss,
-            optimizer,
-            parameters=model.parameters(),
-            update_grad=(data_iter_step + 1) % accum_iter == 0,
-        )
-        if (data_iter_step + 1) % accum_iter == 0:
+        update_grad = (data_iter_step + 1) % accum_iter == 0
+        try:
+            grad_norm = loss_scaler(
+                loss,
+                optimizer,
+                clip_grad=args.clip_grad,
+                parameters=model.parameters(),
+                update_grad=update_grad,
+            )
+        except RuntimeError as error:
+            diagnostic = (
+                "non-finite gradient detected during unscale/clip: "
+                f"rank={misc.get_rank()} epoch={epoch} step={data_iter_step} "
+                f"sample_indices={sample_indices.detach().cpu().tolist()} "
+                f"error={error}"
+            )
+            sys.stderr.write(diagnostic + "\n")
+            sys.stderr.flush()
+            raise FloatingPointError(diagnostic) from error
+        if update_grad:
+            if grad_norm is None or not bool(torch.isfinite(grad_norm.detach())):
+                raise FloatingPointError(
+                    "non-finite gradient norm at epoch {} step {}".format(
+                        epoch, data_iter_step
+                    )
+                )
+            if (
+                args.finite_check_interval > 0
+                and (data_iter_step // accum_iter) % args.finite_check_interval == 0
+            ):
+                _check_model_parameters_finite(
+                    model, device, epoch, data_iter_step, sample_indices
+                )
             optimizer.zero_grad()
 
         torch.cuda.synchronize()
@@ -247,6 +350,8 @@ def train_one_epoch(
             negative_anchor_count=absent_count,
             lr=optimizer.param_groups[0]["lr"],
         )
+        if update_grad:
+            metric_logger.update(grad_norm=grad_norm.item())
         if "LPIPS" in args.loss_version:
             metric_logger.update(p_loss=middle_output["p_loss"].item())
 

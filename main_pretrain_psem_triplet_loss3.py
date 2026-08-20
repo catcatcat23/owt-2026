@@ -3,9 +3,11 @@
 import datetime
 import json
 import os
+import random
 import time
 from pathlib import Path
 
+import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import torchvision.transforms as transforms
@@ -43,12 +45,41 @@ def get_args_parser():
     parser.add_argument("--roi_max_weight_ratio", type=float, default=4.0)
     parser.add_argument("--lpips_loss_weight", type=float, default=1.0)
     parser.add_argument(
+        "--amp_dtype",
+        choices=("fp16", "bf16", "fp32"),
+        default="fp16",
+        help="autocast precision; bf16 is recommended on A100 for stability",
+    )
+    parser.add_argument(
+        "--clip_grad",
+        type=float,
+        default=1.0,
+        help="global gradient norm cap; set <=0 to disable",
+    )
+    parser.add_argument("--finite_check_interval", type=int, default=50)
+    parser.add_argument("--deterministic", action="store_true")
+    parser.add_argument(
         "--delta_loss_weight",
         type=float,
         default=0.1,
         help="Weight for Loss3-style supervision of R(S+c)-R(S).",
     )
     return parser
+
+
+def _seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % (2 ** 32)
+    random.seed(worker_seed)
+    np.random.seed(worker_seed)
+    worker_info = torch.utils.data.get_worker_info()
+    dataset = worker_info.dataset
+    while isinstance(dataset, Subset):
+        dataset = dataset.dataset
+    transform = getattr(dataset, "transform", None)
+    transforms_list = getattr(transform, "transforms", (transform,))
+    for transform_item in transforms_list:
+        if hasattr(transform_item, "rng"):
+            transform_item.rng = np.random.default_rng(worker_seed)
 
 
 def main(args):
@@ -59,7 +90,29 @@ def main(args):
     print(f"{args}".replace(", ", ",\n"))
 
     device = torch.device(args.device)
-    cudnn.benchmark = True
+    seed = args.seed + misc.get_rank()
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    cudnn.benchmark = not args.deterministic
+    cudnn.deterministic = args.deterministic
+    if (
+        args.amp_dtype == "bf16"
+        and device.type == "cuda"
+        and not torch.cuda.is_bf16_supported()
+    ):
+        raise RuntimeError("BF16 requested but this CUDA device does not support it")
+    if args.clip_grad is not None and args.clip_grad <= 0:
+        args.clip_grad = None
+    if args.finite_check_interval < 0:
+        raise ValueError("finite_check_interval must be non-negative")
+    print(
+        f"numeric policy: amp={args.amp_dtype} clip_grad={args.clip_grad} "
+        f"deterministic={args.deterministic} "
+        f"finite_check_interval={args.finite_check_interval}"
+    )
 
     dataset_train = dataset_reader(
         base_dir=args.data_path,
@@ -96,6 +149,7 @@ def main(args):
         rank=misc.get_rank(),
         shuffle=True,
         drop_last=False,
+        seed=args.seed,
     )
     print(f"Sampler_train = {sampler_train}")
 
@@ -105,6 +159,8 @@ def main(args):
     else:
         log_writer = None
 
+    data_generator = torch.Generator()
+    data_generator.manual_seed(args.seed + misc.get_rank())
     data_loader_train = DataLoader(
         dataset_train,
         batch_size=args.batch_size,
@@ -112,6 +168,8 @@ def main(args):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=False,
+        worker_init_fn=_seed_worker,
+        generator=data_generator,
     )
 
     import OWT_models_psem_lossbalance_v3 as OWT_models_psem
@@ -154,7 +212,7 @@ def main(args):
     optimizer = torch.optim.AdamW(
         param_groups, lr=args.lr, betas=(0.9, 0.95)
     )
-    loss_scaler = NativeScaler()
+    loss_scaler = NativeScaler(enabled=args.amp_dtype == "fp16")
     misc.load_model(
         args=args,
         model_without_ddp=model_without_ddp,

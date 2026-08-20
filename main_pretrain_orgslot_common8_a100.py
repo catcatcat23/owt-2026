@@ -49,6 +49,12 @@ def get_args_parser():
     parser.add_argument("--token_factor", default=20, type=int)
     parser.add_argument("--slot_tg_depth", default=1, type=int)
     parser.add_argument(
+        "--slot_head_type",
+        choices=("linear", "multiscale_conv"),
+        default="linear",
+    )
+    parser.add_argument("--slot_head_channels", default=128, type=int)
+    parser.add_argument(
         "--fusion_mode",
         choices=FUSION_MODES,
         default="linear_sqrt",
@@ -435,6 +441,8 @@ def main(args):
         slot_tg_depth=args.slot_tg_depth,
         fusion_mode=args.fusion_mode,
         fusion_reference_count=args.fusion_reference_count,
+        slot_head_type=args.slot_head_type,
+        slot_head_channels=args.slot_head_channels,
     )
     initial_checkpoint_report = None
     if args.init_checkpoint:
@@ -485,6 +493,11 @@ def main(args):
     print("slots: {}".format(model.slot_names))
     print("training scope: {}".format(args.training_scope))
     print("segmentation supervision: {}".format(args.seg_supervision))
+    print(
+        "slot head: {} (channels={})".format(
+            args.slot_head_type, args.slot_head_channels
+        )
+    )
     print("trainable parameters: {}".format(
         sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
     ))

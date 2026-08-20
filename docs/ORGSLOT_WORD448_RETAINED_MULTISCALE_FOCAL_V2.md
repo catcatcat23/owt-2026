@@ -45,12 +45,19 @@ sifansong:
 
 | Stage | Job ID | Dependency at submission |
 |---|---:|---|
-| real ROI100 smoke | 119609 | Priority |
-| formal ROI20 training | 119610 | afterok:119609 |
-| reconstruction Direct/Indirect | 119611 | afterok:119610 |
-| head train-calibration | 119612 | afterok:119610 |
-| head test | 119613 | afterok:119612 |
+| real ROI100 smoke | 119640 | Priority |
+| formal ROI20 training | 119641 | afterok:119640 |
+| reconstruction Direct/Indirect | 119642 | afterok:119641 |
+| head train-calibration | 119643 | afterok:119641 |
+| head test | 119644 | afterok:119643 |
 
-The first submission attempt used the login name as the Slurm account and was
-rejected before any job was created. The scripts were corrected to the account
-reported by sacctmgr.
+Submission audit:
+
+- An initial account-name attempt was rejected before creating jobs.
+- Jobs 119609-119613 were cancelled. The smoke file had accidentally been
+  overwritten by the formal file because both had the same basename in a
+  temporary patch-generation directory; 119609 ran 8 minutes of the formal
+  configuration before cancellation and is not an experiment result.
+- Commit ad98843 restores a distinct four-update ROI100 smoke and adds shell
+  assertions for MAX_UPDATES=4, ACCUM_ITER=1, ROI probability 1.0 and a unique
+  smoke tag before launching Python.

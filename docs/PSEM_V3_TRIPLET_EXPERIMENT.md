@@ -148,6 +148,7 @@ The repair on branch fix/psem-v3-numeric-stability is:
   checkpoint 400, so it tests close to the observed failure boundary.
 
 The local test gate contains 23 PSEM tests, including nine dedicated numeric
-tests, and all pass. The updated XEC smoke is intentionally separate from the
-formal run; formal training must not start until the BF16 checkpoint-475 smoke
-passes.
+tests, and all pass. The same nine numeric tests pass in the sifansong XEC
+environment. Diagnostic smoke job 119639 was submitted from sifansong/XEC and
+is pending for four A800 GPUs. It is intentionally separate from the formal
+run; formal training must not start until this BF16 checkpoint-475 smoke passes.

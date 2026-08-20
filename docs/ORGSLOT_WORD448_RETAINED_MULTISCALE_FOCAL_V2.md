@@ -40,4 +40,17 @@ and computes the union of reconstruction-retained and head-supervised rows.
 
 ## Job registry
 
-Job IDs are added after remote submission.
+Submitted from login account antengcai23 on XEC using Slurm project account
+sifansong:
+
+| Stage | Job ID | Dependency at submission |
+|---|---:|---|
+| real ROI100 smoke | 119609 | Priority |
+| formal ROI20 training | 119610 | afterok:119609 |
+| reconstruction Direct/Indirect | 119611 | afterok:119610 |
+| head train-calibration | 119612 | afterok:119610 |
+| head test | 119613 | afterok:119612 |
+
+The first submission attempt used the login name as the Slurm account and was
+rejected before any job was created. The scripts were corrected to the account
+reported by sacctmgr.

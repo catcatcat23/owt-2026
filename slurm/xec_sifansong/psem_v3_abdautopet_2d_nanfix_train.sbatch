@@ -21,7 +21,7 @@ TRAIN_CSV=${ROOT}/csv/AbdAutoPET/Training_A100_Final112_xec.csv
 TORCH_HOME=${ROOT}/artifacts/torch
 TMPDIR=${ROOT}/artifacts/tmp/${SLURM_JOB_ID}
 POSITIVE_COUNTS="59698 43715 34418 30768"
-SOURCE_RUN=PSEMv3_TripletContext_Loss3_Delta01_AbdAutoPET_2D_C4_T20_GPU4_B12A4_E1200
+SOURCE_RUN=PSEMv3_TripletContext_Loss3_Delta01_AbdAutoPET_2D_C4_T20_GPU4_B12A4_E1200_RESUME_CKPT400_FP32FIX
 RESUME_CHECKPOINT=${ROOT}/Results/PSEM_v3_Triplet_Loss3/AbdAutoPET_2D/${SOURCE_RUN}/checkpoint-475.pth
 RUN_NAME=PSEMv3_TripletContext_Loss3_Delta01_AbdAutoPET_2D_C4_T20_GPU4_B12A4_E1200_RESUME_CKPT475_BF16_CLIP1
 OUT_DIR=${ROOT}/Results/PSEM_v3_Triplet_Loss3/AbdAutoPET_2D/${RUN_NAME}
@@ -44,7 +44,10 @@ PORT_NUM=${MASTER_PORT:-$((10000 + RANDOM % 50000))}
 test -x "${CONDA_ENV}/bin/python"
 test -r "${TRAIN_CSV}"
 test -r "${TORCH_HOME}/hub/checkpoints/vgg16-397923af.pth"
-test -r "${RESUME_CHECKPOINT}"
+if [[ ! -r "${RESUME_CHECKPOINT}" ]]; then
+  echo "Missing resume checkpoint: ${RESUME_CHECKPOINT}" >&2
+  exit 2
+fi
 python -c "import os, torch; expected=4; count=torch.cuda.device_count(); print('CUDA_VISIBLE_DEVICES=', os.environ.get('CUDA_VISIBLE_DEVICES')); print('torch_cuda=', torch.__version__, torch.version.cuda, 'count=', count); assert torch.cuda.is_available() and count == expected; x=torch.ones(1, device='cuda'); assert x.item() == 1"
 python -c "import torch; c=torch.load('${RESUME_CHECKPOINT}', map_location='cpu'); assert int(c['epoch']) == 475; assert all(k in c for k in ('model', 'optimizer', 'scaler', 'args')); print('resume checkpoint metadata validated')"
 python -c "import torch; from VQ.lpips import normalize_tensor; x=torch.zeros(2,4,3,3,device='cuda',dtype=torch.float16); y=normalize_tensor(x); assert y.dtype == torch.float32 and torch.isfinite(y).all(); print('LPIPS FP32 normalization validated')"

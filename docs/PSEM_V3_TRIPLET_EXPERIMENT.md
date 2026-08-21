@@ -149,6 +149,10 @@ The repair on branch fix/psem-v3-numeric-stability is:
 
 The local test gate contains 23 PSEM tests, including nine dedicated numeric
 tests, and all pass. The same nine numeric tests pass in the sifansong XEC
-environment. Diagnostic smoke job 119639 was submitted from sifansong/XEC and
-is pending for four A800 GPUs. It is intentionally separate from the formal
-run; formal training must not start until this BF16 checkpoint-475 smoke passes.
+environment. Diagnostic smoke job 119639 failed during shell preflight before
+Python started because its checkpoint path incorrectly pointed to the original
+run directory. Checkpoint 475 actually belongs to the
+`RESUME_CKPT400_FP32FIX` run. Both the smoke and formal-resume scripts now
+use that directory and print an explicit error if the checkpoint is missing.
+Formal training must not start until the corrected BF16 checkpoint-475 smoke
+passes.

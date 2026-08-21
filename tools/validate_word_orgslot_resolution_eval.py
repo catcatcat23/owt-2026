@@ -65,7 +65,7 @@ def main():
     if len(rows) != args.expected_cases * 8 * 4:
         raise RuntimeError("unexpected per-case row count")
     for row in rows:
-        for field in ("dice", "iou"):
+        for field in ("case_dice", "case_iou"):
             if not math.isfinite(float(row[field])):
                 raise RuntimeError("non-finite {} in per_case.csv".format(field))
 

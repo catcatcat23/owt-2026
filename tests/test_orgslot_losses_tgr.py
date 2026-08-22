@@ -193,6 +193,39 @@ class LossAndTGRTests(unittest.TestCase):
             float(diagnostics_four["organ"]["negative_samples"]), 3.0
         )
 
+    def test_small_organ_diagnostics_have_fixed_per_slot_schema(self):
+        slot_names = ["organ_a", "organ_b"]
+        slot_logits = {
+            name: torch.zeros(2, 1, 4, 4) for name in slot_names
+        }
+        visible_masks = {
+            name: torch.zeros(2, 1, 4, 4) for name in slot_names
+        }
+        diagnostics = {}
+        base_segmentation_loss(
+            slot_logits,
+            visible_masks,
+            slot_names,
+            torch.tensor([[True, False], [True, False]]),
+            loss_type="small_organ",
+            diagnostics=diagnostics,
+        )
+
+        expected_keys = {
+            "positive_samples",
+            "negative_samples",
+            "tversky_loss",
+            "positive_focal_loss",
+            "hard_negative_focal_loss",
+            "empty_negative_loss",
+        }
+        self.assertEqual(set(diagnostics), set(slot_names))
+        self.assertEqual(set(diagnostics["organ_a"]), expected_keys)
+        self.assertEqual(set(diagnostics["organ_b"]), expected_keys)
+        self.assertEqual(
+            float(diagnostics["organ_b"]["negative_samples"]), 0.0
+        )
+
     def test_tversky_prefers_correct_mask(self):
         target = torch.tensor([[[[1.0, 0.0]]]])
         correct = torch.tensor([[[[8.0, -8.0]]]])

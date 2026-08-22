@@ -80,6 +80,64 @@ class OrganSlot112Crop448Tests(unittest.TestCase):
         )
         self.assertEqual(tuple(output["image"].shape), (3, 448, 448))
 
+    def test_evaluation_uses_center_336_crop_without_losing_focus_organs(self):
+        transform = OrganSlotHighResTransform(
+            output_size=336,
+            training=False,
+            global_crop_size=336,
+            roi_crop_size=224,
+        )
+        output = transform(make_sample())
+        self.assertEqual(
+            output["crop_box"].tolist(), [82, 82, 336, 336, 501, 501]
+        )
+        self.assertEqual(tuple(output["image"].shape), (3, 336, 336))
+        self.assertTrue(torch.any(output["label"] == 4))
+
+    def test_roi_224_retains_focus_organ_and_resizes_to_336(self):
+        transform = OrganSlotHighResTransform(
+            output_size=336,
+            training=True,
+            global_crop_size=336,
+            roi_crop_size=224,
+            roi_center_jitter=0.1,
+            flip_probability=0.0,
+            rotation_probability=0.0,
+            gamma_probability=0.0,
+            photometric_operations=0,
+        )
+        sample = make_sample()
+        sample.update({"focus_class_id": 4, "roi_applied": True})
+        output = transform(sample)
+        self.assertEqual(output["crop_box"].tolist()[2:4], [224, 224])
+        self.assertEqual(tuple(output["image"].shape), (3, 336, 336))
+        self.assertTrue(torch.any(output["label"] == 4))
+
+    def test_roi_384_at_point7mm_retains_large_pancreas_proxy(self):
+        label = torch.zeros(1, 716, 716, dtype=torch.long)
+        label[:, 240:474, 300:436] = 6
+        sample = {
+            "image": label.float().div(8).repeat(3, 1, 1),
+            "label": label,
+            "focus_class_id": 6,
+            "roi_applied": True,
+        }
+        transform = OrganSlotHighResTransform(
+            output_size=448,
+            training=True,
+            global_crop_size=448,
+            roi_crop_size=384,
+            roi_center_jitter=0.1,
+            flip_probability=0.0,
+            rotation_probability=0.0,
+            gamma_probability=0.0,
+            photometric_operations=0,
+        )
+        output = transform(sample)
+        self.assertEqual(output["crop_box"].tolist()[2:4], [384, 384])
+        self.assertEqual(tuple(output["image"].shape), (3, 448, 448))
+        self.assertTrue(torch.any(output["label"] == 6))
+
     def test_transform_rejects_mismatched_spatial_size(self):
         transform = OrganSlotHighResTransform(training=False)
         with self.assertRaisesRegex(ValueError, "spatial shapes differ"):

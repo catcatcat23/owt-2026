@@ -2,7 +2,7 @@
 """Evaluate Common8 OWT/OrganSlot checkpoints by reconstruction thresholding.
 
 The primary metric is case-level 3D Dice over the unmodified ground-truth mask.
-The evaluator uses the deterministic 448 center crop from training validation and
+The evaluator uses the deterministic center crop from training validation and
 never uses labels to select a crop or threshold.
 """
 
@@ -38,6 +38,14 @@ def parse_args():
     )
     parser.add_argument(
         "--method", choices=("owt", "orgslot"), default="orgslot"
+    )
+    parser.add_argument("--preprocess-summary")
+    parser.add_argument(
+        "--expected-spacing",
+        nargs=3,
+        type=float,
+        default=None,
+        metavar=("SX", "SY", "SZ"),
     )
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--test-csv", required=True)
@@ -452,13 +460,37 @@ def main():
     test_csv = Path(args.test_csv).resolve()
     class_map = Path(args.class_map).resolve()
     output_dir = Path(args.output_dir).resolve()
-    for required in (checkpoint_path, test_csv, class_map):
+    required_paths = [checkpoint_path, test_csv, class_map]
+    preprocess_summary = None
+    if args.preprocess_summary is not None:
+        preprocess_summary = Path(args.preprocess_summary).resolve()
+        required_paths.append(preprocess_summary)
+    for required in required_paths:
         if not required.is_file():
             raise FileNotFoundError(required)
     if output_dir.exists():
         raise FileExistsError(output_dir)
-    if args.input_size != 448 or args.global_crop_size != 448:
-        raise ValueError("formal WORD evaluation requires deterministic 448 crop")
+    if args.input_size <= 0 or args.input_size % 16 != 0:
+        raise ValueError("input-size must be positive and divisible by patch size 16")
+    if args.global_crop_size <= 0:
+        raise ValueError("global-crop-size must be positive")
+    if args.expected_spacing is not None and preprocess_summary is None:
+        raise ValueError("expected-spacing requires preprocess-summary")
+    if preprocess_summary is not None:
+        with open(preprocess_summary, "r", encoding="utf-8") as handle:
+            preprocess = json.load(handle)
+        recorded_spacing = preprocess.get("config", {}).get("spacing_mm")
+        if args.expected_spacing is not None and (
+            recorded_spacing is None
+            or not np.allclose(
+                recorded_spacing, args.expected_spacing, rtol=0.0, atol=1e-6
+            )
+        ):
+            raise ValueError(
+                "preprocessing spacing {} != expected {}".format(
+                    recorded_spacing, list(args.expected_spacing)
+                )
+            )
     if args.threshold <= 0:
         raise ValueError("threshold must be positive")
 
@@ -473,20 +505,30 @@ def main():
 
     output_dir.mkdir(parents=True, exist_ok=False)
     config = vars(args).copy()
-    config.update({
-        "checkpoint": str(checkpoint_path),
-        "test_csv": str(test_csv),
-        "class_map": str(class_map),
-        "output_dir": str(output_dir),
-        "test_csv_sha256": sha256(test_csv),
-        "checkpoint_sha256": sha256(checkpoint_path),
-        "class_map_sha256": sha256(class_map),
-        "class_ids_resolved": class_ids,
-        "class_names": class_names,
-        "primary_mode": PRIMARY_MODE,
-        "threshold_policy": "fixed legacy OWT value; not selected on WORD test",
-        "ground_truth_policy": "unmodified semantic label after deterministic center crop",
-    })
+    config.update(
+        {
+            "checkpoint": str(checkpoint_path),
+            "test_csv": str(test_csv),
+            "class_map": str(class_map),
+            "output_dir": str(output_dir),
+            "test_csv_sha256": sha256(test_csv),
+            "checkpoint_sha256": sha256(checkpoint_path),
+            "class_map_sha256": sha256(class_map),
+            "class_ids_resolved": class_ids,
+            "class_names": class_names,
+            "primary_mode": PRIMARY_MODE,
+            "threshold_policy": "fixed legacy OWT value; not selected on WORD test",
+            "ground_truth_policy": (
+                "unmodified semantic label after deterministic center crop"
+            ),
+        }
+    )
+    if preprocess_summary is not None:
+        config["preprocess_summary"] = str(preprocess_summary)
+        config["preprocess_summary_sha256"] = sha256(preprocess_summary)
+        config["preprocess_spacing_mm"] = preprocess.get("config", {}).get(
+            "spacing_mm"
+        )
     atomic_json(output_dir / "resolved_config.json", config)
 
     device = torch.device(args.device)

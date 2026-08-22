@@ -32,6 +32,7 @@ def tiny_model(
     specs=None,
     slot_tg_depth=1,
     fusion_mode="post_layernorm",
+    img_size=32,
     fusion_reference_count=None,
     slot_head_type="linear",
     slot_head_channels=128,
@@ -43,7 +44,7 @@ def tiny_model(
             {"name": "spleen", "raw_class_id": 2},
         ]
     return OrganSlotMaskedAutoencoderViT(
-        img_size=32,
+        img_size=img_size,
         patch_size=16,
         in_chans=3,
         embed_dim=32,
@@ -78,6 +79,19 @@ class OrganSlotModelTests(unittest.TestCase):
             self.assertEqual(output["slot_canvases"][name].shape, (2, 4, 32))
         loss = output["reconstruction"].mean()
         loss += sum(value.mean() for value in output["slot_logits"].values())
+        loss.backward()
+        self.assertTrue(torch.isfinite(loss))
+        self.assertIsNotNone(model.patch_embed.proj.weight.grad)
+
+    def test_336_resolution_forward_backward(self):
+        torch.manual_seed(3)
+        model = tiny_model(img_size=336, fusion_mode="linear_sqrt")
+        images = torch.rand(1, 3, 336, 336)
+        keep = torch.tensor([[1, 1, 1]], dtype=torch.bool)
+        output = model(images, keep)
+        self.assertEqual(output["reconstruction"].shape, images.shape)
+        self.assertEqual(model.patch_embed.num_patches, 21 * 21)
+        loss = output["reconstruction"].square().mean()
         loss.backward()
         self.assertTrue(torch.isfinite(loss))
         self.assertIsNotNone(model.patch_embed.proj.weight.grad)

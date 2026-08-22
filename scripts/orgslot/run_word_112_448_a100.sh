@@ -12,17 +12,30 @@ REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 PYTHON=${PYTHON:-/home/Anteng/miniconda3/envs/abdpet/bin/python}
 DATA_ROOT=${DATA_ROOT:-/mnt/DATA-4/anteng}
 PROCESSED_ROOT=${PROCESSED_ROOT:-${DATA_ROOT}/processed/OWT_Common8_112_NATIVE/WORD}
-TRAIN_CSV=${TRAIN_CSV:-${PROCESSED_ROOT}/csv/WORD_Training_2D_native112.csv}
-VAL_CSV=${VAL_CSV:-${PROCESSED_ROOT}/csv/WORD_Test_2D_native112.csv}
+MANIFEST_TAG=${MANIFEST_TAG:-native112}
+TRAIN_CSV=${TRAIN_CSV:-${PROCESSED_ROOT}/csv/WORD_Training_2D_${MANIFEST_TAG}.csv}
+VAL_CSV=${VAL_CSV:-${PROCESSED_ROOT}/csv/WORD_Test_2D_${MANIFEST_TAG}.csv}
 PREPROCESS_SUMMARY=${PREPROCESS_SUMMARY:-${PROCESSED_ROOT}/metadata/preprocess_summary.json}
 ROI_INDEX=${ROI_INDEX:-${PROCESSED_ROOT}/metadata/small_organ_roi_index.json}
 LPIPS_STATE=${LPIPS_STATE:-${DATA_ROOT}/pretrained/owt_lpips_vgg16.pth}
+EXPECTED_SPACING=${EXPECTED_SPACING:-"1 1 2"}
 
 FUSION_MODE=${FUSION_MODE:?Set FUSION_MODE after the current AutoPET evaluations}
 FUSION_REFERENCE_COUNT=${FUSION_REFERENCE_COUNT:-9}
 LAMBDA_SEG=${LAMBDA_SEG:?Set LAMBDA_SEG after the current AutoPET evaluations}
 LAMBDA_BG_SEG=${LAMBDA_BG_SEG:-0.25}
 SEG_SUPERVISION=${SEG_SUPERVISION:-retained}
+SEG_LOSS_TYPE=${SEG_LOSS_TYPE:-dice_bce}
+FOCAL_ALPHA=${FOCAL_ALPHA:-0.75}
+FOCAL_GAMMA=${FOCAL_GAMMA:-2.0}
+TVERSKY_ALPHA_FP=${TVERSKY_ALPHA_FP:-0.3}
+TVERSKY_BETA_FN=${TVERSKY_BETA_FN:-0.7}
+TVERSKY_EPS=${TVERSKY_EPS:-1e-6}
+BALANCED_FOCAL_WEIGHT=${BALANCED_FOCAL_WEIGHT:-0.5}
+HARD_NEGATIVE_RATIO=${HARD_NEGATIVE_RATIO:-0.02}
+NEGATIVE_SLICE_WEIGHT=${NEGATIVE_SLICE_WEIGHT:-0.1}
+SLOT_HEAD_TYPE=${SLOT_HEAD_TYPE:-linear}
+SLOT_HEAD_CHANNELS=${SLOT_HEAD_CHANNELS:-128}
 ORGAN_ROI_PROBABILITY=${ORGAN_ROI_PROBABILITY:-0.2}
 TGR_MODE=${TGR_MODE:-legacy_batch}
 DISABLE_TRAIN_AUGMENTATION=${DISABLE_TRAIN_AUGMENTATION:-0}
@@ -67,6 +80,11 @@ for required in "${PYTHON}" "${TRAIN_CSV}" "${VAL_CSV}" "${PREPROCESS_SUMMARY}" 
     exit 2
   fi
 done
+read -r -a SPACING_ARRAY <<< "${EXPECTED_SPACING}"
+if [[ "${#SPACING_ARRAY[@]}" -ne 3 ]]; then
+  echo "EXPECTED_SPACING must contain exactly three values" >&2
+  exit 2
+fi
 if [[ "${ARM}" == "roi20" && ! -f "${ROI_INDEX}" ]]; then
   echo "Missing ROI index: ${ROI_INDEX}" >&2
   exit 2
@@ -90,6 +108,7 @@ COMMAND=(
   --input_size 448
   --global_crop_size 448
   --roi_crop_size 384
+  --expected_spacing "${SPACING_ARRAY[@]}"
   --roi_center_jitter 0.1
   --focus_class_ids 4,5,6
   --max_optimizer_updates "${MAX_UPDATES}"
@@ -98,6 +117,8 @@ COMMAND=(
   --weight_decay "${WEIGHT_DECAY}"
   --token_factor 20
   --slot_tg_depth 1
+  --slot_head_type "${SLOT_HEAD_TYPE}"
+  --slot_head_channels "${SLOT_HEAD_CHANNELS}"
   --fusion_mode "${FUSION_MODE}"
   --fusion_reference_count "${FUSION_REFERENCE_COUNT}"
   --loss_version L2-LPIPS
@@ -106,6 +127,15 @@ COMMAND=(
   --lambda_seg "${LAMBDA_SEG}"
   --lambda_bg_seg "${LAMBDA_BG_SEG}"
   --seg_supervision "${SEG_SUPERVISION}"
+  --seg_loss_type "${SEG_LOSS_TYPE}"
+  --focal_alpha "${FOCAL_ALPHA}"
+  --focal_gamma "${FOCAL_GAMMA}"
+  --tversky_alpha_fp "${TVERSKY_ALPHA_FP}"
+  --tversky_beta_fn "${TVERSKY_BETA_FN}"
+  --tversky_eps "${TVERSKY_EPS}"
+  --balanced_focal_weight "${BALANCED_FOCAL_WEIGHT}"
+  --hard_negative_ratio "${HARD_NEGATIVE_RATIO}"
+  --negative_slice_weight "${NEGATIVE_SLICE_WEIGHT}"
   --tgr_mode "${TGR_MODE}"
   --data_path "${TRAIN_CSV}"
   --val_data_path "${VAL_CSV}"
@@ -147,9 +177,14 @@ fi
   echo "train_csv=${TRAIN_CSV}"
   echo "gpu_binding_source=${GPU_BINDING_SOURCE}"
   echo "cuda_visible_devices=${CUDA_VISIBLE_DEVICES:-<unset>}"
+  echo "spacing=${EXPECTED_SPACING}"
   echo "fusion_mode=${FUSION_MODE} fusion_reference_count=${FUSION_REFERENCE_COUNT} lambda_seg=${LAMBDA_SEG}"
   echo "seg_supervision=${SEG_SUPERVISION} lambda_bg_seg=${LAMBDA_BG_SEG}"
   echo "organ_roi_probability=${ORGAN_ROI_PROBABILITY} tgr_mode=${TGR_MODE}"
+  echo "seg_loss_type=${SEG_LOSS_TYPE} focal_alpha=${FOCAL_ALPHA} focal_gamma=${FOCAL_GAMMA}"
+  echo "tversky_alpha_fp=${TVERSKY_ALPHA_FP} tversky_beta_fn=${TVERSKY_BETA_FN} tversky_eps=${TVERSKY_EPS}"
+  echo "balanced_focal_weight=${BALANCED_FOCAL_WEIGHT} hard_negative_ratio=${HARD_NEGATIVE_RATIO} negative_slice_weight=${NEGATIVE_SLICE_WEIGHT}"
+  echo "slot_head_type=${SLOT_HEAD_TYPE} slot_head_channels=${SLOT_HEAD_CHANNELS}"
   echo "micro_batch=${MICRO_BATCH} accum_iter=${ACCUM_ITER} effective_batch=${EFFECTIVE_BATCH}"
   echo "base_lr=${BASE_LR} weight_decay=${WEIGHT_DECAY}"
   echo "max_updates=${MAX_UPDATES} warmup_updates=${WARMUP_UPDATES}"

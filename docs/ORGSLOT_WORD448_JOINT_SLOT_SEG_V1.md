@@ -141,3 +141,44 @@ shared reconstruction decoder。已有 frozen head-only probe 仅作为表示诊
 - `tools/eval_common8_orgslot_reconstruction_threshold.py`
 
 Job IDs：等待 Gate B 提交后填写。
+
+## 8. Focal v2 正式实验
+
+Dice+BCE tiny 的数值门禁虽然通过，但最终 background loss 约为 0.0036，
+八个前景 slot loss 均接近 1.0，存在全背景塌缩风险。因此 v2 保留联合重建、
+ROI20 和 all-slot supervision，只替换独立 binary head 的损失：
+
+\[
+L=L_{global\ L2}+L_{LPIPS}+0.1L_{slot\ focal}.
+\]
+
+固定配置：
+
+- `seg_loss_type=focal`；
+- `focal_alpha=0.75`，其中 alpha 是前景正类权重；
+- `focal_gamma=2.0`；
+- `lambda_seg=0.1`；
+- `seg_supervision=all`；
+- `organ_roi_probability=0.20`；
+- fused Loss3 关闭。
+
+Focal 的原始数值约为 Dice+BCE 的十分之一，因此使用 0.1 而不是直接沿用
+0.01。该设置预期使加权辅助项约为 0.004，仍小于旧 Dice+BCE 联合实验的
+0.01--0.02，避免分割目标主导重建。
+
+训练日志额外记录每个 slot 的 `predicted_fraction`、`target_fraction` 和
+`positive_probability`。smoke 必须验证这些字段有限，正式判断还必须依赖固定
+0.5 threshold 的逐 head Dice/预测体积，以及相同 0.02 threshold 的
+reconstruction Direct/Indirect Dice。
+
+XEC `antengcai23` 任务链（2026-08-15）：
+
+| 阶段 | Job ID | 依赖/状态 |
+|---|---:|---|
+| ROI100 Focal smoke | 117005 | 已提交，等待调度 |
+| ROI20正式训练 | 117006 | `afterok:117005` |
+| reconstruction评估 | 117007 | `afterok:117006` |
+| head train calibration | 117008 | `afterok:117006` |
+| head test | 117009 | `afterok:117008` |
+
+代码分支：`experiment/orgslot-jointseg-focal-v0`；提交：`7d8343e`。

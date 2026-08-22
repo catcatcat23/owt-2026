@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=xec_os448_js_smk
+#SBATCH --job-name=xec_os448_rmcf_smk
 #SBATCH --partition=gpua800,gpua8001t
 #SBATCH --account=sifansong
 #SBATCH --qos=4gpus
@@ -7,19 +7,15 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:a800:2
 #SBATCH --cpus-per-task=12
-#SBATCH --mem=128G
+#SBATCH --mem=160G
 #SBATCH --time=01:00:00
-#SBATCH --output=/gpfs/work/aac/antengcai23/slurm/logs/OrganSlot/WORD448_JointSeg_Smoke/%x_%j.out
-#SBATCH --error=/gpfs/work/aac/antengcai23/slurm/logs/OrganSlot/WORD448_JointSeg_Smoke/%x_%j.err
+#SBATCH --output=/gpfs/work/aac/antengcai23/slurm/logs/OrganSlot/WORD448_RetainedMultiFocal/%x_%j.out
+#SBATCH --error=/gpfs/work/aac/antengcai23/slurm/logs/OrganSlot/WORD448_RetainedMultiFocal/%x_%j.err
 
 set -euo pipefail
 ROOT=/gpfs/work/aac/antengcai23
 WORKDIR=${ROOT}/worktrees/orgslotbank_slotseg
-SEG_LOSS_TYPE=${SEG_LOSS_TYPE:-dice_bce}
-FOCAL_ALPHA=${FOCAL_ALPHA:-0.75}
-FOCAL_GAMMA=${FOCAL_GAMMA:-2.0}
-LAMBDA_SEG=${LAMBDA_SEG:-0.01}
-RUN_TAG=${RUN_TAG:-OrgSlot_WORD448_ROI100_JointSegAll_L0.01_Smoke}
+RUN_TAG=OrgSlot_WORD448_ROI100_RetainedMultiConv_Focal_L0.1_Smoke
 RUN_NAME=${RUN_TAG}_${SLURM_JOB_ID}
 OUTPUT_DIR=${WORKDIR}/Results/OrganSlotBank/Common8/WORD_2D/${RUN_NAME}
 cd "${WORKDIR}"
@@ -30,23 +26,23 @@ export PROCESSED_ROOT=${ROOT}/data/OWT_Common8_112_NATIVE/WORD
 export ROI_INDEX=${PROCESSED_ROOT}/metadata/small_organ_roi_index_xec.json
 export LPIPS_STATE=${ROOT}/worktrees/orgslotbank/Results/OrganSlotBank/_assets/owt_lpips_vgg16.pth
 export FUSION_MODE=linear_sqrt FUSION_REFERENCE_COUNT=9
-export LAMBDA_SEG LAMBDA_BG_SEG=0.25 SEG_SUPERVISION=all
-export SEG_LOSS_TYPE FOCAL_ALPHA FOCAL_GAMMA
+export LAMBDA_SEG=0.1 LAMBDA_BG_SEG=0 SEG_SUPERVISION=retained
+export SEG_LOSS_TYPE=focal FOCAL_ALPHA=0.75 FOCAL_GAMMA=2.0
+export SLOT_HEAD_TYPE=multiscale_conv SLOT_HEAD_CHANNELS=128
 export ORGAN_ROI_PROBABILITY=1.0 TGR_MODE=legacy_batch
 export RUN_NAME OUTPUT_DIR
-export N_GPU=2 MICRO_BATCH=2 ACCUM_ITER=1 TARGET_EFFECTIVE_BATCH=4
+export N_GPU=2 MICRO_BATCH=8 ACCUM_ITER=1 TARGET_EFFECTIVE_BATCH=16
 export MAX_UPDATES=4 WARMUP_UPDATES=0 WORKERS=4 SAVE_FREQ=1
 export MASTER_PORT=$((19000 + SLURM_JOB_ID % 20000))
 export PATH=${ROOT}/envs/abdpet/bin:${PATH}
 export LD_LIBRARY_PATH=${ROOT}/envs/abdpet/lib:/gpfs/spack/opt/spack/linux-icelake/mesa-25.0.5-zygiclacf7ay3uqqvqizl3lsvuzkk4od/lib:${LD_LIBRARY_PATH:-}
 export PYTHONNOUSERSITE=1
 
+test "${MAX_UPDATES}" -eq 4
+test "${ACCUM_ITER}" -eq 1
+test "${ORGAN_ROI_PROBABILITY}" = "1.0"
+test "${RUN_TAG}" = "OrgSlot_WORD448_ROI100_RetainedMultiConv_Focal_L0.1_Smoke"
 nvidia-smi -L
-${PYTHON} -c "import os, torch; count=torch.cuda.device_count(); print('CUDA_VISIBLE_DEVICES=', os.environ.get('CUDA_VISIBLE_DEVICES')); assert torch.cuda.is_available() and count == 2"
+${PYTHON} -c "import os, torch; n=torch.cuda.device_count(); print('CUDA_VISIBLE_DEVICES=', os.environ.get('CUDA_VISIBLE_DEVICES')); assert torch.cuda.is_available() and n == 2"
 bash scripts/orgslot/run_word_112_448_a100.sh roi20
-${PYTHON} tools/validate_orgslot_jointseg_smoke.py \
-  --run-dir "${OUTPUT_DIR}" \
-  --expected-seg-loss "${SEG_LOSS_TYPE}" \
-  --expected-lambda-seg "${LAMBDA_SEG}" \
-  --expected-focal-alpha "${FOCAL_ALPHA}" \
-  --expected-focal-gamma "${FOCAL_GAMMA}"
+${PYTHON} tools/validate_orgslot_jointseg_smoke.py   --run-dir "${OUTPUT_DIR}"   --expected-seg-loss focal   --expected-seg-supervision retained   --expected-slot-head-type multiscale_conv   --expected-background-weight 0   --expected-lambda-seg 0.1   --expected-focal-alpha 0.75   --expected-focal-gamma 2.0

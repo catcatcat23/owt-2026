@@ -11,15 +11,58 @@ from pathlib import Path
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-dir", required=True)
+    parser.add_argument("--expected-seg-loss", default="dice_bce")
+    parser.add_argument(
+        "--expected-seg-supervision", choices=("retained", "all"), default="all"
+    )
+    parser.add_argument("--expected-slot-head-type", default="linear")
+    parser.add_argument("--expected-background-weight", default=0.25, type=float)
+    parser.add_argument("--expected-lambda-seg", default=0.01, type=float)
+    parser.add_argument("--expected-focal-alpha", default=0.75, type=float)
+    parser.add_argument("--expected-focal-gamma", default=2.0, type=float)
+    parser.add_argument(
+        "--expected-spacing", nargs=3, default=(1.0, 1.0, 2.0), type=float
+    )
+    parser.add_argument("--expected-tversky-alpha-fp", default=0.3, type=float)
+    parser.add_argument("--expected-tversky-beta-fn", default=0.7, type=float)
+    parser.add_argument("--expected-tversky-eps", default=1e-6, type=float)
+    parser.add_argument("--expected-balanced-focal-weight", default=0.5, type=float)
+    parser.add_argument("--expected-hard-negative-ratio", default=0.02, type=float)
+    parser.add_argument("--expected-negative-slice-weight", default=0.1, type=float)
     args = parser.parse_args()
     run_dir = Path(args.run_dir)
     config = json.loads((run_dir / "resolved_config.json").read_text())
     if not config.get("organ_roi_aug"):
         raise RuntimeError("ROI augmentation was not enabled")
-    if config.get("seg_supervision") != "all":
-        raise RuntimeError("seg_supervision must be all")
-    if float(config.get("lambda_seg")) != 0.01:
-        raise RuntimeError("lambda_seg must be 0.01")
+    if config.get("seg_supervision") != args.expected_seg_supervision:
+        raise RuntimeError("unexpected seg_supervision")
+    if config.get("slot_head_type") != args.expected_slot_head_type:
+        raise RuntimeError("unexpected slot_head_type")
+    if float(config.get("lambda_bg_seg")) != args.expected_background_weight:
+        raise RuntimeError("unexpected lambda_bg_seg")
+    if config.get("seg_loss_type") != args.expected_seg_loss:
+        raise RuntimeError("unexpected segmentation loss type")
+    if float(config.get("lambda_seg")) != args.expected_lambda_seg:
+        raise RuntimeError("unexpected lambda_seg")
+    if list(config.get("expected_spacing", ())) != list(args.expected_spacing):
+        raise RuntimeError("unexpected preprocessing spacing")
+    if args.expected_seg_loss == "small_organ":
+        expected_values = {
+            "tversky_alpha_fp": args.expected_tversky_alpha_fp,
+            "tversky_beta_fn": args.expected_tversky_beta_fn,
+            "tversky_eps": args.expected_tversky_eps,
+            "balanced_focal_weight": args.expected_balanced_focal_weight,
+            "hard_negative_ratio": args.expected_hard_negative_ratio,
+            "negative_slice_weight": args.expected_negative_slice_weight,
+        }
+        for name, expected in expected_values.items():
+            if float(config.get(name)) != expected:
+                raise RuntimeError("unexpected {}".format(name))
+    if args.expected_seg_loss in ("focal", "small_organ"):
+        if float(config.get("focal_alpha")) != args.expected_focal_alpha:
+            raise RuntimeError("unexpected focal_alpha")
+        if float(config.get("focal_gamma")) != args.expected_focal_gamma:
+            raise RuntimeError("unexpected focal_gamma")
     if float(config.get("lambda_lpips")) != 1.0:
         raise RuntimeError("lambda_lpips must be 1")
 
@@ -37,23 +80,60 @@ def main():
     ):
         if not math.isfinite(float(latest[name])):
             raise RuntimeError("non-finite {}".format(name))
-    expected_weighted = 0.01 * float(latest["train_segmentation_loss"])
+    expected_weighted = args.expected_lambda_seg * float(
+        latest["train_segmentation_loss"]
+    )
     if abs(float(latest["train_weighted_segmentation_loss"]) - expected_weighted) > 1e-6:
         raise RuntimeError("weighted segmentation loss is inconsistent")
     if float(latest["train_roi_fraction"]) <= 0:
         raise RuntimeError("ROI path was not exercised")
     if any("positive_roi_loss" in name for name in latest):
         raise RuntimeError("legacy fused Loss3 metrics unexpectedly exist")
+    observed_slots = []
+    positive_small_organ_slots = []
     for slot in (
         "background", "spleen", "right_kidney", "left_kidney",
         "gallbladder", "esophagus", "pancreas", "liver", "stomach",
     ):
         loss_name = "train_seg_{}_loss".format(slot)
         count_name = "train_seg_{}_supervised_samples".format(slot)
+        if loss_name not in latest:
+            if slot == "background" and args.expected_background_weight == 0:
+                continue
+            continue
         if not math.isfinite(float(latest[loss_name])):
             raise RuntimeError("non-finite {}".format(loss_name))
         if float(latest[count_name]) <= 0:
             raise RuntimeError("{} received no supervision".format(slot))
+        observed_slots.append(slot)
+        for suffix in (
+            "predicted_fraction", "target_fraction", "positive_probability"
+        ):
+            metric = "train_seg_{}_{}".format(slot, suffix)
+            if metric not in latest or not math.isfinite(float(latest[metric])):
+                raise RuntimeError(
+                    "missing or non-finite {}".format(metric)
+                )
+        if args.expected_seg_loss == "small_organ":
+            for suffix in (
+                "positive_samples",
+                "negative_samples",
+                "tversky_loss",
+                "positive_focal_loss",
+                "hard_negative_focal_loss",
+                "empty_negative_loss",
+                "positive_slice_predicted_fraction",
+                "empty_slice_predicted_fraction",
+            ):
+                metric = "train_seg_{}_{}".format(slot, suffix)
+                if metric not in latest or not math.isfinite(float(latest[metric])):
+                    raise RuntimeError("missing or non-finite {}".format(metric))
+            if float(latest["train_seg_{}_positive_samples".format(slot)]) > 0:
+                positive_small_organ_slots.append(slot)
+    if not set(("gallbladder", "esophagus", "pancreas")) & set(observed_slots):
+        raise RuntimeError("smoke did not supervise a small-organ focus slot")
+    if args.expected_seg_loss == "small_organ" and not positive_small_organ_slots:
+        raise RuntimeError("smoke did not exercise a positive organ slice")
     checkpoints = glob.glob(str(run_dir / "checkpoint-*.pth"))
     if not checkpoints:
         raise RuntimeError("smoke produced no checkpoint")

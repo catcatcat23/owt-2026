@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=xec_os448_jsall
+#SBATCH --job-name=xec_os448_rmcf
 #SBATCH --partition=gpua800,gpua8001t
 #SBATCH --account=sifansong
 #SBATCH --qos=4gpus
@@ -9,17 +9,13 @@
 #SBATCH --cpus-per-task=20
 #SBATCH --mem=192G
 #SBATCH --time=4-00:00:00
-#SBATCH --output=/gpfs/work/aac/antengcai23/slurm/logs/OrganSlot/WORD448_JointSeg_Train/%x_%j.out
-#SBATCH --error=/gpfs/work/aac/antengcai23/slurm/logs/OrganSlot/WORD448_JointSeg_Train/%x_%j.err
+#SBATCH --output=/gpfs/work/aac/antengcai23/slurm/logs/OrganSlot/WORD448_RetainedMultiFocal/%x_%j.out
+#SBATCH --error=/gpfs/work/aac/antengcai23/slurm/logs/OrganSlot/WORD448_RetainedMultiFocal/%x_%j.err
 
 set -euo pipefail
 ROOT=/gpfs/work/aac/antengcai23
 WORKDIR=${ROOT}/worktrees/orgslotbank_slotseg
-SEG_LOSS_TYPE=${SEG_LOSS_TYPE:-dice_bce}
-FOCAL_ALPHA=${FOCAL_ALPHA:-0.75}
-FOCAL_GAMMA=${FOCAL_GAMMA:-2.0}
-LAMBDA_SEG=${LAMBDA_SEG:-0.01}
-RUN_TAG=${RUN_TAG:-OrgSlot_WORD448_ROI20_JointSegAll_L0.01}
+RUN_TAG=OrgSlot_WORD448_ROI20_RetainedMultiConv_Focal_L0.1
 RUN_NAME=${RUN_TAG}_${SLURM_JOB_ID}
 OUTPUT_DIR=${WORKDIR}/Results/OrganSlotBank/Common8/WORD_2D/${RUN_NAME}
 cd "${WORKDIR}"
@@ -30,8 +26,9 @@ export PROCESSED_ROOT=${ROOT}/data/OWT_Common8_112_NATIVE/WORD
 export ROI_INDEX=${PROCESSED_ROOT}/metadata/small_organ_roi_index_xec.json
 export LPIPS_STATE=${ROOT}/worktrees/orgslotbank/Results/OrganSlotBank/_assets/owt_lpips_vgg16.pth
 export FUSION_MODE=linear_sqrt FUSION_REFERENCE_COUNT=9
-export LAMBDA_SEG LAMBDA_BG_SEG=0.25 SEG_SUPERVISION=all
-export SEG_LOSS_TYPE FOCAL_ALPHA FOCAL_GAMMA
+export LAMBDA_SEG=0.1 LAMBDA_BG_SEG=0 SEG_SUPERVISION=retained
+export SEG_LOSS_TYPE=focal FOCAL_ALPHA=0.75 FOCAL_GAMMA=2.0
+export SLOT_HEAD_TYPE=multiscale_conv SLOT_HEAD_CHANNELS=128
 export ORGAN_ROI_PROBABILITY=0.2 TGR_MODE=legacy_batch
 export RUN_NAME OUTPUT_DIR
 export N_GPU=2 MICRO_BATCH=8 ACCUM_ITER=12 TARGET_EFFECTIVE_BATCH=192
@@ -43,8 +40,8 @@ export LD_LIBRARY_PATH=${ROOT}/envs/abdpet/lib:/gpfs/spack/opt/spack/linux-icela
 export PYTHONNOUSERSITE=1
 
 nvidia-smi -L
-${PYTHON} -c "import os, torch; count=torch.cuda.device_count(); print('CUDA_VISIBLE_DEVICES=', os.environ.get('CUDA_VISIBLE_DEVICES')); assert torch.cuda.is_available() and count == 2"
+${PYTHON} -c "import os, torch; n=torch.cuda.device_count(); print('CUDA_VISIBLE_DEVICES=', os.environ.get('CUDA_VISIBLE_DEVICES')); assert torch.cuda.is_available() and n == 2"
 bash scripts/orgslot/run_word_112_448_a100.sh roi20
 
 test -r "${OUTPUT_DIR}/checkpoint-802.pth"
-${PYTHON} -c "import torch; c=torch.load('${OUTPUT_DIR}/checkpoint-802.pth', map_location='cpu'); a=c['args']; assert int(c['epoch']) == 802; assert int(getattr(a, 'max_optimizer_updates')) == 118800; assert getattr(a, 'seg_supervision') == 'all'; assert getattr(a, 'seg_loss_type') == '${SEG_LOSS_TYPE}'; assert float(getattr(a, 'lambda_seg')) == float('${LAMBDA_SEG}'); assert bool(getattr(a, 'organ_roi_aug')); print('formal checkpoint validated')"
+${PYTHON} -c "import torch; c=torch.load('${OUTPUT_DIR}/checkpoint-802.pth', map_location='cpu'); a=c['args']; assert int(c['epoch']) == 802; assert getattr(a, 'seg_supervision') == 'retained'; assert getattr(a, 'seg_loss_type') == 'focal'; assert getattr(a, 'slot_head_type') == 'multiscale_conv'; assert float(getattr(a, 'lambda_seg')) == 0.1; assert float(getattr(a, 'lambda_bg_seg')) == 0; print('formal checkpoint validated')"

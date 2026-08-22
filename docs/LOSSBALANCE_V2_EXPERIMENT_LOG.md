@@ -92,18 +92,19 @@ LPIPS, base LR `1e-4`, effective global batch 64, and 1200 epochs.
 
 ## Staged launch policy
 
-1. Submit one-epoch 2D and Fixfr4 3D smoke jobs.
-2. Check finite loss, all class diagnostics, peak GPU memory, throughput,
-   checkpoint creation, and absence of traceback/OOM.
-3. Only after both pass, submit the two 1200-epoch jobs.
-4. Submit the same Direct and LoRA evaluation used for the controlled baseline,
-   dependent on successful full training.
+1. Every new loss, mask, or architecture variant first runs a real-data 2D smoke.
+2. After the smoke passes, complete the controlled 2D training.
+3. Run the same 2D Direct/Indirect evaluation and compare mean Dice, small-organ
+   Dice, reconstruction L2/LPIPS, and failure cases against the controlled baseline.
+4. Launch a 3D full run only if the 2D evaluation shows a meaningful benefit
+   without catastrophic regression. A passing 3D smoke proves only that the code
+   runs; it is not evidence that a full 3D experiment is worth four GPUs.
 
 ## Jobs
 
-| Job | Experiment | Status |
+| Job | Experiment | Final status |
 |---:|---|---|
-| 1567943 | WORD 2D LossBalance-v2 smoke, 2 GPUs, 4a800 | PENDING (Priority) |
-| 1567944 | WORD Fixfr4 3D LossBalance-v2 smoke, 4 GPUs, 8a800 | PENDING (Priority) |
-| TBD | WORD 2D LossBalance-v2 full | gated on smoke |
-| TBD | WORD Fixfr4 3D LossBalance-v2 full, 4 GPUs | gated on smoke |
+| 1567943 | WORD 2D LossBalance-v2 smoke, 2 GPUs, 4a800 | COMPLETED, 00:02:01 |
+| 1567944 | WORD Fixfr4 3D LossBalance-v2 smoke, 4 GPUs, 8a800 | COMPLETED, 00:02:04; retained as code validation only |
+| 1586123 | WORD 2D LossBalance-v2 full | COMPLETED, 19:28:18; unified 2D evaluation is next |
+| 1586124 | WORD Fixfr4 3D LossBalance-v2 full, 4 GPUs | CANCELLED before start on 2026-08-02; elapsed 00:00:00 |

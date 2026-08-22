@@ -117,6 +117,30 @@ anchors plus present/absent cases; save `checkpoint-0.pth`; and pass
 `tools/validate_psem_v3_triplet_smoke.py`. Only then may the 1200-epoch WORD 2D
 training be submitted.
 
+## Second retry (2026-08-11)
+
+The first recovery smoke jobs `1655585` (WORD) and `1655588` (AbdAutoPET)
+started on `gpua800n1` without a GPU allocation and failed at the strict CUDA
+preflight. Their dependent chains became unusable and were cancelled. No model
+forward or loss computation occurred, so these failures are infrastructure
+incidents rather than method results.
+
+The replacement submission explicitly passes typed A800 GRES on the `sbatch`
+command line and excludes `gpua800n1`, `gpua800n2`, and `gpua800n6`:
+
+| Dataset | Stage | Job | Dependency | Initial state |
+|---|---|---:|---|---|
+| WORD | smoke | 1658407 | none | PENDING (Priority) |
+| WORD | train | 1658408 | afterok:1658407 | PENDING (Dependency) |
+| WORD | evaluation | 1658409 | afterok:1658408 | PENDING (Dependency) |
+| AbdAutoPET | smoke | 1658410 | none | PENDING (Priority) |
+| AbdAutoPET | train | 1658411 | afterok:1658410 | PENDING (Dependency) |
+| AbdAutoPET | evaluation | 1658412 | afterok:1658411 | PENDING (Dependency) |
+
+Immediately after submission, every job showed the expected
+`ReqTRES=...gres/gpu=N`, typed `TresPerNode=gres:gpu:a800:N`, and
+`ExcNodeList=gpua800n[1-2,6]`. Future audits should use these six job IDs in
+place of the superseded `1655585`--`1655590` chain.
 
 ## AutoPET NaN incident and numeric-stability repair (2026-08-20)
 

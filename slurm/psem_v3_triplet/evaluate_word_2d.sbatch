@@ -28,6 +28,7 @@ export PYTHONNOUSERSITE=1
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
 export PYTHONUNBUFFERED=1
 
+python -c "import os, torch; expected=1; count=torch.cuda.device_count(); print('CUDA_VISIBLE_DEVICES=', os.environ.get('CUDA_VISIBLE_DEVICES')); print('torch_cuda=', torch.__version__, torch.version.cuda, 'count=', count); assert torch.cuda.is_available() and count == expected, 'required CUDA device is not visible'; x=torch.ones(1, device='cuda'); assert x.item() == 1"
 test -f ${RUN_DIR}/checkpoint-1199.pth
 python tools/evaluate_owt_common8.py \
   --dataset WORD --test-csv /gpfs/work/aac/bolinren19/2026-07/DATA/processed/OWT_Common8/WORD/csv/WORD_Test_2D_224.csv \

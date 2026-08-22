@@ -29,6 +29,8 @@ export PYTHONNOUSERSITE=1
 export PYTHONUNBUFFERED=1
 PORT_NUM=${MASTER_PORT:-$((10000 + RANDOM % 50000))}
 
+python -c "import os, torch; expected=2; count=torch.cuda.device_count(); print('CUDA_VISIBLE_DEVICES=', os.environ.get('CUDA_VISIBLE_DEVICES')); print('torch_cuda=', torch.__version__, torch.version.cuda, 'count=', count); assert torch.cuda.is_available() and count == expected, 'required CUDA devices are not visible'; x=torch.ones(1, device='cuda'); assert x.item() == 1"
+
 python -m torch.distributed.launch \
   --nproc_per_node=2 --master_port=${PORT_NUM} --use_env \
   main_pretrain_psem_triplet_loss3.py \

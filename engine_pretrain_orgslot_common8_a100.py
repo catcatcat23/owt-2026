@@ -8,6 +8,7 @@ import torch
 from engine_pretrain_orgslot import perceptual_reconstruction_loss
 from losses_orgslot import base_reconstruction_loss, base_segmentation_loss
 import util.misc as misc
+from util.orgslot_lossbalance_v3 import state_separated_mask_roi_l2
 from util.slot_tgr import build_base_reconstruction_target, sample_base_slot_keep_mask
 
 
@@ -236,6 +237,29 @@ def train_one_epoch(
                     + args.lambda_lpips * perceptual_loss
                     + args.lambda_seg * segmentation_loss
                 )
+            zero = reconstruction_loss.detach() * 0.0
+            empty = torch.zeros(len(slot_names), device=device)
+            positive = {
+                "loss": zero, "class_losses": empty, "class_counts": empty,
+                "valid_samples": zero, "mass": zero,
+            }
+            removed = {
+                "loss": zero, "class_losses": empty, "class_counts": empty,
+                "valid_samples": zero, "mass": zero,
+            }
+            if (
+                args.training_scope != "head_only"
+                and args.positive_roi_loss_weight > 0
+            ):
+                state_stats = state_separated_mask_roi_l2(
+                    output["reconstruction"], target, visible_masks,
+                    slot_names, keep, roi_class_weights,
+                )
+                positive = state_stats["positive"]
+                removed = state_stats["removed"]
+                total_loss = total_loss + (
+                    args.positive_roi_loss_weight * positive["loss"]
+                )
 
         if not torch.isfinite(total_loss):
             raise FloatingPointError(
@@ -264,10 +288,31 @@ def train_one_epoch(
             "weighted_segmentation_loss": float(
                 (args.lambda_seg * segmentation_loss).detach()
             ),
+            "positive_roi_loss": float(positive["loss"].detach()),
+            "positive_valid_samples": float(positive["valid_samples"].detach()),
+            "positive_weighted_mass": float(positive["mass"].detach()),
+            "removed_monitor_loss": float(removed["loss"].detach()),
+            "removed_valid_samples": float(removed["valid_samples"].detach()),
+            "removed_mass": float(removed["mass"].detach()),
             "retained_slots": float(keep.sum(dim=1).float().mean()),
             "roi_fraction": float(roi.float().mean()),
             "lr": optimizer.param_groups[0]["lr"],
         }
+        for slot_index, slot_name in enumerate(slot_names):
+            if float(roi_class_weights[slot_index]) <= 0:
+                continue
+            values["positive_{}_loss".format(slot_name)] = float(
+                positive["class_losses"][slot_index].detach()
+            )
+            values["positive_{}_count".format(slot_name)] = float(
+                positive["class_counts"][slot_index].detach()
+            )
+            values["removed_{}_loss".format(slot_name)] = float(
+                removed["class_losses"][slot_index].detach()
+            )
+            values["removed_{}_count".format(slot_name)] = float(
+                removed["class_counts"][slot_index].detach()
+            )
         for slot_index, slot_name in enumerate(slot_names):
             if slot_name not in per_slot_segmentation:
                 continue

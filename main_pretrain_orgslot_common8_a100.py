@@ -36,6 +36,7 @@ from util.label_visibility import (
     load_visibility_config,
 )
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
+from util.orgslot_lossbalance_v3 import build_class_frequency_weights
 
 
 def get_args_parser():
@@ -114,6 +115,11 @@ def get_args_parser():
     parser.add_argument("--lambda_lpips", default=1.0, type=float)
     parser.add_argument("--lambda_seg", default=0.0, type=float)
     parser.add_argument("--lambda_bg_seg", default=0.25, type=float)
+    parser.add_argument("--positive_roi_loss_weight", default=0.0, type=float)
+    parser.add_argument("--roi_positive_sample_counts", nargs="+", type=int)
+    parser.add_argument("--roi_frequency_dataset_size", default=None, type=int)
+    parser.add_argument("--roi_frequency_alpha", default=0.5, type=float)
+    parser.add_argument("--roi_max_weight_ratio", default=4.0, type=float)
     parser.add_argument(
         "--seg_loss_type",
         choices=("dice_bce", "focal", "small_organ"),
@@ -423,6 +429,8 @@ def main(args):
         raise ValueError("Common8 requires eight foreground slots plus background")
     if args.fusion_reference_count is None:
         args.fusion_reference_count = len(slot_specs)
+    if [int(item["raw_class_id"]) for item in slot_specs] != list(range(9)):
+        raise ValueError("Loss-v3 requires Common8 slots ordered by raw IDs 0..8")
 
     train_raw, dataset_train = _build_dataset(
         args,
@@ -443,6 +451,27 @@ def main(args):
     assert_case_splits_disjoint(
         {"train": train_raw.case_ids, "validation": val_raw.case_ids}
     )
+    if args.positive_roi_loss_weight < 0:
+        raise ValueError("positive_roi_loss_weight must be non-negative")
+    if args.training_scope == "head_only" and args.positive_roi_loss_weight > 0:
+        raise ValueError("head_only training cannot use positive ROI reconstruction loss")
+    if args.positive_roi_loss_weight > 0:
+        if args.roi_positive_sample_counts is None:
+            raise ValueError("Loss-v3 requires roi_positive_sample_counts")
+        if len(args.roi_positive_sample_counts) != len(slot_specs) - 1:
+            raise ValueError("Loss-v3 requires one count per foreground slot")
+        frequency_dataset_size = (
+            args.roi_frequency_dataset_size or len(train_raw)
+        )
+        args.roi_class_weights = build_class_frequency_weights(
+            args.roi_positive_sample_counts,
+            frequency_dataset_size,
+            alpha=args.roi_frequency_alpha,
+            max_weight_ratio=args.roi_max_weight_ratio,
+        ).tolist()
+    else:
+        args.roi_class_weights = [0.0] + [1.0] * (len(slot_specs) - 1)
+    print("Loss-v3 class weights:", args.roi_class_weights)
 
     sampler_train = torch.utils.data.DistributedSampler(
         dataset_train,

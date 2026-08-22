@@ -42,6 +42,11 @@ DISABLE_TRAIN_AUGMENTATION=${DISABLE_TRAIN_AUGMENTATION:-0}
 MAX_TRAIN_SAMPLES=${MAX_TRAIN_SAMPLES:-}
 MAX_VAL_SAMPLES=${MAX_VAL_SAMPLES:-}
 GPU_IDS=${GPU_IDS:-}
+POSITIVE_ROI_LOSS_WEIGHT=${POSITIVE_ROI_LOSS_WEIGHT:-0}
+ROI_POSITIVE_SAMPLE_COUNTS=${ROI_POSITIVE_SAMPLE_COUNTS:-}
+ROI_FREQUENCY_DATASET_SIZE=${ROI_FREQUENCY_DATASET_SIZE:-}
+ROI_FREQUENCY_ALPHA=${ROI_FREQUENCY_ALPHA:-0.5}
+ROI_MAX_WEIGHT_RATIO=${ROI_MAX_WEIGHT_RATIO:-4.0}
 N_GPU=${N_GPU:-2}
 MASTER_PORT=${MASTER_PORT:-25741}
 MICRO_BATCH=${MICRO_BATCH:-8}
@@ -137,6 +142,9 @@ COMMAND=(
   --hard_negative_ratio "${HARD_NEGATIVE_RATIO}"
   --negative_slice_weight "${NEGATIVE_SLICE_WEIGHT}"
   --tgr_mode "${TGR_MODE}"
+  --positive_roi_loss_weight "${POSITIVE_ROI_LOSS_WEIGHT}"
+  --roi_frequency_alpha "${ROI_FREQUENCY_ALPHA}"
+  --roi_max_weight_ratio "${ROI_MAX_WEIGHT_RATIO}"
   --data_path "${TRAIN_CSV}"
   --val_data_path "${VAL_CSV}"
   --preprocess_summary "${PREPROCESS_SUMMARY}"
@@ -148,6 +156,17 @@ COMMAND=(
   --print_freq 20
   --seed 0
 )
+if [[ "${POSITIVE_ROI_LOSS_WEIGHT}" != "0" && "${POSITIVE_ROI_LOSS_WEIGHT}" != "0.0" ]]; then
+  if [[ -z "${ROI_POSITIVE_SAMPLE_COUNTS}" || -z "${ROI_FREQUENCY_DATASET_SIZE}" ]]; then
+    echo "Loss-v3 requires ROI_POSITIVE_SAMPLE_COUNTS and ROI_FREQUENCY_DATASET_SIZE" >&2
+    exit 2
+  fi
+  read -r -a ROI_COUNTS_ARRAY <<< "${ROI_POSITIVE_SAMPLE_COUNTS}"
+  COMMAND+=(
+    --roi_positive_sample_counts "${ROI_COUNTS_ARRAY[@]}"
+    --roi_frequency_dataset_size "${ROI_FREQUENCY_DATASET_SIZE}"
+  )
+fi
 if [[ "${ARM}" == "roi20" ]]; then
   COMMAND+=(
     --organ_roi_aug
@@ -185,6 +204,7 @@ fi
   echo "tversky_alpha_fp=${TVERSKY_ALPHA_FP} tversky_beta_fn=${TVERSKY_BETA_FN} tversky_eps=${TVERSKY_EPS}"
   echo "balanced_focal_weight=${BALANCED_FOCAL_WEIGHT} hard_negative_ratio=${HARD_NEGATIVE_RATIO} negative_slice_weight=${NEGATIVE_SLICE_WEIGHT}"
   echo "slot_head_type=${SLOT_HEAD_TYPE} slot_head_channels=${SLOT_HEAD_CHANNELS}"
+  echo "positive_roi_loss_weight=${POSITIVE_ROI_LOSS_WEIGHT} frequency_alpha=${ROI_FREQUENCY_ALPHA} max_weight_ratio=${ROI_MAX_WEIGHT_RATIO}"
   echo "micro_batch=${MICRO_BATCH} accum_iter=${ACCUM_ITER} effective_batch=${EFFECTIVE_BATCH}"
   echo "base_lr=${BASE_LR} weight_decay=${WEIGHT_DECAY}"
   echo "max_updates=${MAX_UPDATES} warmup_updates=${WARMUP_UPDATES}"

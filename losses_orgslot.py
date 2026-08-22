@@ -239,6 +239,15 @@ def base_segmentation_loss(
             "hard_negative_focal_loss": [],
         }
         empty_negative_losses = []
+        if loss_type == "small_organ" and diagnostics is not None:
+            diagnostics[name] = {
+                "positive_samples": zero,
+                "negative_samples": zero,
+                "tversky_loss": zero,
+                "positive_focal_loss": zero,
+                "hard_negative_focal_loss": zero,
+                "empty_negative_loss": zero,
+            }
         for sample_index in range(batch_size):
             if not bool(slot_keep_mask[sample_index, slot_index]):
                 continue

@@ -167,6 +167,7 @@ def train_one_epoch(
         head_compute_mask = _head_compute_mask(
             slot_names, segmentation_keep, args.lambda_bg_seg
         )
+        segmentation_diagnostics = {}
 
         with torch.cuda.amp.autocast():
             if args.training_scope == "head_only":
@@ -186,6 +187,13 @@ def train_one_epoch(
                     loss_type=args.seg_loss_type,
                     focal_alpha=args.focal_alpha,
                     focal_gamma=args.focal_gamma,
+                    tversky_alpha_fp=args.tversky_alpha_fp,
+                    tversky_beta_fn=args.tversky_beta_fn,
+                    tversky_eps=args.tversky_eps,
+                    balanced_focal_weight=args.balanced_focal_weight,
+                    hard_negative_ratio=args.hard_negative_ratio,
+                    negative_slice_weight=args.negative_slice_weight,
+                    diagnostics=segmentation_diagnostics,
                 )
                 reconstruction_loss = segmentation_loss.detach() * 0.0
                 perceptual_loss = segmentation_loss.detach() * 0.0
@@ -215,6 +223,13 @@ def train_one_epoch(
                         loss_type=args.seg_loss_type,
                         focal_alpha=args.focal_alpha,
                         focal_gamma=args.focal_gamma,
+                        tversky_alpha_fp=args.tversky_alpha_fp,
+                        tversky_beta_fn=args.tversky_beta_fn,
+                        tversky_eps=args.tversky_eps,
+                        balanced_focal_weight=args.balanced_focal_weight,
+                        hard_negative_ratio=args.hard_negative_ratio,
+                        negative_slice_weight=args.negative_slice_weight,
+                        diagnostics=segmentation_diagnostics,
                     )
                 total_loss = (
                     reconstruction_loss
@@ -259,26 +274,60 @@ def train_one_epoch(
             values["seg_{}_loss".format(slot_name)] = float(
                 per_slot_segmentation[slot_name].detach()
             )
+            supervised_rows = segmentation_keep[:, slot_index]
             values["seg_{}_supervised_samples".format(slot_name)] = float(
-                segmentation_keep[:, slot_index].sum()
+                supervised_rows.sum()
             )
             probabilities = torch.sigmoid(
                 output["calibrated_logits"][slot_name].detach().float()
             )
             target_mask = visible_masks[slot_name].bool()
+            supervised_probabilities = probabilities[supervised_rows]
+            supervised_targets = target_mask[supervised_rows]
             values["seg_{}_predicted_fraction".format(slot_name)] = float(
-                probabilities.ge(0.5).float().mean()
+                supervised_probabilities.ge(0.5).float().mean()
             )
             values["seg_{}_target_fraction".format(slot_name)] = float(
-                target_mask.float().mean()
+                supervised_targets.float().mean()
             )
-            if torch.any(target_mask):
-                positive_probability = probabilities[target_mask].mean()
+            if torch.any(supervised_targets):
+                positive_probability = supervised_probabilities[
+                    supervised_targets
+                ].mean()
             else:
                 positive_probability = probabilities.sum() * 0.0
             values["seg_{}_positive_probability".format(slot_name)] = float(
                 positive_probability
             )
+            positive_rows = (
+                target_mask.flatten(1).any(dim=1) & supervised_rows
+            )
+            empty_rows = ~target_mask.flatten(1).any(dim=1) & supervised_rows
+            if torch.any(positive_rows):
+                positive_predicted_fraction = probabilities[
+                    positive_rows
+                ].ge(0.5).float().mean()
+            else:
+                positive_predicted_fraction = probabilities.sum() * 0.0
+            if torch.any(empty_rows):
+                empty_predicted_fraction = probabilities[
+                    empty_rows
+                ].ge(0.5).float().mean()
+            else:
+                empty_predicted_fraction = probabilities.sum() * 0.0
+            values[
+                "seg_{}_positive_slice_predicted_fraction".format(slot_name)
+            ] = float(positive_predicted_fraction)
+            values[
+                "seg_{}_empty_slice_predicted_fraction".format(slot_name)
+            ] = float(empty_predicted_fraction)
+            if slot_name in segmentation_diagnostics:
+                for metric_name, metric_value in segmentation_diagnostics[
+                    slot_name
+                ].items():
+                    values["seg_{}_{}".format(slot_name, metric_name)] = float(
+                        metric_value.detach()
+                    )
         if "focus_class_id" in batch:
             focus = batch["focus_class_id"].to(device=device, dtype=torch.long)
             for class_id in focus_class_ids:

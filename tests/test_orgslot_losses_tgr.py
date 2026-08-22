@@ -14,6 +14,8 @@ from losses_orgslot import (
     base_segmentation_loss,
     new_region_reconstruction_loss,
     sigmoid_focal_loss,
+    small_organ_segmentation_loss,
+    tversky_loss,
     old_confidence_suppression_loss,
 )
 from util.slot_tgr import (
@@ -118,6 +120,88 @@ class LossAndTGRTests(unittest.TestCase):
         self.assertGreater(retained.grad.abs().sum(), 0)
         self.assertGreater(dropped.grad.abs().sum(), 0)
 
+    def test_small_organ_empty_slice_uses_topk_bce_and_weight(self):
+        logits = torch.tensor([[[[4.0, 0.0], [0.0, 0.0]]]], requires_grad=True)
+        target = torch.zeros_like(logits)
+        loss, details = small_organ_segmentation_loss(
+            logits,
+            target,
+            hard_negative_ratio=0.25,
+            negative_slice_weight=0.1,
+        )
+        expected = 0.1 * torch.nn.functional.softplus(torch.tensor(4.0))
+        self.assertTrue(torch.allclose(loss.detach(), expected, atol=1e-6))
+        self.assertFalse(details["is_positive"])
+        loss.backward()
+        self.assertGreater(float(logits.grad[0, 0, 0, 0]), 0.0)
+        self.assertEqual(int(torch.count_nonzero(logits.grad)), 1)
+
+    def test_small_organ_positive_slice_has_finite_foreground_gradient(self):
+        logits = torch.zeros(1, 1, 4, 4, requires_grad=True)
+        target = torch.zeros_like(logits)
+        target[:, :, 1, 1] = 1
+        loss, details = small_organ_segmentation_loss(logits, target)
+        self.assertTrue(details["is_positive"])
+        self.assertTrue(torch.isfinite(loss))
+        self.assertGreater(float(details["tversky_loss"]), 0.0)
+        loss.backward()
+        self.assertTrue(torch.all(torch.isfinite(logits.grad)))
+        self.assertLess(float(logits.grad[0, 0, 1, 1]), 0.0)
+        self.assertGreater(float(logits.grad.abs().sum()), 0.0)
+
+    def test_small_organ_separately_averages_positive_and_empty_slices(self):
+        positive_target = torch.zeros(1, 1, 4, 4)
+        positive_target[:, :, 1, 1] = 1
+        empty_target = torch.zeros_like(positive_target)
+
+        logits_two = {"organ": torch.zeros(2, 1, 4, 4)}
+        targets_two = {
+            "organ": torch.cat([positive_target, empty_target], dim=0)
+        }
+        diagnostics_two = {}
+        loss_two, _ = base_segmentation_loss(
+            logits_two,
+            targets_two,
+            ["organ"],
+            torch.ones(2, 1, dtype=torch.bool),
+            loss_type="small_organ",
+            diagnostics=diagnostics_two,
+        )
+
+        logits_four = {"organ": torch.zeros(4, 1, 4, 4)}
+        targets_four = {
+            "organ": torch.cat(
+                [positive_target, empty_target, empty_target, empty_target],
+                dim=0,
+            )
+        }
+        diagnostics_four = {}
+        loss_four, _ = base_segmentation_loss(
+            logits_four,
+            targets_four,
+            ["organ"],
+            torch.ones(4, 1, dtype=torch.bool),
+            loss_type="small_organ",
+            diagnostics=diagnostics_four,
+        )
+
+        self.assertTrue(torch.allclose(loss_two, loss_four, atol=1e-6))
+        self.assertEqual(
+            float(diagnostics_two["organ"]["positive_samples"]), 1.0
+        )
+        self.assertEqual(
+            float(diagnostics_four["organ"]["negative_samples"]), 3.0
+        )
+
+    def test_tversky_prefers_correct_mask(self):
+        target = torch.tensor([[[[1.0, 0.0]]]])
+        correct = torch.tensor([[[[8.0, -8.0]]]])
+        incorrect = -correct
+        self.assertLess(
+            float(tversky_loss(correct, target)),
+            float(tversky_loss(incorrect, target)),
+
+        )
     def test_focal_parameters_are_validated(self):
         logits = torch.zeros(1, 1, 2, 2)
         target = torch.zeros_like(logits)

@@ -20,6 +20,15 @@ def main():
     parser.add_argument("--expected-lambda-seg", default=0.01, type=float)
     parser.add_argument("--expected-focal-alpha", default=0.75, type=float)
     parser.add_argument("--expected-focal-gamma", default=2.0, type=float)
+    parser.add_argument(
+        "--expected-spacing", nargs=3, default=(1.0, 1.0, 2.0), type=float
+    )
+    parser.add_argument("--expected-tversky-alpha-fp", default=0.3, type=float)
+    parser.add_argument("--expected-tversky-beta-fn", default=0.7, type=float)
+    parser.add_argument("--expected-tversky-eps", default=1e-6, type=float)
+    parser.add_argument("--expected-balanced-focal-weight", default=0.5, type=float)
+    parser.add_argument("--expected-hard-negative-ratio", default=0.02, type=float)
+    parser.add_argument("--expected-negative-slice-weight", default=0.1, type=float)
     args = parser.parse_args()
     run_dir = Path(args.run_dir)
     config = json.loads((run_dir / "resolved_config.json").read_text())
@@ -35,7 +44,21 @@ def main():
         raise RuntimeError("unexpected segmentation loss type")
     if float(config.get("lambda_seg")) != args.expected_lambda_seg:
         raise RuntimeError("unexpected lambda_seg")
-    if args.expected_seg_loss == "focal":
+    if list(config.get("expected_spacing", ())) != list(args.expected_spacing):
+        raise RuntimeError("unexpected preprocessing spacing")
+    if args.expected_seg_loss == "small_organ":
+        expected_values = {
+            "tversky_alpha_fp": args.expected_tversky_alpha_fp,
+            "tversky_beta_fn": args.expected_tversky_beta_fn,
+            "tversky_eps": args.expected_tversky_eps,
+            "balanced_focal_weight": args.expected_balanced_focal_weight,
+            "hard_negative_ratio": args.expected_hard_negative_ratio,
+            "negative_slice_weight": args.expected_negative_slice_weight,
+        }
+        for name, expected in expected_values.items():
+            if float(config.get(name)) != expected:
+                raise RuntimeError("unexpected {}".format(name))
+    if args.expected_seg_loss in ("focal", "small_organ"):
         if float(config.get("focal_alpha")) != args.expected_focal_alpha:
             raise RuntimeError("unexpected focal_alpha")
         if float(config.get("focal_gamma")) != args.expected_focal_gamma:
@@ -67,6 +90,7 @@ def main():
     if any("positive_roi_loss" in name for name in latest):
         raise RuntimeError("legacy fused Loss3 metrics unexpectedly exist")
     observed_slots = []
+    positive_small_organ_slots = []
     for slot in (
         "background", "spleen", "right_kidney", "left_kidney",
         "gallbladder", "esophagus", "pancreas", "liver", "stomach",
@@ -90,8 +114,26 @@ def main():
                 raise RuntimeError(
                     "missing or non-finite {}".format(metric)
                 )
+        if args.expected_seg_loss == "small_organ":
+            for suffix in (
+                "positive_samples",
+                "negative_samples",
+                "tversky_loss",
+                "positive_focal_loss",
+                "hard_negative_focal_loss",
+                "empty_negative_loss",
+                "positive_slice_predicted_fraction",
+                "empty_slice_predicted_fraction",
+            ):
+                metric = "train_seg_{}_{}".format(slot, suffix)
+                if metric not in latest or not math.isfinite(float(latest[metric])):
+                    raise RuntimeError("missing or non-finite {}".format(metric))
+            if float(latest["train_seg_{}_positive_samples".format(slot)]) > 0:
+                positive_small_organ_slots.append(slot)
     if not set(("gallbladder", "esophagus", "pancreas")) & set(observed_slots):
         raise RuntimeError("smoke did not supervise a small-organ focus slot")
+    if args.expected_seg_loss == "small_organ" and not positive_small_organ_slots:
+        raise RuntimeError("smoke did not exercise a positive organ slice")
     checkpoints = glob.glob(str(run_dir / "checkpoint-*.pth"))
     if not checkpoints:
         raise RuntimeError("smoke produced no checkpoint")

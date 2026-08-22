@@ -40,7 +40,7 @@ from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
 def get_args_parser():
     parser = argparse.ArgumentParser(
-        "OrganSlotBank Common8 1x1x2/448 pre-training", add_help=False
+        "OrganSlotBank Common8 configurable-spacing pre-training", add_help=False
     )
     parser.add_argument("--batch_size", default=8, type=int)
     parser.add_argument("--epochs", default=798, type=int)
@@ -73,6 +73,14 @@ def get_args_parser():
     parser.add_argument("--min_lr", default=0.0, type=float)
     parser.add_argument("--warmup_epochs", default=40, type=int)
     parser.add_argument("--max_optimizer_updates", default=118800, type=int)
+    parser.add_argument(
+        "--expected_spacing",
+        nargs=3,
+        type=float,
+        default=(1.0, 1.0, 2.0),
+        metavar=("SX", "SY", "SZ"),
+        help="Required preprocessing spacing recorded in the summary.",
+    )
     parser.add_argument("--warmup_updates", default=5940, type=int)
 
     parser.add_argument("--data_path", required=True)
@@ -108,7 +116,7 @@ def get_args_parser():
     parser.add_argument("--lambda_bg_seg", default=0.25, type=float)
     parser.add_argument(
         "--seg_loss_type",
-        choices=("dice_bce", "focal"),
+        choices=("dice_bce", "focal", "small_organ"),
         default="dice_bce",
         help="independent binary loss used by every supervised slot head",
     )
@@ -120,6 +128,12 @@ def get_args_parser():
         "--focal_gamma", default=2.0, type=float,
         help="hard-example exponent for binary focal loss",
     )
+    parser.add_argument("--tversky_alpha_fp", default=0.3, type=float)
+    parser.add_argument("--tversky_beta_fn", default=0.7, type=float)
+    parser.add_argument("--tversky_eps", default=1e-6, type=float)
+    parser.add_argument("--balanced_focal_weight", default=0.5, type=float)
+    parser.add_argument("--hard_negative_ratio", default=0.02, type=float)
+    parser.add_argument("--negative_slice_weight", default=0.1, type=float)
 
     parser.add_argument(
         "--seg_supervision",
@@ -328,8 +342,24 @@ def main(args):
         raise ValueError("focal_alpha must be in [0, 1]")
     if args.focal_gamma < 0.0:
         raise ValueError("focal_gamma must be non-negative")
-    if args.seg_loss_type == "focal" and args.lambda_seg == 0:
-        raise ValueError("focal segmentation requires --lambda_seg > 0")
+    if args.tversky_alpha_fp < 0 or args.tversky_beta_fn < 0:
+        raise ValueError("Tversky FP/FN coefficients must be non-negative")
+    if args.tversky_alpha_fp + args.tversky_beta_fn == 0:
+        raise ValueError("at least one Tversky coefficient must be positive")
+    if args.tversky_eps <= 0:
+        raise ValueError("tversky_eps must be positive")
+    if args.balanced_focal_weight < 0:
+        raise ValueError("balanced_focal_weight must be non-negative")
+    if not 0.0 < args.hard_negative_ratio <= 1.0:
+        raise ValueError("hard_negative_ratio must be in (0, 1]")
+    if args.negative_slice_weight < 0:
+        raise ValueError("negative_slice_weight must be non-negative")
+    if args.seg_loss_type in ("focal", "small_organ") and args.lambda_seg == 0:
+        raise ValueError(
+            "{} segmentation requires --lambda_seg > 0".format(
+                args.seg_loss_type
+            )
+        )
     if args.training_scope == "head_only":
         if not args.init_checkpoint:
             raise ValueError("head_only requires --init_checkpoint")
@@ -358,8 +388,15 @@ def main(args):
     with open(args.preprocess_summary, "r", encoding="utf-8") as handle:
         preprocess = json.load(handle)
     expected_preprocess = preprocess.get("config", {})
-    if expected_preprocess.get("spacing_mm") != [1.0, 1.0, 2.0]:
-        raise ValueError("preprocessing spacing must be exactly 1x1x2 mm")
+    recorded_spacing = expected_preprocess.get("spacing_mm")
+    if recorded_spacing is None or not np.allclose(
+        recorded_spacing, args.expected_spacing, rtol=0.0, atol=1e-6
+    ):
+        raise ValueError(
+            "preprocessing spacing {} != expected {}".format(
+                recorded_spacing, list(args.expected_spacing)
+            )
+        )
     if expected_preprocess.get("offline_spatial_matrix") != "native_after_resampling":
         raise ValueError("preprocessing must retain the native resampled matrix")
     if args.input_size != 448 or args.global_crop_size != 448:
@@ -506,6 +543,19 @@ def main(args):
             args.seg_loss_type, args.focal_alpha, args.focal_gamma
         )
     )
+    if args.seg_loss_type == "small_organ":
+        print(
+            "small-organ loss: Tversky(fp={}, fn={}, eps={}), "
+            "balanced_focal_weight={}, hard_negative_ratio={}, "
+            "negative_slice_weight={}".format(
+                args.tversky_alpha_fp,
+                args.tversky_beta_fn,
+                args.tversky_eps,
+                args.balanced_focal_weight,
+                args.hard_negative_ratio,
+                args.negative_slice_weight,
+            )
+        )
     print("organ ROI augmentation: {}".format(args.organ_roi_aug))
 
     if args.distributed:

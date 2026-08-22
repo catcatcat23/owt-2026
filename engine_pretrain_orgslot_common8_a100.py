@@ -284,11 +284,18 @@ def train_one_epoch(
             target_mask = visible_masks[slot_name].bool()
             supervised_probabilities = probabilities[supervised_rows]
             supervised_targets = target_mask[supervised_rows]
+            if torch.any(supervised_rows):
+                predicted_fraction = supervised_probabilities.ge(0.5).float().mean()
+                target_fraction = supervised_targets.float().mean()
+            else:
+                zero_metric = probabilities.sum() * 0.0
+                predicted_fraction = zero_metric
+                target_fraction = zero_metric
             values["seg_{}_predicted_fraction".format(slot_name)] = float(
-                supervised_probabilities.ge(0.5).float().mean()
+                predicted_fraction
             )
             values["seg_{}_target_fraction".format(slot_name)] = float(
-                supervised_targets.float().mean()
+                target_fraction
             )
             if torch.any(supervised_targets):
                 positive_probability = supervised_probabilities[

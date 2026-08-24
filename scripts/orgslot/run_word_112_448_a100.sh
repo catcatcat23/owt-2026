@@ -60,6 +60,7 @@ WORKERS=${WORKERS:-10}
 SAVE_FREQ=${SAVE_FREQ:-100}
 MAX_STEPS_PER_EPOCH=${MAX_STEPS_PER_EPOCH:-}
 NO_SAVE=${NO_SAVE:-0}
+RESUME_CHECKPOINT=${RESUME_CHECKPOINT:-}
 
 if [[ -n "${SLURM_JOB_ID:-}" ]]; then
   if [[ -z "${CUDA_VISIBLE_DEVICES:-}" ]]; then
@@ -85,6 +86,10 @@ for required in "${PYTHON}" "${TRAIN_CSV}" "${VAL_CSV}" "${PREPROCESS_SUMMARY}" 
     exit 2
   fi
 done
+if [[ -n "${RESUME_CHECKPOINT}" && ! -f "${RESUME_CHECKPOINT}" ]]; then
+  echo "Missing resume checkpoint: ${RESUME_CHECKPOINT}" >&2
+  exit 2
+fi
 read -r -a SPACING_ARRAY <<< "${EXPECTED_SPACING}"
 if [[ "${#SPACING_ARRAY[@]}" -ne 3 ]]; then
   echo "EXPECTED_SPACING must contain exactly three values" >&2
@@ -189,6 +194,9 @@ fi
 if [[ "${NO_SAVE}" == "1" ]]; then
   COMMAND+=(--no_save)
 fi
+if [[ -n "${RESUME_CHECKPOINT}" ]]; then
+  COMMAND+=(--resume "${RESUME_CHECKPOINT}")
+fi
 
 {
   echo "arm=${ARM}"
@@ -208,6 +216,7 @@ fi
   echo "micro_batch=${MICRO_BATCH} accum_iter=${ACCUM_ITER} effective_batch=${EFFECTIVE_BATCH}"
   echo "base_lr=${BASE_LR} weight_decay=${WEIGHT_DECAY}"
   echo "max_updates=${MAX_UPDATES} warmup_updates=${WARMUP_UPDATES}"
+  echo "resume_checkpoint=${RESUME_CHECKPOINT:-<none>}"
   printf 'command='
   printf '%q ' "${COMMAND[@]}"
   printf '\n'

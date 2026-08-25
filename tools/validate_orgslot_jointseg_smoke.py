@@ -87,8 +87,10 @@ def main():
         raise RuntimeError("weighted segmentation loss is inconsistent")
     if float(latest["train_roi_fraction"]) <= 0:
         raise RuntimeError("ROI path was not exercised")
-    if any("positive_roi_loss" in name for name in latest):
-        raise RuntimeError("legacy fused Loss3 metrics unexpectedly exist")
+    if float(config.get("positive_roi_loss_weight", 0.0)) != 0.0:
+        raise RuntimeError("legacy fused Loss3 loss is enabled")
+    if abs(float(latest.get("train_positive_roi_loss", 0.0))) > 1e-12:
+        raise RuntimeError("disabled legacy fused Loss3 loss is non-zero")
     observed_slots = []
     positive_small_organ_slots = []
     for slot in (

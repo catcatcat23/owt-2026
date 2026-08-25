@@ -51,7 +51,7 @@ def get_args_parser():
     parser.add_argument("--slot_tg_depth", default=1, type=int)
     parser.add_argument(
         "--slot_head_type",
-        choices=("linear", "multiscale_conv"),
+        choices=("linear", "multiscale_conv", "query_dot"),
         default="linear",
     )
     parser.add_argument("--slot_head_channels", default=128, type=int)
@@ -529,6 +529,7 @@ def main(args):
             for name, parameter in model.named_parameters()
             if parameter.requires_grad
             and ".head." not in name
+            and not name.startswith("pixel_query_decoder.")
             and not name.endswith("calibration_scale")
             and not name.endswith("calibration_bias")
         ]
@@ -541,6 +542,9 @@ def main(args):
                 parameter.requires_grad = False
             slot.calibration_scale.requires_grad = False
             slot.calibration_bias.requires_grad = False
+        if model.pixel_query_decoder is not None:
+            for parameter in model.pixel_query_decoder.parameters():
+                parameter.requires_grad = False
 
     device = torch.device(args.device)
     model.to(device)

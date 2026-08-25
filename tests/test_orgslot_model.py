@@ -153,6 +153,45 @@ class OrganSlotModelTests(unittest.TestCase):
             model.slot_bank.get_slot("kidney").head.proj.weight.grad
         )
 
+    def test_query_dot_uses_shared_pixels_and_slot_queries(self):
+        torch.manual_seed(5)
+        model = tiny_model(slot_head_type="query_dot", slot_head_channels=16)
+        images = torch.rand(2, 3, 32, 32)
+        keep = torch.tensor([[1, 0, 1], [0, 1, 1]], dtype=torch.bool)
+        output = model(
+            images,
+            slot_keep_mask=keep,
+            head_compute_mask=keep,
+            decode_reconstruction=False,
+        )
+        for index, name in enumerate(model.slot_names):
+            logits = output["calibrated_logits"][name]
+            self.assertEqual(logits.shape, (2, 1, 32, 32))
+            dropped_rows = ~keep[:, index]
+            self.assertTrue(torch.equal(
+                logits[dropped_rows], torch.zeros_like(logits[dropped_rows])
+            ))
+
+        loss = sum(
+            logits.square().mean()
+            for logits in output["calibrated_logits"].values()
+        )
+        loss.backward()
+        self.assertTrue(torch.isfinite(loss))
+        self.assertGreater(
+            model.pixel_query_decoder.pixel_proj.weight.grad.abs().sum(), 0
+        )
+        self.assertGreater(model.patch_embed.proj.weight.grad.abs().sum(), 0)
+        for index, name in enumerate(model.slot_names):
+            slot = model.slot_bank.get_slot(name)
+            if keep[:, index].any():
+                self.assertGreater(slot.head.embedding.grad.abs().sum(), 0)
+            self.assertTrue(all(
+                parameter.grad is None for parameter in slot.aher.parameters()
+            ))
+        self.assertIsNone(model.decoder_pred.weight.grad)
+
+
     def test_decode_heads_false_skips_every_head(self):
         model = tiny_model(slot_head_type="multiscale_conv")
         output = model(

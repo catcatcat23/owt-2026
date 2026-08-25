@@ -1,6 +1,7 @@
 """Explicit organ-wise slot modules for E-OWT-Seg."""
 
 import copy
+import math
 import re
 
 import torch
@@ -109,6 +110,81 @@ class MultiScaleBinaryHead2D(nn.Module):
         return logits
 
 
+class SlotQueryEmbedding(nn.Module):
+    """Per-slot identity used by the shared query-mask decoder."""
+
+    def __init__(self, dim):
+        super().__init__()
+        self.embedding = nn.Parameter(torch.empty(int(dim)))
+        nn.init.normal_(self.embedding, std=0.02)
+
+
+class SharedPixelQueryDecoder2D(nn.Module):
+    """Shared spatial decoder and token-to-mask query projection."""
+
+    def __init__(self, embed_dim, grid_size, channels=128, upsample_stages=2):
+        super().__init__()
+        self.grid_size = tuple(int(value) for value in grid_size)
+        if len(self.grid_size) != 2:
+            raise ValueError("SharedPixelQueryDecoder2D requires a 2D grid")
+        self.channels = int(channels)
+        if self.channels <= 0:
+            raise ValueError("query-mask channels must be positive")
+        self.upsample_stages = int(upsample_stages)
+        if self.upsample_stages < 1:
+            raise ValueError("upsample_stages must be positive")
+
+        self.pixel_norm = nn.LayerNorm(embed_dim)
+        self.pixel_proj = nn.Linear(embed_dim, self.channels)
+        self.query_norm = nn.LayerNorm(embed_dim)
+        self.query_proj = nn.Linear(embed_dim, self.channels)
+        self.blocks = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(
+                    self.channels,
+                    self.channels,
+                    kernel_size=3,
+                    padding=1,
+                    groups=self.channels,
+                    bias=False,
+                ),
+                nn.Conv2d(self.channels, self.channels, kernel_size=1, bias=False),
+                nn.GroupNorm(_group_count(self.channels), self.channels),
+                nn.GELU(),
+            )
+            for _ in range(self.upsample_stages)
+        ])
+
+    def forward_pixels(self, z):
+        batch_size, patch_count, _ = z.shape
+        if patch_count != int(torch.tensor(self.grid_size).prod().item()):
+            raise ValueError("encoder patch count does not match pixel grid")
+        features = self.pixel_proj(self.pixel_norm(z))
+        features = features.transpose(1, 2).reshape(
+            batch_size, self.channels, *self.grid_size
+        )
+        for block in self.blocks:
+            features = F.interpolate(
+                features, scale_factor=2.0, mode="bilinear", align_corners=False
+            )
+            features = block(features)
+        return features
+
+    def forward_mask(self, pixel_features, tokens, slot_identity, output_size):
+        if pixel_features.shape[0] != tokens.shape[0]:
+            raise ValueError("pixel features and tokens must share a batch size")
+        pooled_tokens = self.query_norm(tokens).mean(dim=1)
+        query = self.query_proj(pooled_tokens) + slot_identity.unsqueeze(0)
+        pixel_features = F.normalize(pixel_features, dim=1)
+        query = F.normalize(query, dim=-1)
+        logits = torch.einsum("bdhw,bd->bhw", pixel_features, query)
+        logits = logits.mul(math.sqrt(self.channels)).unsqueeze(1)
+        output_size = tuple(int(value) for value in output_size)
+        return F.interpolate(
+            logits, size=output_size, mode="bilinear", align_corners=False
+        )
+
+
 class OrganSlot(nn.Module):
     """One collector, local TGEnc, AHER, head, and calibration pair."""
 
@@ -183,6 +259,10 @@ class OrganSlot(nn.Module):
             self.head = MultiScaleBinaryHead2D(
                 decoder_dim, grid_size, channels=head_channels
             )
+        elif self.head_type == "query_dot":
+            if dataset_type != "2D":
+                raise ValueError("query_dot head currently supports 2D only")
+            self.head = SlotQueryEmbedding(head_channels)
         else:
             raise ValueError("unsupported slot head type: {}".format(head_type))
         self.calibration_scale = nn.Parameter(torch.ones(()))
@@ -203,7 +283,23 @@ class OrganSlot(nn.Module):
         return canvas, tokens, collector_attention, aher_attention
 
     def forward_head(self, canvas, output_size):
+        if self.head_type == "query_dot":
+            raise RuntimeError("query_dot requires tokens and shared pixel features")
         raw_logits = self.head(canvas, output_size)
+        calibrated_logits = (
+            self.calibration_scale * raw_logits + self.calibration_bias
+        )
+        return raw_logits, calibrated_logits
+
+    def forward_query_head(self, tokens, pixel_features, decoder, output_size):
+        if self.head_type != "query_dot":
+            raise RuntimeError("forward_query_head requires a query_dot slot")
+        raw_logits = decoder.forward_mask(
+            pixel_features,
+            tokens,
+            self.head.embedding,
+            output_size,
+        )
         calibrated_logits = (
             self.calibration_scale * raw_logits + self.calibration_bias
         )

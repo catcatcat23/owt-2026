@@ -27,7 +27,7 @@ export DATA_ROOT=${ROOT}/2026-07/DATA
 export PROCESSED_ROOT=${DATA_ROOT}/processed/OWT_Common8_112_NATIVE/WORD
 export MANIFEST_TAG=native112
 export EXPECTED_SPACING="1 1 2"
-export ROI_INDEX=${PROCESSED_ROOT}/metadata/small_organ_roi_index.json
+export ROI_INDEX=${PROCESSED_ROOT}/metadata/small_organ_roi_index_verified.json
 export LPIPS_STATE=${ROOT}/OD_OWT_orgslot/Results/OrganSlotBank/_assets/owt_lpips_vgg16.pth
 export FUSION_MODE=linear_sqrt FUSION_REFERENCE_COUNT=9
 export LAMBDA_SEG=0.1 LAMBDA_BG_SEG=0 SEG_SUPERVISION=retained

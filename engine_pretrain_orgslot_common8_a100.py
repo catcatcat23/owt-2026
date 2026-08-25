@@ -108,6 +108,13 @@ def train_one_epoch(
     model.train(True)
     model_without_ddp = _unwrap_model(model)
     slot_names = model_without_ddp.slot_names
+    roi_class_weights = torch.as_tensor(
+        args.roi_class_weights, device=device, dtype=torch.float32
+    )
+    if roi_class_weights.shape != (len(slot_names),):
+        raise ValueError("roi_class_weights must align with slot_names")
+    if torch.any(roi_class_weights < 0):
+        raise ValueError("roi_class_weights must be non-negative")
     focus_class_ids = tuple(
         int(value) for value in args.focus_class_ids.split(",") if value
     )

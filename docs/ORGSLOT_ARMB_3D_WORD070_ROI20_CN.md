@@ -17,6 +17,7 @@
 | head | multiscale Conv2d | multiscale Conv3d |
 | loss | small-organ，lambda_seg=0.01 | 相同，按 3D slab 计算 |
 | batch | 192 slices/update | 48 slabs/update，约 192 slices/update |
+| actual LR | 7.5e-5 | 7.5e-5（显式固定） |
 | optimizer updates | 118800 | 118800 |
 
 ## 3D ROI20
@@ -43,6 +44,7 @@ short-slab volumetric 3D 实验。
 - negative slab weight = 0.1
 - `lambda_seg=0.01`
 - 4 x A800，micro batch 2/GPU，accumulation 6
+- actual LR = 7.5e-5，与 2D Arm B 一致
 
 ## 正式评估
 

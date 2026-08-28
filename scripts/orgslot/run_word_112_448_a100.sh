@@ -58,6 +58,7 @@ TARGET_EFFECTIVE_BATCH=${TARGET_EFFECTIVE_BATCH:-192}
 MAX_UPDATES=${MAX_UPDATES:-118800}
 WARMUP_UPDATES=${WARMUP_UPDATES:-5940}
 BASE_LR=${BASE_LR:-1e-4}
+ACTUAL_LR=${ACTUAL_LR:-}
 WEIGHT_DECAY=${WEIGHT_DECAY:-0.05}
 WORKERS=${WORKERS:-10}
 SAVE_FREQ=${SAVE_FREQ:-100}
@@ -207,6 +208,9 @@ fi
 if [[ -n "${RESUME_CHECKPOINT}" ]]; then
   COMMAND+=(--resume "${RESUME_CHECKPOINT}")
 fi
+if [[ -n "${ACTUAL_LR}" ]]; then
+  COMMAND+=(--lr "${ACTUAL_LR}")
+fi
 
 {
   echo "arm=${ARM}"
@@ -226,6 +230,7 @@ fi
   echo "positive_roi_loss_weight=${POSITIVE_ROI_LOSS_WEIGHT} frequency_alpha=${ROI_FREQUENCY_ALPHA} max_weight_ratio=${ROI_MAX_WEIGHT_RATIO}"
   echo "micro_batch=${MICRO_BATCH} accum_iter=${ACCUM_ITER} effective_batch=${EFFECTIVE_BATCH}"
   echo "base_lr=${BASE_LR} weight_decay=${WEIGHT_DECAY}"
+  echo "actual_lr_override=${ACTUAL_LR:-<auto>}"
   echo "max_updates=${MAX_UPDATES} warmup_updates=${WARMUP_UPDATES}"
   echo "resume_checkpoint=${RESUME_CHECKPOINT:-<none>}"
   printf 'command='

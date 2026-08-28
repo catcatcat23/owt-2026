@@ -42,6 +42,7 @@ export RUN_NAME OUTPUT_DIR
 # approximately 192 slices, matching Arm B's 2D slice-equivalent batch.
 export N_GPU=4 MICRO_BATCH=2 ACCUM_ITER=6 TARGET_EFFECTIVE_BATCH=48
 export MAX_UPDATES=118800 WARMUP_UPDATES=5940 BASE_LR=1e-4 WEIGHT_DECAY=0.05
+export ACTUAL_LR=7.5e-5
 export WORKERS=6 SAVE_FREQ=25
 export MASTER_PORT=$((19000 + SLURM_JOB_ID % 20000))
 export PATH=${ROOT}/envs/abdpet/bin:${PATH}
@@ -53,6 +54,7 @@ test "${DIMENSION}" = "3D"
 test "${FIX_FRAME}" = "4"
 test "$((N_GPU * MICRO_BATCH * ACCUM_ITER))" -eq 48
 test "$((N_GPU * MICRO_BATCH * ACCUM_ITER * FIX_FRAME))" -eq 192
+test "${ACTUAL_LR}" = "7.5e-5"
 nvidia-smi -L
 ${PYTHON} -c "import os, torch; n=torch.cuda.device_count(); print('CUDA_VISIBLE_DEVICES=', os.environ.get('CUDA_VISIBLE_DEVICES')); assert torch.cuda.is_available() and n == 4"
 bash scripts/orgslot/run_word_112_448_a100.sh roi20

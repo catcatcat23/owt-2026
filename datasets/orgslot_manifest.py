@@ -79,15 +79,38 @@ class OrganSlotManifestDataset(Dataset):
             None if expected_size is None else int(expected_size)
         )
         self.records = _read_csv(csv_path)
+        sample_count = len(self.records)
         if max_samples is not None:
-            self.records = self.records[: int(max_samples)]
+            sample_count = min(sample_count, int(max_samples))
+        self.sample_record_indices = tuple(range(sample_count))
+
+        self._case_record_indices = {}
+        self._record_position = {}
+        for record_index, row in enumerate(self.records):
+            case_id, slice_index = parse_case_and_slice(row["image_pth"])
+            self._case_record_indices.setdefault(case_id, []).append(
+                (slice_index, record_index)
+            )
+        for case_id, entries in self._case_record_indices.items():
+            entries.sort()
+            if len(entries) < self.fix_frame and self.dataset_type == "3D":
+                raise ValueError(
+                    "case {} has {} slices, fewer than fix_frame={}".format(
+                        case_id, len(entries), self.fix_frame
+                    )
+                )
+            for position, (_, record_index) in enumerate(entries):
+                self._record_position[record_index] = (case_id, position)
 
         self.case_ids = tuple(
-            sorted({parse_case_and_slice(row["image_pth"])[0] for row in self.records})
+            sorted({
+                parse_case_and_slice(self.records[index]["image_pth"])[0]
+                for index in self.sample_record_indices
+            })
         )
 
     def __len__(self):
-        return len(self.records)
+        return len(self.sample_record_indices)
 
     @staticmethod
     def _checked_read(path, flag):
@@ -117,19 +140,23 @@ class OrganSlotManifestDataset(Dataset):
             torch.from_numpy(label.astype(np.int64)).unsqueeze(0),
         )
 
-    def _window_paths(self, path, start, suffix):
-        path = Path(path)
-        stem = path.name.rsplit("_", 1)[0]
-        return [path.with_name(f"{stem}_{index}{suffix}") for index in range(
-            start, start + self.fix_frame
-        )]
+    def _window_records(self, record_index):
+        case_id, anchor_position = self._record_position[record_index]
+        entries = self._case_record_indices[case_id]
+        start = anchor_position - self.fix_frame // 2
+        start = min(max(start, 0), len(entries) - self.fix_frame)
+        selected = entries[start : start + self.fix_frame]
+        return [self.records[index] for _, index in selected], [
+            slice_index for slice_index, _ in selected
+        ]
 
-    def _load_3d(self, record, start):
-        image_paths = self._window_paths(record["image_pth"], start, ".jpg")
-        mask_paths = self._window_paths(record["mask_pth"], start, ".png")
+    def _load_3d(self, record_index):
+        window_records, slice_indices = self._window_records(record_index)
         images = []
         labels = []
-        for image_path, mask_path in zip(image_paths, mask_paths):
+        for window_record in window_records:
+            image_path = window_record["image_pth"]
+            mask_path = window_record["mask_pth"]
             image = self._checked_read(image_path, cv2.IMREAD_GRAYSCALE)
             label = self._checked_read(mask_path, cv2.IMREAD_GRAYSCALE)
             self._check_spatial_size(image, image_path)
@@ -140,10 +167,11 @@ class OrganSlotManifestDataset(Dataset):
         label = np.stack(labels, axis=0).astype(np.int64)
         image_tensor = torch.from_numpy(image).unsqueeze(0).repeat(3, 1, 1, 1)
         label_tensor = torch.from_numpy(label).unsqueeze(0)
-        return image_tensor.float(), label_tensor.long()
+        return image_tensor.float(), label_tensor.long(), slice_indices
 
     def __getitem__(self, index):
-        record = self.records[index]
+        record_index = self.sample_record_indices[index]
+        record = self.records[record_index]
         image_case, image_slice = parse_case_and_slice(record["image_pth"])
         mask_case, mask_slice = parse_case_and_slice(record["mask_pth"])
         if (image_case, image_slice) != (mask_case, mask_slice):
@@ -153,8 +181,9 @@ class OrganSlotManifestDataset(Dataset):
             )
         if self.dataset_type == "2D":
             image, label = self._load_2d(record)
+            slice_indices = (image_slice,)
         else:
-            image, label = self._load_3d(record, image_slice)
+            image, label, slice_indices = self._load_3d(record_index)
         return {
             "image": image,
             "label": label,
@@ -162,4 +191,5 @@ class OrganSlotManifestDataset(Dataset):
             "case_name": image_case,
             "case_id": image_case,
             "slice_index": image_slice,
+            "slice_indices": torch.tensor(slice_indices, dtype=torch.int64),
         }

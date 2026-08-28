@@ -110,6 +110,73 @@ class MultiScaleBinaryHead2D(nn.Module):
         return logits
 
 
+class MultiScaleBinaryHead3D(nn.Module):
+    """Anisotropic 3D counterpart of Arm B's local convolutional head."""
+
+    def __init__(self, dim, grid_size, channels=128, upsample_stages=4):
+        super().__init__()
+        self.grid_size = tuple(int(value) for value in grid_size)
+        if len(self.grid_size) != 3:
+            raise ValueError("MultiScaleBinaryHead3D requires a 3D grid")
+        self.channels = min(int(channels), int(dim))
+        if self.channels <= 0:
+            raise ValueError("head channels must be positive")
+        self.upsample_stages = int(upsample_stages)
+        if self.upsample_stages < 1:
+            raise ValueError("upsample_stages must be positive")
+        self.norm = nn.LayerNorm(dim)
+        self.input_proj = nn.Linear(dim, self.channels)
+        blocks = []
+        current_channels = self.channels
+        for _ in range(self.upsample_stages):
+            next_channels = max(16, current_channels // 2)
+            blocks.append(nn.Sequential(
+                nn.Conv3d(
+                    current_channels,
+                    current_channels,
+                    kernel_size=3,
+                    padding=1,
+                    groups=current_channels,
+                    bias=False,
+                ),
+                nn.Conv3d(current_channels, next_channels, 1, bias=False),
+                nn.GroupNorm(_group_count(next_channels), next_channels),
+                nn.GELU(),
+            ))
+            current_channels = next_channels
+        self.blocks = nn.ModuleList(blocks)
+        self.proj = nn.Conv3d(current_channels, 1, kernel_size=1)
+
+    def forward(self, canvas, output_size):
+        batch_size, patch_count, _ = canvas.shape
+        if patch_count != int(torch.tensor(self.grid_size).prod().item()):
+            raise ValueError("canvas patch count does not match head grid")
+        output_size = tuple(int(value) for value in output_size)
+        if len(output_size) != 3:
+            raise ValueError("MultiScaleBinaryHead3D output must be 3D")
+        features = self.input_proj(self.norm(canvas))
+        features = features.transpose(1, 2).reshape(
+            batch_size, self.channels, *self.grid_size
+        )
+        for block in self.blocks:
+            features = F.interpolate(
+                features,
+                scale_factor=(1.0, 2.0, 2.0),
+                mode="trilinear",
+                align_corners=False,
+            )
+            features = block(features)
+        logits = self.proj(features)
+        if tuple(logits.shape[-3:]) != output_size:
+            logits = F.interpolate(
+                logits,
+                size=output_size,
+                mode="trilinear",
+                align_corners=False,
+            )
+        return logits
+
+
 class SlotQueryEmbedding(nn.Module):
     """Per-slot identity used by the shared query-mask decoder."""
 
@@ -277,14 +344,13 @@ class OrganSlot(nn.Module):
         if self.head_type == "linear":
             self.head = PatchBinaryHead(decoder_dim, grid_size)
         elif self.head_type == "multiscale_conv":
-            if dataset_type != "2D":
-                raise ValueError("multiscale_conv head currently supports 2D only")
-            self.head = MultiScaleBinaryHead2D(
-                decoder_dim, grid_size, channels=head_channels
+            head_class = (
+                MultiScaleBinaryHead2D
+                if dataset_type == "2D"
+                else MultiScaleBinaryHead3D
             )
+            self.head = head_class(decoder_dim, grid_size, channels=head_channels)
         elif self.head_type in ("query_dot", "multi_query_dot"):
-            if dataset_type != "2D":
-                raise ValueError("query heads currently support 2D only")
             self.head = SlotQueryEmbedding(head_channels)
         else:
             raise ValueError("unsupported slot head type: {}".format(head_type))

@@ -36,6 +36,9 @@ HARD_NEGATIVE_RATIO=${HARD_NEGATIVE_RATIO:-0.02}
 NEGATIVE_SLICE_WEIGHT=${NEGATIVE_SLICE_WEIGHT:-0.1}
 SLOT_HEAD_TYPE=${SLOT_HEAD_TYPE:-linear}
 SLOT_HEAD_CHANNELS=${SLOT_HEAD_CHANNELS:-128}
+DIMENSION=${DIMENSION:-2D}
+FIX_FRAME=${FIX_FRAME:-4}
+TEMP_STRIDE=${TEMP_STRIDE:-1}
 ORGAN_ROI_PROBABILITY=${ORGAN_ROI_PROBABILITY:-0.2}
 TGR_MODE=${TGR_MODE:-legacy_batch}
 DISABLE_TRAIN_AUGMENTATION=${DISABLE_TRAIN_AUGMENTATION:-0}
@@ -80,6 +83,10 @@ if [[ "${EFFECTIVE_BATCH}" -ne "${TARGET_EFFECTIVE_BATCH}" ]]; then
   echo "Effective batch ${EFFECTIVE_BATCH} != required ${TARGET_EFFECTIVE_BATCH}" >&2
   exit 2
 fi
+if [[ "${DIMENSION}" != "2D" && "${DIMENSION}" != "3D" ]]; then
+  echo "DIMENSION must be 2D or 3D" >&2
+  exit 2
+fi
 for required in "${PYTHON}" "${TRAIN_CSV}" "${VAL_CSV}" "${PREPROCESS_SUMMARY}" "${LPIPS_STATE}"; do
   if [[ ! -e "${required}" ]]; then
     echo "Missing required path: ${required}" >&2
@@ -101,7 +108,7 @@ if [[ "${ARM}" == "roi20" && ! -f "${ROI_INDEX}" ]]; then
 fi
 
 RUN_NAME=${RUN_NAME:-OrgSlot_WORD112_input448_${ARM}_${FUSION_MODE}_seg${LAMBDA_SEG}_eb${TARGET_EFFECTIVE_BATCH}_u${MAX_UPDATES}}
-OUTPUT_DIR=${OUTPUT_DIR:-${REPO_ROOT}/Results/OrganSlotBank/Common8/WORD_2D/${RUN_NAME}}
+OUTPUT_DIR=${OUTPUT_DIR:-${REPO_ROOT}/Results/OrganSlotBank/Common8/WORD_${DIMENSION}/${RUN_NAME}}
 if [[ -e "${OUTPUT_DIR}" ]]; then
   echo "Refusing to reuse output directory: ${OUTPUT_DIR}" >&2
   exit 2
@@ -116,6 +123,9 @@ COMMAND=(
   --batch_size "${MICRO_BATCH}"
   --accum_iter "${ACCUM_ITER}"
   --input_size 448
+  --dimension "${DIMENSION}"
+  --fix_frame "${FIX_FRAME}"
+  --temp_stride "${TEMP_STRIDE}"
   --global_crop_size 448
   --roi_crop_size 384
   --expected_spacing "${SPACING_ARRAY[@]}"
@@ -212,6 +222,7 @@ fi
   echo "tversky_alpha_fp=${TVERSKY_ALPHA_FP} tversky_beta_fn=${TVERSKY_BETA_FN} tversky_eps=${TVERSKY_EPS}"
   echo "balanced_focal_weight=${BALANCED_FOCAL_WEIGHT} hard_negative_ratio=${HARD_NEGATIVE_RATIO} negative_slice_weight=${NEGATIVE_SLICE_WEIGHT}"
   echo "slot_head_type=${SLOT_HEAD_TYPE} slot_head_channels=${SLOT_HEAD_CHANNELS}"
+  echo "dimension=${DIMENSION} fix_frame=${FIX_FRAME} temp_stride=${TEMP_STRIDE}"
   echo "positive_roi_loss_weight=${POSITIVE_ROI_LOSS_WEIGHT} frequency_alpha=${ROI_FREQUENCY_ALPHA} max_weight_ratio=${ROI_MAX_WEIGHT_RATIO}"
   echo "micro_batch=${MICRO_BATCH} accum_iter=${ACCUM_ITER} effective_batch=${EFFECTIVE_BATCH}"
   echo "base_lr=${BASE_LR} weight_decay=${WEIGHT_DECAY}"

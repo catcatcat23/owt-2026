@@ -122,7 +122,14 @@ class SlotQueryEmbedding(nn.Module):
 class SharedPixelQueryDecoder2D(nn.Module):
     """Shared spatial decoder and token-to-mask query projection."""
 
-    def __init__(self, embed_dim, grid_size, channels=128, upsample_stages=2):
+    def __init__(
+        self,
+        embed_dim,
+        grid_size,
+        channels=128,
+        upsample_stages=2,
+        multi_query=False,
+    ):
         super().__init__()
         self.grid_size = tuple(int(value) for value in grid_size)
         if len(self.grid_size) != 2:
@@ -133,6 +140,7 @@ class SharedPixelQueryDecoder2D(nn.Module):
         self.upsample_stages = int(upsample_stages)
         if self.upsample_stages < 1:
             raise ValueError("upsample_stages must be positive")
+        self.multi_query = bool(multi_query)
 
         self.pixel_norm = nn.LayerNorm(embed_dim)
         self.pixel_proj = nn.Linear(embed_dim, self.channels)
@@ -173,12 +181,27 @@ class SharedPixelQueryDecoder2D(nn.Module):
     def forward_mask(self, pixel_features, tokens, slot_identity, output_size):
         if pixel_features.shape[0] != tokens.shape[0]:
             raise ValueError("pixel features and tokens must share a batch size")
-        pooled_tokens = self.query_norm(tokens).mean(dim=1)
-        query = self.query_proj(pooled_tokens) + slot_identity.unsqueeze(0)
         pixel_features = F.normalize(pixel_features, dim=1)
-        query = F.normalize(query, dim=-1)
-        logits = torch.einsum("bdhw,bd->bhw", pixel_features, query)
-        logits = logits.mul(math.sqrt(self.channels)).unsqueeze(1)
+        normalized_tokens = self.query_norm(tokens)
+        if self.multi_query:
+            queries = self.query_proj(normalized_tokens)
+            queries = queries + slot_identity[None, None, :]
+            queries = F.normalize(queries, dim=-1)
+            part_logits = torch.einsum(
+                "bdhw,bkd->bkhw", pixel_features, queries
+            ).mul(math.sqrt(self.channels))
+            # Smooth maximum without token-count bias. If all token queries
+            # are identical, this exactly matches the single-query score.
+            logits = torch.logsumexp(part_logits, dim=1)
+            logits = logits - math.log(tokens.shape[1])
+        else:
+            pooled_tokens = normalized_tokens.mean(dim=1)
+            query = self.query_proj(pooled_tokens) + slot_identity.unsqueeze(0)
+            query = F.normalize(query, dim=-1)
+            logits = torch.einsum(
+                "bdhw,bd->bhw", pixel_features, query
+            ).mul(math.sqrt(self.channels))
+        logits = logits.unsqueeze(1)
         output_size = tuple(int(value) for value in output_size)
         return F.interpolate(
             logits, size=output_size, mode="bilinear", align_corners=False
@@ -259,9 +282,9 @@ class OrganSlot(nn.Module):
             self.head = MultiScaleBinaryHead2D(
                 decoder_dim, grid_size, channels=head_channels
             )
-        elif self.head_type == "query_dot":
+        elif self.head_type in ("query_dot", "multi_query_dot"):
             if dataset_type != "2D":
-                raise ValueError("query_dot head currently supports 2D only")
+                raise ValueError("query heads currently support 2D only")
             self.head = SlotQueryEmbedding(head_channels)
         else:
             raise ValueError("unsupported slot head type: {}".format(head_type))
@@ -283,8 +306,8 @@ class OrganSlot(nn.Module):
         return canvas, tokens, collector_attention, aher_attention
 
     def forward_head(self, canvas, output_size):
-        if self.head_type == "query_dot":
-            raise RuntimeError("query_dot requires tokens and shared pixel features")
+        if self.head_type in ("query_dot", "multi_query_dot"):
+            raise RuntimeError("query heads require tokens and shared pixel features")
         raw_logits = self.head(canvas, output_size)
         calibrated_logits = (
             self.calibration_scale * raw_logits + self.calibration_bias
@@ -292,8 +315,8 @@ class OrganSlot(nn.Module):
         return raw_logits, calibrated_logits
 
     def forward_query_head(self, tokens, pixel_features, decoder, output_size):
-        if self.head_type != "query_dot":
-            raise RuntimeError("forward_query_head requires a query_dot slot")
+        if self.head_type not in ("query_dot", "multi_query_dot"):
+            raise RuntimeError("forward_query_head requires a query slot")
         raw_logits = decoder.forward_mask(
             pixel_features,
             tokens,

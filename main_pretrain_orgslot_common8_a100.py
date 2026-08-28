@@ -26,7 +26,11 @@ from datasets.orgslot_highres import (
 )
 from datasets.orgslot_manifest import OrganSlotManifestDataset
 from engine_pretrain_orgslot_common8_a100 import train_one_epoch
-from OWT_models_orgslot import FUSION_MODES, mae_vit_base_patch16
+from OWT_models_orgslot import (
+    FUSION_MODES,
+    mae_vit_base_patch16,
+    mae_vit_basefix16_patch16,
+)
 from VQ.lpips import LPIPS
 import timm.optim.optim_factory as optim_factory
 import util.misc as misc
@@ -47,6 +51,9 @@ def get_args_parser():
     parser.add_argument("--epochs", default=798, type=int)
     parser.add_argument("--accum_iter", default=12, type=int)
     parser.add_argument("--input_size", default=448, type=int)
+    parser.add_argument("--dimension", choices=("2D", "3D"), default="2D")
+    parser.add_argument("--fix_frame", default=4, type=int)
+    parser.add_argument("--temp_stride", default=1, type=int)
     parser.add_argument("--token_factor", default=20, type=int)
     parser.add_argument("--slot_tg_depth", default=1, type=int)
     parser.add_argument(
@@ -230,11 +237,11 @@ def _model_args(args, slot_count):
     return SimpleNamespace(
         LA=True,
         arch_version="v11",
-        dataset_type="2D",
+        dataset_type=args.dimension,
         token_factor=args.token_factor,
         organ_token_total=args.token_factor * slot_count,
-        fix_frame=0,
-        temp_stride=0,
+        fix_frame=(args.fix_frame if args.dimension == "3D" else 0),
+        temp_stride=(args.temp_stride if args.dimension == "3D" else 0),
         loss_version=[name for name in args.loss_version.split("-") if name != "LPIPS"],
         text_encoding="None",
     )
@@ -297,7 +304,8 @@ def _seed_worker(worker_id):
 def _build_dataset(args, csv_path, classes, stage, training, max_samples):
     raw = OrganSlotManifestDataset(
         csv_path,
-        dataset_type="2D",
+        dataset_type=args.dimension,
+        fix_frame=args.fix_frame,
         intensity_norm="fixed_255",
         expected_size=None,
         max_samples=max_samples,
@@ -407,6 +415,13 @@ def main(args):
         raise ValueError("preprocessing must retain the native resampled matrix")
     if args.input_size != 448 or args.global_crop_size != 448:
         raise ValueError("this experiment requires 448 crop and 448 model input")
+    if args.dimension == "3D":
+        if args.fix_frame < 2:
+            raise ValueError("3D training requires fix_frame >= 2")
+        if args.temp_stride < 1 or args.fix_frame % args.temp_stride:
+            raise ValueError("temp_stride must be a positive divisor of fix_frame")
+    elif args.fix_frame != 4 or args.temp_stride != 1:
+        raise ValueError("fix_frame/temp_stride are only configurable in 3D mode")
     if args.organ_roi_aug:
         with open(args.roi_index, "r", encoding="utf-8") as handle:
             roi_metadata = json.load(handle)
@@ -499,7 +514,12 @@ def main(args):
         raise ValueError("epochs is too small for the requested update budget")
 
     model_args = _model_args(args, len(slot_specs))
-    model = mae_vit_base_patch16(
+    model_factory = (
+        mae_vit_basefix16_patch16
+        if args.dimension == "3D"
+        else mae_vit_base_patch16
+    )
+    model = model_factory(
         img_size=args.input_size,
         norm_pix_loss=False,
         model_args=model_args,
@@ -558,6 +578,11 @@ def main(args):
     print("warmup updates: {}".format(args.warmup_updates))
     print("slots: {}".format(model.slot_names))
     print("training scope: {}".format(args.training_scope))
+    print(
+        "training dimension: {} (fix_frame={}, temp_stride={})".format(
+            args.dimension, args.fix_frame, args.temp_stride
+        )
+    )
     print("segmentation supervision: {}".format(args.seg_supervision))
     print(
         "slot head: {} (channels={})".format(

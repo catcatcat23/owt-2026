@@ -175,6 +175,21 @@ class OrganSlotModelTests(unittest.TestCase):
         output["reconstruction"].mean().backward()
         self.assertIsNotNone(model.patch_embed.proj.weight.grad)
 
+    def test_3d_multiscale_head_forward_backward_shapes(self):
+        torch.manual_seed(4)
+        model = tiny_model(
+            "3D", slot_head_type="multiscale_conv", slot_head_channels=32
+        )
+        images = torch.rand(1, 3, 4, 32, 32)
+        output = model(images, decode_reconstruction=False)
+        for logits in output["slot_logits"].values():
+            self.assertEqual(logits.shape, (1, 1, 4, 32, 32))
+        loss = sum(logits.mean() for logits in output["slot_logits"].values())
+        loss.backward()
+        self.assertTrue(torch.isfinite(loss))
+        head = model.slot_bank.get_slot("kidney").head
+        self.assertIsNotNone(head.proj.weight.grad)
+
     def test_fixed_fusion_2d_and_3d_forward_backward(self):
         for dataset_type in ("2D", "3D"):
             with self.subTest(dataset_type=dataset_type):

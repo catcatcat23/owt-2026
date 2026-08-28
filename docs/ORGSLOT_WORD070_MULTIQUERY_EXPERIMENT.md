@@ -54,6 +54,15 @@ No diversity loss is added in the first controlled run. Token specialization or
 collapse must be measured after training instead of changing head and loss at
 the same time.
 
+## Run registry
+
+- Branch: `experiment/orgslot-querymask-multiquery`
+- Implementation commit: `606c7ed`
+- Account/cluster: `bolinren19 / SIP`
+- Smoke: Job `2548701`, 2xA800, 16 CPU, 128 GB
+- Formal train: Job `2548702`, 4xA800, 24 CPU, 192 GB, `afterok:2548701`
+- Formal output: checkpoint-802 after 118,800 optimizer updates
+
 ## Acceptance gates
 
 1. Unit tests: finite forward/backward, exact mask shapes, dropped-row zeros,

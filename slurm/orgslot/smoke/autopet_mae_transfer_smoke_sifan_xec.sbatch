@@ -2,7 +2,7 @@
 #SBATCH --job-name=xec_ap_mae_smoke
 #SBATCH --partition=gpua800,gpua8001t
 #SBATCH --account=sifansong
-#SBATCH --qos=gpu
+#SBATCH --qos=4gpus
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:a800:1

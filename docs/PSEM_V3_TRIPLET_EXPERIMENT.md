@@ -180,3 +180,61 @@ run directory. Checkpoint 475 actually belongs to the
 use that directory and print an explicit error if the checkpoint is missing.
 Formal training must not start until the corrected BF16 checkpoint-475 smoke
 passes.
+
+## Final formal evaluations (2026-08-31)
+
+### AbdAutoPET 2D
+
+The numerically repaired training completed on `sifansong/XEC` as Job
+`121484`. Formal evaluation Job `124936` strictly loaded checkpoint 1199 and
+processed all 200 cases (22,400 slices). The scientific configuration remained
+PSEM-v3 Triplet+Loss3 with four foreground classes, 20 tokens per class,
+per-sample normalization, effective source batch 192, positive-ROI weight 0.25,
+and Delta weight 0.1. The execution policy used BF16, FP32 LPIPS, gradient
+clipping, and component-level finite checks.
+
+| Readout | label_1 | label_2 | label_3 | label_4 | Mean post Dice | Mean post NSD | Mean post HD95 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Direct | 96.12% | 91.64% | 91.70% | 75.67% | 88.783% | 83.172% | 7.055 mm |
+| Indirect | 96.36% | 92.56% | 92.69% | 78.15% | **89.938%** | **87.639%** | 8.074 mm |
+
+The dataset repository does not provide a verified organ-name mapping for labels 1--4, so the table intentionally retains label IDs. Under the identical 200-case protocol, PSEM-v1 Indirect remains best at
+90.512%. PSEM-v3 Indirect is statistically indistinguishable from PSEM-v2a
+Indirect: the paired case-bootstrap difference is +0.049 percentage points
+with 95% CI [-0.107, 0.224]. It is 0.574 points below PSEM-v1 Indirect with
+95% CI [-0.718, -0.410]. PSEM-v3 Direct is 1.326 points below PSEM-v1 Direct
+with 95% CI [-1.597, -0.988]. Therefore the AutoPET result shows that Indirect is preserved better than Direct, but it does not establish improved decomposition over v1 because both readouts are lower; it is not a new absolute SOTA.
+
+
+### AbdAutoPET reconstruction evidence
+
+| Variant | Whole L2 | Whole LPIPS | Whole PSNR | Whole SSIM | label_4-only L2 |
+|---|---:|---:|---:|---:|---:|
+| PSEM-v1 | **0.00015039** | **0.01907** | **38.624** | 0.91971 | 0.00019494 |
+| PSEM-v3 Triplet+Loss3 | 0.00017368 | 0.02313 | 37.979 | 0.90798 | 0.00025977 |
+| PSEM-v2a Query20 | 0.00017749 | 0.02356 | 37.908 | 0.92126 | **0.00019280** |
+| PSEM+LossBalance-v2 | 0.00026088 | 0.03334 | 36.373 | **0.92377** | 0.00058690 |
+
+PSEM-v3 Whole L2 is 15.49% higher than v1 and 2.15% lower than v2a. Its
+`label_4-only` L2 is 33.25%/34.73% higher than v1/v2a, consistent with the
+observed label-4 Direct Dice regression. SSIM is not monotonic with Dice, so
+reconstruction metrics cannot replace class-decomposition evaluation.
+
+### WORD 2D
+
+Training Job `114767` and formal 24-case evaluation Job `114768` completed.
+
+| Readout | Spleen | Right kidney | Left kidney | Gallbladder | Esophagus | Pancreas | Liver | Stomach | Mean post Dice |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Direct | 87.84% | 87.39% | 86.65% | 25.11% | 46.65% | 52.98% | 91.49% | 68.72% | **68.353%** |
+| Indirect | 86.89% | 85.06% | 82.67% | 32.13% | 41.86% | 56.38% | 91.59% | 69.37% | **68.244%** |
+
+Compared with the same Query20+Loss3 model without Triplet pairing, Direct
+improves from 67.209% to 68.353%, whereas Indirect improves from 52.216% to
+68.244%. This is the intended effect: Direct, Context, and Plus are paired on
+the same source image so that `Prediction(Plus) - Prediction(Context)` is
+explicitly trained to isolate the anchor organ. The gain is dataset-dependent;
+it is strong on WORD but does not raise the AutoPET ceiling over PSEM-v1.
+
+The branch-level ranked tables, protocol caveats, and complete experiment
+registry are maintained in the repository `README.md`.

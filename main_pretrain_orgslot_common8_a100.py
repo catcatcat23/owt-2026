@@ -147,6 +147,18 @@ def get_args_parser():
     parser.add_argument("--balanced_focal_weight", default=0.5, type=float)
     parser.add_argument("--hard_negative_ratio", default=0.02, type=float)
     parser.add_argument("--negative_slice_weight", default=0.1, type=float)
+    parser.add_argument(
+        "--amp_dtype",
+        choices=("fp16", "bf16", "fp32"),
+        default="fp16",
+        help="autocast precision; bf16 is recommended on A800 for stability",
+    )
+    parser.add_argument(
+        "--clip_grad", type=float, default=1.0,
+        help="global gradient norm cap; set <=0 to disable",
+    )
+    parser.add_argument("--finite_check_interval", type=int, default=50)
+
 
     parser.add_argument(
         "--seg_supervision",
@@ -348,6 +360,12 @@ def main(args):
 
     if args.device != "cuda":
         raise ValueError("the formal A100 entry point requires --device cuda")
+    if args.amp_dtype == "bf16" and not torch.cuda.is_bf16_supported():
+        raise RuntimeError("BF16 requested but this CUDA device does not support it")
+    if args.clip_grad is not None and args.clip_grad <= 0:
+        args.clip_grad = None
+    if args.finite_check_interval < 0:
+        raise ValueError("finite_check_interval must be non-negative")
     if args.lambda_lpips and "LPIPS" not in args.loss_version.split("-"):
         raise ValueError("lambda_lpips > 0 requires LPIPS in --loss_version")
     if args.lambda_seg < 0:
@@ -615,6 +633,11 @@ def main(args):
             )
         )
     print("organ ROI augmentation: {}".format(args.organ_roi_aug))
+    print(
+        "numeric policy: amp={} clip_grad={} finite_check_interval={}".format(
+            args.amp_dtype, args.clip_grad, args.finite_check_interval
+        )
+    )
 
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(
@@ -629,7 +652,7 @@ def main(args):
     optimizer = torch.optim.AdamW(
         parameter_groups, lr=args.lr, betas=(0.9, 0.95)
     )
-    loss_scaler = NativeScaler()
+    loss_scaler = NativeScaler(enabled=args.amp_dtype == "fp16")
     misc.load_model(
         args=args,
         model_without_ddp=model_without_ddp,

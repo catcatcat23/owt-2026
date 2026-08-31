@@ -34,6 +34,9 @@ TVERSKY_EPS=${TVERSKY_EPS:-1e-6}
 BALANCED_FOCAL_WEIGHT=${BALANCED_FOCAL_WEIGHT:-0.5}
 HARD_NEGATIVE_RATIO=${HARD_NEGATIVE_RATIO:-0.02}
 NEGATIVE_SLICE_WEIGHT=${NEGATIVE_SLICE_WEIGHT:-0.1}
+AMP_DTYPE=${AMP_DTYPE:-fp16}
+CLIP_GRAD=${CLIP_GRAD:-1.0}
+FINITE_CHECK_INTERVAL=${FINITE_CHECK_INTERVAL:-50}
 SLOT_HEAD_TYPE=${SLOT_HEAD_TYPE:-linear}
 SLOT_HEAD_CHANNELS=${SLOT_HEAD_CHANNELS:-128}
 DIMENSION=${DIMENSION:-2D}
@@ -157,6 +160,9 @@ COMMAND=(
   --balanced_focal_weight "${BALANCED_FOCAL_WEIGHT}"
   --hard_negative_ratio "${HARD_NEGATIVE_RATIO}"
   --negative_slice_weight "${NEGATIVE_SLICE_WEIGHT}"
+  --amp_dtype "${AMP_DTYPE}"
+  --clip_grad "${CLIP_GRAD}"
+  --finite_check_interval "${FINITE_CHECK_INTERVAL}"
   --tgr_mode "${TGR_MODE}"
   --positive_roi_loss_weight "${POSITIVE_ROI_LOSS_WEIGHT}"
   --roi_frequency_alpha "${ROI_FREQUENCY_ALPHA}"
@@ -226,6 +232,7 @@ fi
   echo "tversky_alpha_fp=${TVERSKY_ALPHA_FP} tversky_beta_fn=${TVERSKY_BETA_FN} tversky_eps=${TVERSKY_EPS}"
   echo "balanced_focal_weight=${BALANCED_FOCAL_WEIGHT} hard_negative_ratio=${HARD_NEGATIVE_RATIO} negative_slice_weight=${NEGATIVE_SLICE_WEIGHT}"
   echo "slot_head_type=${SLOT_HEAD_TYPE} slot_head_channels=${SLOT_HEAD_CHANNELS}"
+  echo "amp_dtype=${AMP_DTYPE} clip_grad=${CLIP_GRAD} finite_check_interval=${FINITE_CHECK_INTERVAL}"
   echo "dimension=${DIMENSION} fix_frame=${FIX_FRAME} temp_stride=${TEMP_STRIDE}"
   echo "positive_roi_loss_weight=${POSITIVE_ROI_LOSS_WEIGHT} frequency_alpha=${ROI_FREQUENCY_ALPHA} max_weight_ratio=${ROI_MAX_WEIGHT_RATIO}"
   echo "micro_batch=${MICRO_BATCH} accum_iter=${ACCUM_ITER} effective_batch=${EFFECTIVE_BATCH}"

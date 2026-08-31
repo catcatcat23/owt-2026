@@ -1,15 +1,43 @@
 """Common8 A100 loop with focus-slot retention for organ-aware ROI samples."""
 
-import random
+import contextlib
 import math
+import random
 
 import torch
+import torch.distributed as dist
 
 from engine_pretrain_orgslot import perceptual_reconstruction_loss
 from losses_orgslot import base_reconstruction_loss, base_segmentation_loss
 import util.misc as misc
 from util.orgslot_lossbalance_v3 import state_separated_mask_roi_l2
 from util.slot_tgr import build_base_reconstruction_target, sample_base_slot_keep_mask
+
+
+def _autocast_context(device, amp_dtype):
+    if device.type != "cuda" or amp_dtype == "fp32":
+        return contextlib.nullcontext()
+    dtype = torch.float16 if amp_dtype == "fp16" else torch.bfloat16
+    return torch.cuda.amp.autocast(dtype=dtype)
+
+
+def _check_finite(values, device, context):
+    nonfinite = [
+        name for name, value in values.items()
+        if not bool(torch.isfinite(value.detach()).all())
+    ]
+    all_finite = torch.tensor(
+        0.0 if nonfinite else 1.0, device=device, dtype=torch.float32
+    )
+    if dist.is_available() and dist.is_initialized():
+        dist.all_reduce(all_finite, op=dist.ReduceOp.MIN)
+    if bool(all_finite.item()):
+        return
+    raise FloatingPointError(
+        "{}: rank={} nonfinite={}".format(
+            context, misc.get_rank(), nonfinite
+        )
+    )
 
 
 def _unwrap_model(model):
@@ -177,7 +205,7 @@ def train_one_epoch(
         )
         segmentation_diagnostics = {}
 
-        with torch.cuda.amp.autocast():
+        with _autocast_context(device, args.amp_dtype):
             if args.training_scope == "head_only":
                 output = model(
                     image,
@@ -268,21 +296,60 @@ def train_one_epoch(
                     args.positive_roi_loss_weight * positive["loss"]
                 )
 
-        if not torch.isfinite(total_loss):
-            raise FloatingPointError(
-                "non-finite loss at epoch {} step {}: {}".format(
-                    epoch, data_iter_step, float(total_loss.detach())
-                )
-            )
+        loss_components = {
+            "total_loss": total_loss,
+            "reconstruction_loss": reconstruction_loss,
+            "perceptual_loss": perceptual_loss,
+            "segmentation_loss": segmentation_loss,
+            "positive_roi_loss": positive["loss"],
+        }
+        loss_components.update({
+            "segmentation_{}".format(name): value
+            for name, value in per_slot_segmentation.items()
+        })
+        sample_indices = batch["sample_index"].detach().cpu().tolist()
+        _check_finite(
+            loss_components,
+            device,
+            "non-finite loss at epoch {} step {} samples {}".format(
+                epoch, data_iter_step, sample_indices
+            ),
+        )
         scaled_loss = total_loss / args.accum_iter
         update_grad = (data_iter_step + 1) % args.accum_iter == 0
-        loss_scaler(
-            scaled_loss,
-            optimizer,
-            parameters=model.parameters(),
-            update_grad=update_grad,
-        )
+        try:
+            grad_norm = loss_scaler(
+                scaled_loss,
+                optimizer,
+                clip_grad=args.clip_grad,
+                parameters=model.parameters(),
+                update_grad=update_grad,
+            )
+        except RuntimeError as error:
+            raise FloatingPointError(
+                "non-finite gradient at epoch {} step {} samples {}: {}".format(
+                    epoch, data_iter_step, sample_indices, error
+                )
+            ) from error
         if update_grad:
+            _check_finite(
+                {"grad_norm": grad_norm},
+                device,
+                "non-finite gradient norm at epoch {} step {} samples {}".format(
+                    epoch, data_iter_step, sample_indices
+                ),
+            )
+            if (
+                args.finite_check_interval > 0
+                and completed_updates % args.finite_check_interval == 0
+            ):
+                _check_finite(
+                    dict(model_without_ddp.named_parameters()),
+                    device,
+                    "non-finite model parameter at epoch {} step {} samples {}".format(
+                        epoch, data_iter_step, sample_indices
+                    ),
+                )
             optimizer.zero_grad()
             completed_updates += 1
 
@@ -305,6 +372,8 @@ def train_one_epoch(
             "roi_fraction": float(roi.float().mean()),
             "lr": optimizer.param_groups[0]["lr"],
         }
+        if update_grad:
+            values["grad_norm"] = float(grad_norm.detach())
         for slot_index, slot_name in enumerate(slot_names):
             if float(roi_class_weights[slot_index]) <= 0:
                 continue

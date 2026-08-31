@@ -49,10 +49,10 @@ MAE配置：patch16、LA encoder 6层/768维、decoder 8层/768维、mask ratio 
 ## 执行链
 
 1. `autopet_mae_transfer_smoke_sifan_xec.sbatch`：真实数据、完整模型做2次更新并验证checkpoint；
-2. `autopet_mae_transfer_pretrain_sifan_xec.sbatch`：仅在smoke成功后生成固定路径`checkpoint-final.pth`；
+2. `autopet_mae_transfer_pretrain_bolin_sip.sbatch`：正式MAE当前选择bolinren19/SIP的`sifansong/4a800`，其调度预估早于XEC；`autopet_mae_transfer_pretrain_sifan_xec.sbatch`保留为备用；
 3. `orgslot_word07072_armb_autopet_mae_encoder_sifan_xec.sbatch`：B1 encoder-only；
 4. `orgslot_word07072_armb_autopet_mae_sifan_xec.sbatch`：B2 encoder+decoder 的 sifansong/XEC 版本；
 5. `orgslot_word07072_armb_autopet_mae_encoder_decoder_anteng_xec.sbatch`：B2 的 antengcai23/XEC 并行版本，必须先复制并校验同一 MAE checkpoint；
 6. 两个新 checkpoint-802 完成后，将B0/B1/B2使用相同3D病例级重建/head评估脚本重评。
 
-MAE预训练运行在`sifansong/XEC`：这是当前唯一确认同时拥有AutoPET和WORD 0.7的空闲账号环境。B1可在同账号依赖MAE启动；B2在MAE完成并复制同一checkpoint后可转到当前无任务的`antengcai23/XEC`并行。不得把sifansong、antengcai23或SIP/XEC的绝对路径互换，每次复制都要记录SHA256。
+MAE预训练当前运行在`bolinren19/SIP`，因为该账号已有完整AutoPET，且4卡调度预估比XEC早；它不承担后续WORD训练。MAE完成后仅传输模型checkpoint并记录SHA256，再由`sifansong/XEC`运行B1、`antengcai23/XEC`运行B2。不得把三个账号或SIP/XEC的绝对路径互换。

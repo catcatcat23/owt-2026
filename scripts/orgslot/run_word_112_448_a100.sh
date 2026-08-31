@@ -61,6 +61,8 @@ SAVE_FREQ=${SAVE_FREQ:-100}
 MAX_STEPS_PER_EPOCH=${MAX_STEPS_PER_EPOCH:-}
 NO_SAVE=${NO_SAVE:-0}
 RESUME_CHECKPOINT=${RESUME_CHECKPOINT:-}
+MAE_INIT_CHECKPOINT=${MAE_INIT_CHECKPOINT:-}
+MAE_INIT_SCOPE=${MAE_INIT_SCOPE:-encoder_decoder}
 
 if [[ -n "${SLURM_JOB_ID:-}" ]]; then
   if [[ -z "${CUDA_VISIBLE_DEVICES:-}" ]]; then
@@ -88,6 +90,18 @@ for required in "${PYTHON}" "${TRAIN_CSV}" "${VAL_CSV}" "${PREPROCESS_SUMMARY}" 
 done
 if [[ -n "${RESUME_CHECKPOINT}" && ! -f "${RESUME_CHECKPOINT}" ]]; then
   echo "Missing resume checkpoint: ${RESUME_CHECKPOINT}" >&2
+  exit 2
+fi
+if [[ -n "${MAE_INIT_CHECKPOINT}" && ! -f "${MAE_INIT_CHECKPOINT}" ]]; then
+  echo "Missing MAE initialization checkpoint: ${MAE_INIT_CHECKPOINT}" >&2
+  exit 2
+fi
+if [[ -n "${RESUME_CHECKPOINT}" && -n "${MAE_INIT_CHECKPOINT}" ]]; then
+  echo "RESUME_CHECKPOINT and MAE_INIT_CHECKPOINT are mutually exclusive" >&2
+  exit 2
+fi
+if [[ "${MAE_INIT_SCOPE}" != "encoder" && "${MAE_INIT_SCOPE}" != "encoder_decoder" ]]; then
+  echo "MAE_INIT_SCOPE must be encoder or encoder_decoder" >&2
   exit 2
 fi
 read -r -a SPACING_ARRAY <<< "${EXPECTED_SPACING}"
@@ -197,6 +211,12 @@ fi
 if [[ -n "${RESUME_CHECKPOINT}" ]]; then
   COMMAND+=(--resume "${RESUME_CHECKPOINT}")
 fi
+if [[ -n "${MAE_INIT_CHECKPOINT}" ]]; then
+  COMMAND+=(
+    --mae_init_checkpoint "${MAE_INIT_CHECKPOINT}"
+    --mae_init_scope "${MAE_INIT_SCOPE}"
+  )
+fi
 
 {
   echo "arm=${ARM}"
@@ -217,6 +237,7 @@ fi
   echo "base_lr=${BASE_LR} weight_decay=${WEIGHT_DECAY}"
   echo "max_updates=${MAX_UPDATES} warmup_updates=${WARMUP_UPDATES}"
   echo "resume_checkpoint=${RESUME_CHECKPOINT:-<none>}"
+  echo "mae_init_checkpoint=${MAE_INIT_CHECKPOINT:-<none>} mae_init_scope=${MAE_INIT_SCOPE}"
   printf 'command='
   printf '%q ' "${COMMAND[@]}"
   printf '\n'

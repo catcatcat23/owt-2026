@@ -1,8 +1,23 @@
-# OrganSlot WORD Common8：Arm A / Arm B
+# OrganSlot WORD Common8：AutoPET MAE → Arm B
 
-更新时间：2026-08-28
+更新时间：2026-08-31
 
-本分支 `feature/orgslot` 保存 0.7 mm spacing、ROI20、small-organ loss 下的
+当前分支 `experiment/orgslot-autopet-mae-transfer` 在既有最优 Arm B 训练协议上，
+只新增 AutoPET image-only MAE 初始化。主实验加载共享 encoder 与共享 reconstruction
+decoder；所有 organ slot（Collector、TGEnc、AHER）和 segmentation head 均保持随机初始化。
+完整设计、严格权重映射及执行链见
+[docs/ORGSLOT_AUTOPET_MAE_TRANSFER_CN.md](docs/ORGSLOT_AUTOPET_MAE_TRANSFER_CN.md)。
+
+主对照是相同 0.7 mm spacing、ROI20、multiscale head、small-organ loss 和训练更新数下：
+
+| 实验 | 初始化 | 其余训练配置 |
+|---|---|---|
+| scratch Arm B | 随机 | 固定 |
+| AutoPET-MAE Arm B | AutoPET MAE encoder+shared decoder | 固定 |
+
+下面保留分支起点的 Arm A/B 记录，作为 scratch 基线说明。
+
+基线分支 `feature/orgslot` 保存 0.7 mm spacing、ROI20、small-organ loss 下的
 AHER-canvas 分割头对照：
 
 - Arm A：`linear` head；

@@ -27,7 +27,11 @@ nvidia-smi -L
 
 export PYTHONNOUSERSITE=1
 export OMP_NUM_THREADS=1
-"${PYTHON}" main_pretrain_autopet_mae.py \
+MASTER_PORT=$((21000 + SLURM_JOB_ID % 20000))
+"${PYTHON}" -m torch.distributed.run \
+  --nproc_per_node=1 \
+  --master_port="${MASTER_PORT}" \
+  main_pretrain_autopet_mae.py \
   --data_path "${TRAIN_CSV}" \
   --output_dir "${OUTPUT_DIR}" \
   --input_size 224 \

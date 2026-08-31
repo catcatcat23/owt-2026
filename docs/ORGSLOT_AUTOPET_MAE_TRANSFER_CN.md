@@ -24,6 +24,8 @@
 
 三臂中的 Collector、TGEnc、AHER 和 `multiscale_conv` segmentation head 均从相同随机种子初始化。B0不重复训练，但必须和B1/B2一起使用同一套3D病例级 evaluator 重评。
 
+B0来自提交`b748e59`，本分支起点为`5226496`。两提交间针对该训练主线的差异仅为可选Loss-v3、resume和附加日志；模型、数据与既有small-organ loss代码未改。三臂固定`positive_roi_loss_weight=0`，该可选项不进入总损失或梯度，因此可以复用B0。
+
 跨账号数据一致性由`tools/validate_word070_dataset_identity.py`在启动前检查：train 28586张、test 6990张；规范化清单SHA256分别为`ffbe5e...1fc8c`和`871a31...a9f1`，ROI核心SHA256为`3a2596...fb8b`。规范化会移除`/WORD/`之前的账号根路径。
 
 ## AutoPET MAE

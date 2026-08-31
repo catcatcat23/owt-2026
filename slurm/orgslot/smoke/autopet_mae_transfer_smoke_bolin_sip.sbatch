@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=sip_ap_mae_smoke
 #SBATCH --partition=gpua800
-#SBATCH --account=angelosstefanidis
-#SBATCH --qos=gpudebug
+#SBATCH --account=sifansong
+#SBATCH --qos=4a800
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:a800:1

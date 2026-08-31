@@ -110,6 +110,37 @@ class AutoPETMAETransferTests(unittest.TestCase):
         self.assertFalse(train_cases & val_cases)
         self.assertEqual(len(val_cases), 2)
 
+    def test_encoder_only_transfer_leaves_shared_decoder_unchanged(self):
+        source = ArchitectureMatchedMAE(
+            img_size=32,
+            patch_size=16,
+            embed_dim=48,
+            encoder_depth=2,
+            encoder_heads=4,
+            decoder_dim=48,
+            decoder_depth=2,
+            decoder_heads=4,
+        )
+        target = _target_model(img_size=64)
+        decoder_before = {
+            key: value.clone()
+            for key, value in target.state_dict().items()
+            if key.startswith(("decoder_blocks.", "decoder_norm.", "decoder_pred."))
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint_path = Path(directory) / "mae.pth"
+            torch.save({"model": source.state_dict()}, checkpoint_path)
+            report = load_mae_transfer_checkpoint(target, checkpoint_path, "encoder")
+        self.assertEqual(report["scope"], "encoder")
+        self.assertTrue(
+            torch.equal(
+                source.state_dict()["blocks.0.attn.qkv.weight"],
+                target.state_dict()["blocks1.0.attn.qkv.weight"],
+            )
+        )
+        for key, value in decoder_before.items():
+            self.assertTrue(torch.equal(value, target.state_dict()[key]), key)
+
     def test_incomplete_encoder_checkpoint_is_rejected(self):
         source = ArchitectureMatchedMAE(
             img_size=32,

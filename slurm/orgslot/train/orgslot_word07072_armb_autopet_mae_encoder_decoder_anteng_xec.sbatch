@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=xec_os070_maeB
+#SBATCH --job-name=xec_os070_maeED
 #SBATCH --partition=gpua800,gpua8001t
 #SBATCH --account=sifansong
 #SBATCH --qos=4gpus
@@ -9,16 +9,16 @@
 #SBATCH --cpus-per-task=24
 #SBATCH --mem=192G
 #SBATCH --time=4-00:00:00
-#SBATCH --output=/gpfs/work/aac/sifansong/slurm/logs/OrganSlot/WORD070_AutoPETMAE/%x_%j.out
-#SBATCH --error=/gpfs/work/aac/sifansong/slurm/logs/OrganSlot/WORD070_AutoPETMAE/%x_%j.err
+#SBATCH --output=/gpfs/work/aac/antengcai23/slurm/logs/OrganSlot/WORD070_AutoPETMAE/%x_%j.out
+#SBATCH --error=/gpfs/work/aac/antengcai23/slurm/logs/OrganSlot/WORD070_AutoPETMAE/%x_%j.err
 
 set -euo pipefail
-ROOT=/gpfs/work/aac/sifansong
+ROOT=/gpfs/work/aac/antengcai23
 WORKDIR=${ROOT}/worktrees/orgslot_autopet_mae
 RUN_TAG=OrgSlot_WORD07072_ROI20_RetainedMultiConv_SmallOrgan_L001_AutoPETMAE_EncDec
 RUN_NAME=${RUN_TAG}_${SLURM_JOB_ID}
 OUTPUT_DIR=${WORKDIR}/Results/OrganSlotBank/Common8/WORD_2D/${RUN_NAME}
-MAE_INIT_CHECKPOINT=${ROOT}/Results/AutoPET_MAE/MAE_LA6D8_224_M75_U100K_seed0/checkpoint-final.pth
+MAE_INIT_CHECKPOINT=${ROOT}/Results/AutoPET_MAE/TransferredFromSifan/MAE_LA6D8_224_M75_U100K_seed0/checkpoint-final.pth
 
 cd "${WORKDIR}"
 export PYTHON=${ROOT}/envs/abdpet/bin/python
@@ -27,7 +27,7 @@ export PROCESSED_ROOT=${ROOT}/data/OWT_Common8_07072_NATIVE/WORD
 export MANIFEST_TAG=native07072
 export EXPECTED_SPACING="0.7 0.7 2"
 export ROI_INDEX=${PROCESSED_ROOT}/metadata/small_organ_roi_index_verified.json
-export LPIPS_STATE=${ROOT}/data/pretrained/owt_lpips_vgg16.pth
+export LPIPS_STATE=${ROOT}/worktrees/orgslotbank/Results/OrganSlotBank/_assets/owt_lpips_vgg16.pth
 export FUSION_MODE=linear_sqrt FUSION_REFERENCE_COUNT=9
 export LAMBDA_SEG=0.01 LAMBDA_BG_SEG=0 SEG_SUPERVISION=retained
 export SEG_LOSS_TYPE=small_organ FOCAL_ALPHA=0.75 FOCAL_GAMMA=2.0

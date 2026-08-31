@@ -3,8 +3,9 @@
 更新时间：2026-08-31
 
 当前分支 `experiment/orgslot-autopet-mae-transfer` 在既有最优 Arm B 训练协议上，
-只新增 AutoPET image-only MAE 初始化。主实验加载共享 encoder 与共享 reconstruction
-decoder；所有 organ slot（Collector、TGEnc、AHER）和 segmentation head 均保持随机初始化。
+只新增 AutoPET image-only MAE 初始化。两个迁移臂分别加载 encoder-only 与
+encoder+shared reconstruction decoder；所有 organ slot（Collector、TGEnc、AHER）和
+segmentation head 均保持随机初始化。
 完整设计、严格权重映射及执行链见
 [docs/ORGSLOT_AUTOPET_MAE_TRANSFER_CN.md](docs/ORGSLOT_AUTOPET_MAE_TRANSFER_CN.md)。
 
@@ -12,8 +13,9 @@ decoder；所有 organ slot（Collector、TGEnc、AHER）和 segmentation head �
 
 | 实验 | 初始化 | 其余训练配置 |
 |---|---|---|
-| scratch Arm B | 随机 | 固定 |
-| AutoPET-MAE Arm B | AutoPET MAE encoder+shared decoder | 固定 |
+| B0 scratch Arm B | 随机 | 固定 |
+| B1 AutoPET-MAE Arm B | encoder-only | 固定 |
+| B2 AutoPET-MAE Arm B | encoder+shared decoder | 固定 |
 
 下面保留分支起点的 Arm A/B 记录，作为 scratch 基线说明。
 

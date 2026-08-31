@@ -14,7 +14,17 @@
 - `lambda_seg=0.01`，`lambda_bg_seg=0`；
 - effective batch 192，118800 optimizer updates，seed 0。
 
-现有 scratch Arm B 是直接对照。新增实验只改变初始化。
+现有 scratch Arm B 是直接对照。完整对比固定为三臂，新增实验只改变初始化范围：
+
+| Arm | 初始化 | 状态/用途 |
+|---|---|---|
+| B0 scratch | 全部随机初始化 | 已完成的 Arm B checkpoint-802，作为零预训练基线 |
+| B1 encoder-only | AutoPET MAE `patch_embed + cls + 6层LA encoder + encoder_norm` | 隔离 encoder 预训练收益 |
+| B2 encoder+decoder | B1全部内容 + 共享 `decoder_blocks/norm/pred` | 判断共享重建 decoder 是否提供额外收益 |
+
+三臂中的 Collector、TGEnc、AHER 和 `multiscale_conv` segmentation head 均从相同随机种子初始化。B0不重复训练，但必须和B1/B2一起使用同一套3D病例级 evaluator 重评。
+
+跨账号数据一致性由`tools/validate_word070_dataset_identity.py`在启动前检查：train 28586张、test 6990张；规范化清单SHA256分别为`ffbe5e...1fc8c`和`871a31...a9f1`，ROI核心SHA256为`3a2596...fb8b`。规范化会移除`/WORD/`之前的账号根路径。
 
 ## AutoPET MAE
 
@@ -30,15 +40,17 @@ MAE配置：patch16、LA encoder 6层/768维、decoder 8层/768维、mask ratio 
 
 ## 结果判定
 
-主要比较scratch Arm B与AutoPET-MAE Encoder+Decoder Arm B的同协议3D病例级结果：八类平均Dice、小器官平均Dice、逐器官Dice、precision/recall、NSD、HD95、预测/GT体积比以及固定/验证集校准阈值。若主实验有效，再补encoder-only消融以分离decoder贡献。
+主要比较B0/B1/B2的同协议3D病例级结果：八类平均Dice、小器官平均Dice、逐器官Dice、precision/recall、NSD、HD95、预测/GT体积比以及固定/验证集校准阈值。`B1-B0`量化encoder预训练收益，`B2-B1`量化共享decoder的额外贡献；不能只汇报B2相对B0。
 
-单seed只能作为探索性证据。若平均Dice提高至少0.5点且小器官平均提高至少1点、同时大器官下降不超过0.5点，再补两个seed。
+单seed只能作为探索性证据。若B1或B2平均Dice提高至少0.5点且小器官平均提高至少1点、同时大器官下降不超过0.5点，再补两个seed。
 
 ## 执行链
 
 1. `autopet_mae_transfer_smoke_sifan_xec.sbatch`：真实数据、完整模型做2次更新并验证checkpoint；
 2. `autopet_mae_transfer_pretrain_sifan_xec.sbatch`：仅在smoke成功后生成固定路径`checkpoint-final.pth`；
-3. `orgslot_word07072_armb_autopet_mae_sifan_xec.sbatch`：依赖MAE成功完成后启动WORD训练；
-4. WORD checkpoint-802完成后使用与scratch Arm B完全相同的统一重建/head评估脚本。
+3. `orgslot_word07072_armb_autopet_mae_encoder_sifan_xec.sbatch`：B1 encoder-only；
+4. `orgslot_word07072_armb_autopet_mae_sifan_xec.sbatch`：B2 encoder+decoder 的 sifansong/XEC 版本；
+5. `orgslot_word07072_armb_autopet_mae_encoder_decoder_anteng_xec.sbatch`：B2 的 antengcai23/XEC 并行版本，必须先复制并校验同一 MAE checkpoint；
+6. 两个新 checkpoint-802 完成后，将B0/B1/B2使用相同3D病例级重建/head评估脚本重评。
 
-任务应运行在`sifansong/XEC`：该环境同时拥有AutoPET和WORD 0.7数据。不得把sifansong、antengcai23或SIP/XEC的绝对路径互换。
+MAE预训练运行在`sifansong/XEC`：这是当前唯一确认同时拥有AutoPET和WORD 0.7的空闲账号环境。B1可在同账号依赖MAE启动；B2在MAE完成并复制同一checkpoint后可转到当前无任务的`antengcai23/XEC`并行。不得把sifansong、antengcai23或SIP/XEC的绝对路径互换，每次复制都要记录SHA256。

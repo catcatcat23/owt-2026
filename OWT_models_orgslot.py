@@ -11,7 +11,7 @@ import OWT_models
 from OrganSlotEmbed import (
     OrganSlot,
     OrganSlotBank,
-    SharedPixelQueryDecoder2D,
+    SharedPixelQueryDecoder,
 )
 
 
@@ -103,9 +103,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         }
         self.pixel_query_decoder = None
         if slot_head_type in ("query_dot", "multi_query_dot"):
-            if model_args.dataset_type != "2D":
-                raise ValueError("query heads currently support 2D only")
-            self.pixel_query_decoder = SharedPixelQueryDecoder2D(
+            self.pixel_query_decoder = SharedPixelQueryDecoder(
                 embed_dim,
                 grid_size,
                 channels=slot_head_channels,

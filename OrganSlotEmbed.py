@@ -202,8 +202,8 @@ class SlotQueryEmbedding(nn.Module):
         nn.init.normal_(self.embedding, std=0.02)
 
 
-class SharedPixelQueryDecoder2D(nn.Module):
-    """Shared spatial decoder and token-to-mask query projection."""
+class SharedPixelQueryDecoder(nn.Module):
+    """Shared 2D/3D spatial decoder and token-to-mask query projection."""
 
     def __init__(
         self,
@@ -215,8 +215,9 @@ class SharedPixelQueryDecoder2D(nn.Module):
     ):
         super().__init__()
         self.grid_size = tuple(int(value) for value in grid_size)
-        if len(self.grid_size) != 2:
-            raise ValueError("SharedPixelQueryDecoder2D requires a 2D grid")
+        if len(self.grid_size) not in (2, 3):
+            raise ValueError("query decoder grid must be 2D or 3D")
+        self.spatial_dims = len(self.grid_size)
         self.channels = int(channels)
         if self.channels <= 0:
             raise ValueError("query-mask channels must be positive")
@@ -229,9 +230,10 @@ class SharedPixelQueryDecoder2D(nn.Module):
         self.pixel_proj = nn.Linear(embed_dim, self.channels)
         self.query_norm = nn.LayerNorm(embed_dim)
         self.query_proj = nn.Linear(embed_dim, self.channels)
+        conv_layer = nn.Conv2d if self.spatial_dims == 2 else nn.Conv3d
         self.blocks = nn.ModuleList([
             nn.Sequential(
-                nn.Conv2d(
+                conv_layer(
                     self.channels,
                     self.channels,
                     kernel_size=3,
@@ -239,7 +241,7 @@ class SharedPixelQueryDecoder2D(nn.Module):
                     groups=self.channels,
                     bias=False,
                 ),
-                nn.Conv2d(self.channels, self.channels, kernel_size=1, bias=False),
+                conv_layer(self.channels, self.channels, kernel_size=1, bias=False),
                 nn.GroupNorm(_group_count(self.channels), self.channels),
                 nn.GELU(),
             )
@@ -255,9 +257,15 @@ class SharedPixelQueryDecoder2D(nn.Module):
             batch_size, self.channels, *self.grid_size
         )
         for block in self.blocks:
-            features = F.interpolate(
-                features, scale_factor=2.0, mode="bilinear", align_corners=False
-            )
+            if self.spatial_dims == 2:
+                features = F.interpolate(
+                    features, scale_factor=2.0, mode="bilinear",
+                    align_corners=False,
+                )
+            else:
+                features = _trilinear_interpolate_fp32(
+                    features, scale_factor=(1.0, 2.0, 2.0)
+                )
             features = block(features)
         return features
 
@@ -270,9 +278,14 @@ class SharedPixelQueryDecoder2D(nn.Module):
             queries = self.query_proj(normalized_tokens)
             queries = queries + slot_identity[None, None, :]
             queries = F.normalize(queries, dim=-1)
-            part_logits = torch.einsum(
-                "bdhw,bkd->bkhw", pixel_features, queries
-            ).mul(math.sqrt(self.channels))
+            if self.spatial_dims == 2:
+                part_logits = torch.einsum(
+                    "bdhw,bkd->bkhw", pixel_features, queries
+                ).mul(math.sqrt(self.channels))
+            else:
+                part_logits = torch.einsum(
+                    "bdthw,bkd->bkthw", pixel_features, queries
+                ).mul(math.sqrt(self.channels))
             # Smooth maximum without token-count bias. If all token queries
             # are identical, this exactly matches the single-query score.
             logits = torch.logsumexp(part_logits, dim=1)
@@ -281,11 +294,18 @@ class SharedPixelQueryDecoder2D(nn.Module):
             pooled_tokens = normalized_tokens.mean(dim=1)
             query = self.query_proj(pooled_tokens) + slot_identity.unsqueeze(0)
             query = F.normalize(query, dim=-1)
-            logits = torch.einsum(
-                "bdhw,bd->bhw", pixel_features, query
-            ).mul(math.sqrt(self.channels))
+            if self.spatial_dims == 2:
+                logits = torch.einsum(
+                    "bdhw,bd->bhw", pixel_features, query
+                ).mul(math.sqrt(self.channels))
+            else:
+                logits = torch.einsum(
+                    "bdthw,bd->bthw", pixel_features, query
+                ).mul(math.sqrt(self.channels))
         logits = logits.unsqueeze(1)
         output_size = tuple(int(value) for value in output_size)
+        if self.spatial_dims == 3:
+            return _trilinear_interpolate_fp32(logits, size=output_size)
         return F.interpolate(
             logits, size=output_size, mode="bilinear", align_corners=False
         )

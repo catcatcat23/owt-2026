@@ -254,6 +254,81 @@ class OrganSlotModelTests(unittest.TestCase):
         ))
 
 
+    def test_3d_query_heads_forward_backward_and_gradient_isolation(self):
+        images = torch.rand(2, 3, 4, 32, 32)
+        keep = torch.tensor([[1, 0, 1], [0, 1, 1]], dtype=torch.bool)
+        for head_type in ("query_dot", "multi_query_dot"):
+            with self.subTest(head_type=head_type):
+                torch.manual_seed(8)
+                model = tiny_model(
+                    "3D", slot_head_type=head_type, slot_head_channels=16
+                )
+                output = model(
+                    images,
+                    slot_keep_mask=keep,
+                    head_compute_mask=keep,
+                    decode_reconstruction=False,
+                )
+                for index, name in enumerate(model.slot_names):
+                    logits = output["calibrated_logits"][name]
+                    self.assertEqual(logits.shape, (2, 1, 4, 32, 32))
+                    dropped_rows = ~keep[:, index]
+                    self.assertTrue(torch.equal(
+                        logits[dropped_rows], torch.zeros_like(
+                            logits[dropped_rows]
+                        )
+                    ))
+                loss = sum(
+                    logits.square().mean()
+                    for logits in output["calibrated_logits"].values()
+                )
+                loss.backward()
+                self.assertTrue(torch.isfinite(loss))
+                self.assertGreater(
+                    model.pixel_query_decoder.pixel_proj.weight.grad.abs().sum(),
+                    0,
+                )
+                self.assertGreater(
+                    model.pixel_query_decoder.query_proj.weight.grad.abs().sum(),
+                    0,
+                )
+                self.assertGreater(
+                    model.patch_embed.proj.weight.grad.abs().sum(), 0
+                )
+                for index, name in enumerate(model.slot_names):
+                    slot = model.slot_bank.get_slot(name)
+                    if keep[:, index].any():
+                        self.assertGreater(
+                            slot.head.embedding.grad.abs().sum(), 0
+                        )
+                    self.assertTrue(all(
+                        parameter.grad is None
+                        for parameter in slot.aher.parameters()
+                    ))
+                self.assertIsNone(model.decoder_pred.weight.grad)
+
+    def test_3d_multi_query_matches_single_for_identical_tokens(self):
+        torch.manual_seed(9)
+        single = tiny_model(
+            "3D", slot_head_type="query_dot", slot_head_channels=16
+        ).pixel_query_decoder
+        multi = tiny_model(
+            "3D", slot_head_type="multi_query_dot", slot_head_channels=16
+        ).pixel_query_decoder
+        multi.load_state_dict(single.state_dict(), strict=True)
+        pixels = torch.randn(2, 16, 4, 8, 8)
+        one_token = torch.randn(2, 1, 32)
+        tokens = one_token.expand(-1, 4, -1).clone()
+        identity = torch.randn(16)
+        output_size = (4, 32, 32)
+        expected = single.forward_mask(
+            pixels, tokens, identity, output_size
+        )
+        actual = multi.forward_mask(pixels, tokens, identity, output_size)
+        self.assertTrue(torch.allclose(
+            actual, expected, atol=1e-6, rtol=1e-6
+        ))
+
     def test_decode_heads_false_skips_every_head(self):
         model = tiny_model(slot_head_type="multiscale_conv")
         output = model(

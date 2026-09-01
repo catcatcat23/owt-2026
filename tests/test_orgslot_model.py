@@ -305,7 +305,10 @@ class OrganSlotModelTests(unittest.TestCase):
                         parameter.grad is None
                         for parameter in slot.aher.parameters()
                     ))
-                self.assertIsNone(model.decoder_pred.weight.grad)
+                self.assertTrue(all(
+                    parameter.grad is None
+                    for parameter in model.decoder_pred.parameters()
+                ))
 
     def test_3d_multi_query_matches_single_for_identical_tokens(self):
         torch.manual_seed(9)

@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 
 from losses_orgslot import base_segmentation_loss
+from OrganSlotEmbed import _trilinear_interpolate_fp32
 from OWT_models_orgslot import OrganSlotMaskedAutoencoderViT
 from util.checkpoint_orgslot import (
     compare_parameter_hashes,
@@ -289,6 +290,17 @@ class OrganSlotModelTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(loss))
         head = model.slot_bank.get_slot("kidney").head
         self.assertIsNotNone(head.proj.weight.grad)
+
+    def test_bf16_trilinear_resize_uses_differentiable_fp32_fallback(self):
+        features = torch.randn(
+            1, 3, 2, 4, 4, dtype=torch.bfloat16, requires_grad=True
+        )
+        resized = _trilinear_interpolate_fp32(features, size=(4, 8, 8))
+        self.assertEqual(resized.dtype, torch.bfloat16)
+        self.assertEqual(resized.shape, (1, 3, 4, 8, 8))
+        resized.float().square().mean().backward()
+        self.assertIsNotNone(features.grad)
+        self.assertTrue(torch.isfinite(features.grad.float()).all())
 
     def test_fixed_fusion_2d_and_3d_forward_backward(self):
         for dataset_type in ("2D", "3D"):

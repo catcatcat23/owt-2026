@@ -16,7 +16,7 @@ set -euo pipefail
 
 ROOT=/gpfs/work/aac/sifansong
 WORKDIR=${ROOT}/worktrees/orgslot_armb_3d
-TRAIN_JOB_ID=126772
+TRAIN_JOB_ID=${TRAIN_JOB_ID:?submit with --export=ALL,TRAIN_JOB_ID=<job_id>}
 RUN_TAG=OrgSlot_WORD07072_ROI20_RetainedMultiConv3D_FixFr4_SmallOrgan_L0.01_Resume50_BF16_Clip1
 RUN_NAME=${RUN_TAG}_${TRAIN_JOB_ID}
 CHECKPOINT=${WORKDIR}/Results/OrganSlotBank/Common8/WORD_3D/${RUN_NAME}/checkpoint-199.pth

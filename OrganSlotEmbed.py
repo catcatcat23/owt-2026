@@ -21,6 +21,25 @@ def sanitize_slot_name(name):
     return sanitized
 
 
+def _trilinear_interpolate_fp32(tensor, **kwargs):
+    """Run 3D trilinear interpolation in FP32 for AMP compatibility.
+
+    The PyTorch build on XEC does not implement the CUDA BF16
+    ``upsample_trilinear3d`` kernel. Keeping only this parameter-free resize
+    in FP32 preserves BF16 convolutions and a fully differentiable path while
+    avoiding a runtime failure before the first resumed optimizer step.
+    """
+    original_dtype = tensor.dtype
+    if original_dtype in (torch.float16, torch.bfloat16):
+        resized = F.interpolate(
+            tensor.float(), mode="trilinear", align_corners=False, **kwargs
+        )
+        return resized.to(dtype=original_dtype)
+    return F.interpolate(
+        tensor, mode="trilinear", align_corners=False, **kwargs
+    )
+
+
 class PatchBinaryHead(nn.Module):
     """Minimal LayerNorm+Linear head on an AHER patch canvas."""
 
@@ -41,9 +60,10 @@ class PatchBinaryHead(nn.Module):
         output_size = tuple(int(value) for value in output_size)
         if len(output_size) != len(self.grid_size):
             raise ValueError("output_size dimensionality does not match grid")
-        mode = "bilinear" if len(output_size) == 2 else "trilinear"
+        if len(output_size) == 3:
+            return _trilinear_interpolate_fp32(logits, size=output_size)
         return F.interpolate(
-            logits, size=output_size, mode=mode, align_corners=False
+            logits, size=output_size, mode="bilinear", align_corners=False
         )
 
 
@@ -159,20 +179,16 @@ class MultiScaleBinaryHead3D(nn.Module):
             batch_size, self.channels, *self.grid_size
         )
         for block in self.blocks:
-            features = F.interpolate(
+            features = _trilinear_interpolate_fp32(
                 features,
                 scale_factor=(1.0, 2.0, 2.0),
-                mode="trilinear",
-                align_corners=False,
             )
             features = block(features)
         logits = self.proj(features)
         if tuple(logits.shape[-3:]) != output_size:
-            logits = F.interpolate(
+            logits = _trilinear_interpolate_fp32(
                 logits,
                 size=output_size,
-                mode="trilinear",
-                align_corners=False,
             )
         return logits
 

@@ -6,7 +6,10 @@ import torch
 import torch.nn as nn
 
 from losses_orgslot import base_segmentation_loss
-from OrganSlotEmbed import _trilinear_interpolate_fp32
+from OrganSlotEmbed import (
+    FP32CompatibleDepthwiseConv3d,
+    _trilinear_interpolate_fp32,
+)
 from OWT_models_orgslot import OrganSlotMaskedAutoencoderViT
 from util.checkpoint_orgslot import (
     compare_parameter_hashes,
@@ -379,6 +382,22 @@ class OrganSlotModelTests(unittest.TestCase):
         resized.float().square().mean().backward()
         self.assertIsNotNone(features.grad)
         self.assertTrue(torch.isfinite(features.grad.float()).all())
+
+    def test_bf16_depthwise_conv3d_uses_differentiable_fp32_fallback(self):
+        layer = FP32CompatibleDepthwiseConv3d(
+            4, 4, kernel_size=3, padding=1, groups=4, bias=False
+        )
+        features = torch.randn(
+            1, 4, 2, 4, 4, dtype=torch.bfloat16, requires_grad=True
+        )
+        output = layer(features)
+        self.assertEqual(output.dtype, torch.bfloat16)
+        self.assertEqual(output.shape, features.shape)
+        output.float().square().mean().backward()
+        self.assertIsNotNone(features.grad)
+        self.assertTrue(torch.isfinite(features.grad.float()).all())
+        self.assertIsNotNone(layer.weight.grad)
+        self.assertTrue(torch.isfinite(layer.weight.grad).all())
 
     def test_fixed_fusion_2d_and_3d_forward_backward(self):
         for dataset_type in ("2D", "3D"):

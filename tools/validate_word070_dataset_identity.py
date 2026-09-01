@@ -38,10 +38,14 @@ def _manifest_signature(path):
     return len(rows), _sha256_bytes("\n".join(normalized).encode())
 
 
-def validate(processed_root):
+def validate(processed_root, roi_index=None):
     root = Path(processed_root)
     summary = root / "metadata/preprocess_summary.json"
-    roi_path = root / "metadata/small_organ_roi_index_verified.json"
+    roi_path = (
+        Path(roi_index)
+        if roi_index is not None
+        else root / "metadata/small_organ_roi_index_verified.json"
+    )
     train_path = root / "csv/WORD_Training_2D_native07072.csv"
     test_path = root / "csv/WORD_Test_2D_native07072.csv"
     for path in (summary, roi_path, train_path, test_path):
@@ -79,5 +83,11 @@ def validate(processed_root):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--processed_root", required=True)
+    parser.add_argument("--roi_index")
     args = parser.parse_args()
-    print(json.dumps(validate(args.processed_root), sort_keys=True))
+    print(
+        json.dumps(
+            validate(args.processed_root, roi_index=args.roi_index),
+            sort_keys=True,
+        )
+    )

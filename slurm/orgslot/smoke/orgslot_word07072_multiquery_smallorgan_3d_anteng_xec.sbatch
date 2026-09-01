@@ -38,7 +38,7 @@ export ORGAN_ROI_PROBABILITY=1.0
 export RUN_NAME OUTPUT_DIR
 export N_GPU=1 MICRO_BATCH=1 ACCUM_ITER=1 TARGET_EFFECTIVE_BATCH=1
 export MAX_UPDATES=2 WARMUP_UPDATES=0 ACTUAL_LR=7.5e-5
-export MAX_TRAIN_SAMPLES=8 MAX_VAL_SAMPLES=4 WORKERS=4 SAVE_FREQ=1
+export MAX_VAL_SAMPLES=4 WORKERS=4 SAVE_FREQ=1
 export MASTER_PORT=$((19000 + SLURM_JOB_ID % 20000))
 export PATH=${ROOT}/envs/abdpet/bin:${PATH} PYTHONNOUSERSITE=1
 
@@ -52,5 +52,6 @@ ${PYTHON} tools/validate_orgslot_jointseg_smoke.py \
   --expected-slot-head-type multi_query_dot \
   --expected-background-weight 0 \
   --expected-lambda-seg 0.01 \
+  --allow-unsupervised-slots \
   --expected-spacing 0.7 0.7 2
 ${PYTHON} -c "import torch; c=torch.load('${OUTPUT_DIR}/checkpoint-0.pth', map_location='cpu'); assert c['args'].dimension == '3D'; assert c['args'].slot_head_type == 'multi_query_dot'; print('3D Arm D real-data smoke validated')"

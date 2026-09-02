@@ -191,6 +191,109 @@ class OrganSlotModelTests(unittest.TestCase):
             ))
         self.assertIsNone(model.decoder_pred.weight.grad)
 
+    def test_multi_query_head_remains_available(self):
+        torch.manual_seed(7)
+        model = tiny_model(
+            slot_head_type="multi_query_dot", slot_head_channels=16
+        )
+        images = torch.rand(2, 3, 32, 32)
+        keep = torch.tensor([[1, 0, 1], [0, 1, 1]], dtype=torch.bool)
+        output = model(
+            images,
+            slot_keep_mask=keep,
+            head_compute_mask=keep,
+            decode_reconstruction=False,
+        )
+        self.assertTrue(model.pixel_query_decoder.multi_query)
+        for logits in output["calibrated_logits"].values():
+            self.assertEqual(logits.shape, (2, 1, 32, 32))
+
+    def test_arm_e_multiscale_shapes_gradients_and_query_dependence(self):
+        torch.manual_seed(11)
+        model = tiny_model(
+            slot_head_type="arm_e_multiscale_query", slot_head_channels=16
+        )
+        images = torch.rand(2, 3, 32, 32, requires_grad=True)
+        z, _ = model.forward_encoder(images)
+        pixels, scales = model.pixel_query_decoder.forward_pixels(
+            images, z, return_intermediates=True
+        )
+        self.assertEqual(scales["p4_raw"].shape, (2, 16, 8, 8))
+        self.assertEqual(scales["p8_raw"].shape, (2, 16, 4, 4))
+        self.assertEqual(scales["p16"].shape, (2, 16, 2, 2))
+        self.assertEqual(pixels.shape, (2, 16, 8, 8))
+
+        slot = model.slot_bank.get_slot("kidney")
+        tokens, _ = slot.forward_tokens(z)
+        query = model.pixel_query_decoder.forward_query(
+            tokens, slot.head.embedding
+        )
+        self.assertEqual(query.shape, (2, 16))
+        for query_count in (1, 3, 8):
+            queries = query[:, None].expand(-1, query_count, -1).contiguous()
+            logits = model.pixel_query_decoder.forward_mask_from_query(
+                pixels, queries, (32, 32)
+            )
+            self.assertEqual(logits.shape, (2, query_count, 32, 32))
+
+        normal = model.pixel_query_decoder.forward_mask_from_query(
+            pixels, query, (32, 32)
+        )
+        zeroed = model.pixel_query_decoder.forward_mask_from_query(
+            pixels, torch.zeros_like(query), (32, 32)
+        )
+        shuffled = model.pixel_query_decoder.forward_mask_from_query(
+            pixels, query.flip(0), (32, 32)
+        )
+        self.assertGreater(normal.abs().mean(), 1e-4)
+        self.assertTrue(torch.equal(zeroed, torch.zeros_like(zeroed)))
+        self.assertGreater((normal - shuffled).abs().mean(), 1e-5)
+
+        loss = normal.square().mean()
+        loss.backward()
+        self.assertTrue(torch.isfinite(loss))
+        self.assertGreater(
+            model.pixel_query_decoder.spatial_stem.to_p2[0]
+            .weight.grad.abs().sum(),
+            0,
+        )
+        self.assertGreater(
+            model.pixel_query_decoder.query_proj.weight.grad.abs().sum(), 0
+        )
+        self.assertGreater(slot.collector.conv1.weight.grad.abs().sum(), 0)
+
+    def test_arm_e_does_not_change_reconstruction_path(self):
+        torch.manual_seed(19)
+        arm_c = tiny_model(
+            slot_head_type="query_dot", slot_head_channels=16
+        ).eval()
+        torch.manual_seed(23)
+        arm_e = tiny_model(
+            slot_head_type="arm_e_multiscale_query", slot_head_channels=16
+        ).eval()
+        arm_e_state = arm_e.state_dict()
+        for key, value in arm_c.state_dict().items():
+            if key in arm_e_state and arm_e_state[key].shape == value.shape:
+                arm_e_state[key] = value
+        arm_e.load_state_dict(arm_e_state, strict=True)
+
+        images = torch.rand(2, 3, 32, 32)
+        keep = torch.tensor([[1, 0, 1], [0, 1, 1]], dtype=torch.bool)
+        with torch.no_grad():
+            arm_c_reconstruction = arm_c(
+                images,
+                slot_keep_mask=keep,
+                decode_heads=False,
+            )["reconstruction"]
+            arm_e_reconstruction = arm_e(
+                images,
+                slot_keep_mask=keep,
+                decode_heads=False,
+            )["reconstruction"]
+        self.assertTrue(torch.equal(
+            arm_c_reconstruction, arm_e_reconstruction
+        ))
+
 
     def test_decode_heads_false_skips_every_head(self):
         model = tiny_model(slot_head_type="multiscale_conv")

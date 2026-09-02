@@ -303,6 +303,9 @@ def train_one_epoch(
             "removed_mass": float(removed["mass"].detach()),
             "retained_slots": float(keep.sum(dim=1).float().mean()),
             "roi_fraction": float(roi.float().mean()),
+            "peak_memory_gib": (
+                torch.cuda.max_memory_allocated(device) / (1024 ** 3)
+            ),
             "lr": optimizer.param_groups[0]["lr"],
         }
         for slot_index, slot_name in enumerate(slot_names):

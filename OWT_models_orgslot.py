@@ -9,6 +9,7 @@ import torch.nn as nn
 
 import OWT_models
 from OrganSlotEmbed import (
+    MultiScalePixelQueryDecoder2D,
     OrganSlot,
     OrganSlotBank,
     SharedPixelQueryDecoder2D,
@@ -102,10 +103,22 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             "head_channels": slot_head_channels,
         }
         self.pixel_query_decoder = None
-        if slot_head_type == "query_dot":
+        if slot_head_type in ("query_dot", "multi_query_dot"):
             if model_args.dataset_type != "2D":
                 raise ValueError("query_dot head currently supports 2D only")
             self.pixel_query_decoder = SharedPixelQueryDecoder2D(
+                embed_dim,
+                grid_size,
+                channels=slot_head_channels,
+                multi_query=slot_head_type == "multi_query_dot",
+            )
+        elif slot_head_type == "arm_e_multiscale_query":
+            if model_args.dataset_type != "2D":
+                raise ValueError(
+                    "arm_e_multiscale_query head currently supports 2D only"
+                )
+            self.pixel_query_decoder = MultiScalePixelQueryDecoder2D(
+                in_chans,
                 embed_dim,
                 grid_size,
                 channels=slot_head_channels,
@@ -305,7 +318,11 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                     head_compute_mask[:, slot_index], as_tuple=False
                 ).flatten()
                 if active_head_rows.numel():
-                    if slot.head_type == "query_dot":
+                    if slot.head_type in (
+                        "query_dot",
+                        "multi_query_dot",
+                        "arm_e_multiscale_query",
+                    ):
                         if (
                             pixel_features is None
                             or self.pixel_query_decoder is None
@@ -391,7 +408,12 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         output_size = tuple(images.shape[2:])
         pixel_features = None
         if decode_heads and self.pixel_query_decoder is not None:
-            pixel_features = self.pixel_query_decoder.forward_pixels(z)
+            if self._slot_factory["head_type"] == "arm_e_multiscale_query":
+                pixel_features = self.pixel_query_decoder.forward_pixels(
+                    images, z
+                )
+            else:
+                pixel_features = self.pixel_query_decoder.forward_pixels(z)
         slot_output = self.forward_slots(
             z,
             output_size,

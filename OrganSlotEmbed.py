@@ -39,6 +39,23 @@ def _trilinear_interpolate_fp32(tensor, **kwargs):
     )
 
 
+class FP32CompatibleDepthwiseConv3d(nn.Conv3d):
+    """Run low-precision depthwise Conv3d in FP32 when kernels are missing.
+
+    Some supported cluster PyTorch/CUDA builds do not implement BF16
+    depthwise Conv3d. The cast remains inside the autograd graph, so both
+    input and convolution weights still receive gradients while the rest of
+    the model continues to use AMP.
+    """
+
+    def forward(self, tensor):
+        original_dtype = tensor.dtype
+        with torch.cuda.amp.autocast(enabled=False):
+            bias = None if self.bias is None else self.bias.float()
+            output = self._conv_forward(tensor.float(), self.weight.float(), bias)
+        return output.to(dtype=original_dtype)
+
+
 class PatchBinaryHead(nn.Module):
     """Minimal LayerNorm+Linear head on an AHER patch canvas."""
 
@@ -156,7 +173,7 @@ class MultiScaleBinaryHead3D(nn.Module):
         for _ in range(self.upsample_stages):
             next_channels = max(16, current_channels // 2)
             blocks.append(nn.Sequential(
-                nn.Conv3d(
+                FP32CompatibleDepthwiseConv3d(
                     current_channels,
                     current_channels,
                     kernel_size=3,

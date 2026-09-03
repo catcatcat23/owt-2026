@@ -80,7 +80,7 @@ Two-GPU DDP:
 
 - job 2814794 exposed a launcher import-path error before model execution
 - launcher fixed in commit 75c3b45
-- replacement SIP job 2864218 requests 2x A800 under 4a800
+- replacement SIP job 2864374 requests 2x A800 under 8a800
 - the synthetic DDP preflight deliberately gives rank 0 kidney and rank 1
   spleen, then performs three optimizer steps with fixed collective schema
 
@@ -93,7 +93,7 @@ Two-GPU DDP:
 - formal four GPU training:
   slurm/orgslot/train/orgslot_word07072_arm_e_bolin_sip.sbatch
 
-Formal training must not be submitted until the replacement DDP smoke passes.
+Formal training must not be submitted until job 2864374 passes.
 
 ## Success criteria
 

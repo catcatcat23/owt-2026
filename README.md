@@ -28,7 +28,7 @@ effective batch 192、118800 updates、AdamW、seed 0 均与 Arm A/B 相同。
 | Arm | 账号 / 集群 | Job | 状态 | 正式结果 |
 |---|---|---:|---|---:|
 | E multiscale query-dot 单卡 smoke | bolinren19 / SIP | 2814754 | COMPLETED | 通过 |
-| E multiscale query-dot 双卡 smoke | bolinren19 / SIP | 2864218 | PENDING | 尚无 |
+| E multiscale query-dot 双卡 smoke | bolinren19 / SIP | 2864374 | PENDING | 尚无 |
 
 Arm E 第一版固定沿用 Arm C 的 20 token 平均单 query；Arm D 已说明增加 query
 数量不是主要瓶颈，因此本实验只检验高分辨率空间信息。

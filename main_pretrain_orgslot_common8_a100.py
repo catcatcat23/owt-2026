@@ -51,7 +51,7 @@ def get_args_parser():
     parser.add_argument("--slot_tg_depth", default=1, type=int)
     parser.add_argument(
         "--slot_head_type",
-        choices=("linear", "multiscale_conv", "query_dot"),
+        choices=("linear", "multiscale_conv", "query_dot", "multi_query_dot"),
         default="linear",
     )
     parser.add_argument("--slot_head_channels", default=128, type=int)

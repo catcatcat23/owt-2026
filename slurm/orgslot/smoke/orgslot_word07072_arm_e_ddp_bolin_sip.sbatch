@@ -28,7 +28,7 @@ export MASTER_PORT=$((19000 + SLURM_JOB_ID % 20000))
 ${PYTHON} -m torch.distributed.run \
   --nproc_per_node=2 \
   --master_port="${MASTER_PORT}" \
-  tools/smoke_arm_e_ddp.py
+  -m tools.smoke_arm_e_ddp
 
 export DATA_ROOT=${ROOT}/2026-07/DATA
 export PROCESSED_ROOT=${DATA_ROOT}/processed/OWT_Common8_07072_NATIVE/WORD

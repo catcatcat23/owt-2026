@@ -1,14 +1,15 @@
-# OrganSlot WORD Common8：Arm C Single-Query Mask Head
+# OrganSlot WORD Common8：Arm C / D 参数化 Query-Mask 基线
 
 更新时间：2026-08-28
 
-本分支 `experiment/orgslot-querymask` 测试 Arm C：分割路径绕过 AHER canvas，
-让最终 ViT patch 特征提供空间信息，让器官 token 提供器官身份。
+本分支 `experiment/orgslot-querymask` 已统一 Arm C 与 Arm D。两种结构共享
+`SharedPixelQueryDecoder2D`，只通过 `--slot_head_type` 选择 query 聚合方式：
 
 ```text
 final ViT z -> shared pixel decoder -> P(x)
-20 TGEnc tokens -> mean pool -> organ query q_s
-mask_s(x) = sqrt(D) * cosine(P(x), q_s)
+Arm C (`query_dot`): 20 TGEnc tokens -> mean pool -> one query
+Arm D (`multi_query_dot`): 20 TGEnc tokens -> 20 queries -> log-mean-exp
+mask_s(x) = query-conditioned cosine similarity with P(x)
 ```
 
 reconstruction 路径保持 `OrganCollector -> TGEnc -> AHER -> canvas -> fusion` 不变。
@@ -25,10 +26,11 @@ effective batch 192、118800 updates、AdamW、seed 0 均与 Arm A/B 相同。
 
 | Arm | 账号 / 集群 | Job | 状态 | 正式结果 |
 |---|---|---:|---|---:|
-| C pooled query-dot | bolinren19 / SIP | 2415372 | RUNNING | 尚无，禁止预填 |
+| C pooled query-dot | bolinren19 / SIP | 2415372 | COMPLETED | 82.01% |
+| D multi-query dot | bolinren19 / SIP | 2548702 | COMPLETED | 82.12% |
 
-当前实现把 20 个 TGEnc tokens 先平均为一个 query。它保留器官级语义，但可能把
-token 间的部位分工再次压缩。Arm D 是只改变这一点的后续对照。
+Arm C 与 D 的 small-organ mean 分别为 65.87% 和 65.88%。D 没有形成实质提升，
+说明“单 query 聚合”不是当前主要瓶颈，但两种行为都保留用于可复现消融。
 
 完成后必须使用和 Arm A/B 相同的 24 病例、6990 切片、post-processing 协议；
 head 主结果使用固定 0.5 阈值，训练集校准阈值只能作为次要结果。
@@ -40,6 +42,5 @@ head 主结果使用固定 0.5 阈值，训练集校准阈值只能作为次要�
 
 ## 结果路径
 
-Arm C 在 `bolinren19 / SIP` 运行，结果只应写入本 worktree 的
-`Results/OrganSlotBank/...`。不得套用 `antengcai23 / XEC` 的数据或结果路径。
-运行日志不纳入 Git。
+Arm C/D 在 `bolinren19 / SIP` 运行，结果只应写入运行账号对应 worktree 的
+`Results/OrganSlotBank/...`。不得混用不同账号或集群的数据绝对路径。运行日志不纳入 Git。

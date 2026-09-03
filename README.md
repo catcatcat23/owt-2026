@@ -1,19 +1,21 @@
-# OrganSlot WORD Common8：Arm C Single-Query Mask Head
+# OrganSlot WORD Common8：Arm E 多尺度 Pixel Decoder
 
-更新时间：2026-08-28
+更新时间：2026-09-03
 
-本分支 `experiment/orgslot-querymask` 测试 Arm C：分割路径绕过 AHER canvas，
-让最终 ViT patch 特征提供空间信息，让器官 token 提供器官身份。
+本分支 `experiment/orgslot-querymask-multiscale-pixel` 在 Arm C 单 query
+语义路径上加入真正来自输入图像的 P4/P8 空间特征：
 
 ```text
-final ViT z -> shared pixel decoder -> P(x)
+image -> Conv stem -> P4/P8 --+
+final ViT z -> P16 -----------+-> top-down pixel decoder -> P(x)
 20 TGEnc tokens -> mean pool -> organ query q_s
 mask_s(x) = sqrt(D) * cosine(P(x), q_s)
 ```
 
 reconstruction 路径保持 `OrganCollector -> TGEnc -> AHER -> canvas -> fusion` 不变。
-因此 Arm C 只改变 segmentation readout，直接检验 AHER canvas 是否是分割空间信息的
-瓶颈。
+空间支路不能独立输出 mask，最终 mask 始终由 organ query 点积控制。详细设计、
+验证证据和任务记录见
+[docs/ORGSLOT_WORD070_ARM_E_MULTISCALE_PIXEL.md](docs/ORGSLOT_WORD070_ARM_E_MULTISCALE_PIXEL.md)。
 
 ## 锁定的可比配置
 
@@ -25,10 +27,11 @@ effective batch 192、118800 updates、AdamW、seed 0 均与 Arm A/B 相同。
 
 | Arm | 账号 / 集群 | Job | 状态 | 正式结果 |
 |---|---|---:|---|---:|
-| C pooled query-dot | bolinren19 / SIP | 2415372 | RUNNING | 尚无，禁止预填 |
+| E multiscale query-dot 单卡 smoke | bolinren19 / SIP | 2814754 | COMPLETED | 通过 |
+| E multiscale query-dot 双卡 smoke | bolinren19 / SIP | 2864218 | PENDING | 尚无 |
 
-当前实现把 20 个 TGEnc tokens 先平均为一个 query。它保留器官级语义，但可能把
-token 间的部位分工再次压缩。Arm D 是只改变这一点的后续对照。
+Arm E 第一版固定沿用 Arm C 的 20 token 平均单 query；Arm D 已说明增加 query
+数量不是主要瓶颈，因此本实验只检验高分辨率空间信息。
 
 完成后必须使用和 Arm A/B 相同的 24 病例、6990 切片、post-processing 协议；
 head 主结果使用固定 0.5 阈值，训练集校准阈值只能作为次要结果。

@@ -208,6 +208,25 @@ class OrganSlotModelTests(unittest.TestCase):
         for logits in output["calibrated_logits"].values():
             self.assertEqual(logits.shape, (2, 1, 32, 32))
 
+    def test_multi_query_matches_single_query_for_identical_tokens(self):
+        torch.manual_seed(7)
+        single = tiny_model(
+            slot_head_type="query_dot", slot_head_channels=16
+        ).pixel_query_decoder
+        multi = tiny_model(
+            slot_head_type="multi_query_dot", slot_head_channels=16
+        ).pixel_query_decoder
+        multi.load_state_dict(single.state_dict(), strict=True)
+        pixels = torch.randn(2, 16, 8, 8)
+        one_token = torch.randn(2, 1, 32)
+        tokens = one_token.expand(-1, 4, -1).clone()
+        identity = torch.randn(16)
+        expected = single.forward_mask(pixels, tokens, identity, (32, 32))
+        actual = multi.forward_mask(pixels, tokens, identity, (32, 32))
+        self.assertTrue(torch.allclose(
+            actual, expected, atol=1e-6, rtol=1e-6
+        ))
+
     def test_arm_e_multiscale_shapes_gradients_and_query_dependence(self):
         torch.manual_seed(11)
         model = tiny_model(

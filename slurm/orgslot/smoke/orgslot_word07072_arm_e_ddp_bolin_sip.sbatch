@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=sip_os070_armE_2g
 #SBATCH --partition=gpua800
-#SBATCH --account=xipuhpc
+#SBATCH --account=sifansong
 #SBATCH --qos=4a800
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1

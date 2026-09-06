@@ -357,6 +357,123 @@ class SharedPixelQueryDecoder(nn.Module):
         )
 
 
+class SpatialStem2D(nn.Module):
+    """Lightweight image encoder providing genuine stride-4/8 features."""
+
+    def __init__(self, in_channels, channels):
+        super().__init__()
+        channels = int(channels)
+        hidden_channels = max(16, channels // 2)
+        self.to_p2 = nn.Sequential(
+            nn.Conv2d(
+                int(in_channels), hidden_channels, 3, stride=2, padding=1,
+                bias=False,
+            ),
+            nn.GroupNorm(_group_count(hidden_channels), hidden_channels),
+            nn.GELU(),
+        )
+        self.to_p4 = nn.Sequential(
+            nn.Conv2d(
+                hidden_channels, channels, 3, stride=2, padding=1,
+                bias=False,
+            ),
+            nn.GroupNorm(_group_count(channels), channels),
+            nn.GELU(),
+        )
+        self.to_p8 = nn.Sequential(
+            nn.Conv2d(
+                channels, channels, 3, stride=2, padding=1, bias=False
+            ),
+            nn.GroupNorm(_group_count(channels), channels),
+            nn.GELU(),
+        )
+
+    def forward(self, images):
+        p2 = self.to_p2(images)
+        p4 = self.to_p4(p2)
+        p8 = self.to_p8(p4)
+        return p4, p8
+
+
+class MultiScalePixelQueryDecoder2D(SharedPixelQueryDecoder2D):
+    """Arm E pixel path: ViT P16 semantics fused with image P8/P4 detail."""
+
+    def __init__(self, in_channels, embed_dim, grid_size, channels=128):
+        super().__init__(
+            embed_dim,
+            grid_size,
+            channels=channels,
+            upsample_stages=2,
+        )
+        self.spatial_stem = SpatialStem2D(in_channels, self.channels)
+        self.p8_proj = nn.Conv2d(self.channels, self.channels, 1, bias=False)
+        self.p4_proj = nn.Conv2d(self.channels, self.channels, 1, bias=False)
+
+    def forward_pixels(self, images, z, return_intermediates=False):
+        if images.ndim != 4:
+            raise ValueError("Arm E spatial stem requires BCHW images")
+        batch_size, patch_count, _ = z.shape
+        expected_patches = int(torch.tensor(self.grid_size).prod().item())
+        if patch_count != expected_patches:
+            raise ValueError("encoder patch count does not match pixel grid")
+        if images.shape[0] != batch_size:
+            raise ValueError("images and encoder features must share a batch size")
+
+        p4_raw, p8_raw = self.spatial_stem(images)
+        p16 = self.pixel_proj(self.pixel_norm(z))
+        p16 = p16.transpose(1, 2).reshape(
+            batch_size, self.channels, *self.grid_size
+        )
+        p8_fused = F.interpolate(
+            p16, size=p8_raw.shape[-2:], mode="bilinear", align_corners=False
+        )
+        p8_fused = self.blocks[0](p8_fused + self.p8_proj(p8_raw))
+        p4_fused = F.interpolate(
+            p8_fused,
+            size=p4_raw.shape[-2:],
+            mode="bilinear",
+            align_corners=False,
+        )
+        p4_fused = self.blocks[1](p4_fused + self.p4_proj(p4_raw))
+        if return_intermediates:
+            return p4_fused, {
+                "p4_raw": p4_raw,
+                "p8_raw": p8_raw,
+                "p16": p16,
+                "p8_fused": p8_fused,
+                "p4_fused": p4_fused,
+            }
+        return p4_fused
+
+    def forward_query(self, tokens, slot_identity):
+        pooled_tokens = self.query_norm(tokens).mean(dim=1)
+        return self.query_proj(pooled_tokens) + slot_identity.unsqueeze(0)
+
+    def forward_mask_from_query(self, pixel_features, query, output_size):
+        if pixel_features.shape[0] != query.shape[0]:
+            raise ValueError("pixel features and queries must share a batch size")
+        if query.ndim not in (2, 3):
+            raise ValueError("queries must have shape [B,D] or [B,K,D]")
+        pixel_features = F.normalize(pixel_features.float(), dim=1)
+        query = F.normalize(query.float(), dim=-1)
+        if query.ndim == 2:
+            logits = torch.einsum("bdhw,bd->bhw", pixel_features, query)
+            logits = logits.unsqueeze(1)
+        else:
+            logits = torch.einsum("bdhw,bkd->bkhw", pixel_features, query)
+        logits = logits.mul(math.sqrt(self.channels))
+        output_size = tuple(int(value) for value in output_size)
+        return F.interpolate(
+            logits, size=output_size, mode="bilinear", align_corners=False
+        )
+
+    def forward_mask(self, pixel_features, tokens, slot_identity, output_size):
+        if pixel_features.shape[0] != tokens.shape[0]:
+            raise ValueError("pixel features and tokens must share a batch size")
+        query = self.forward_query(tokens, slot_identity)
+        return self.forward_mask_from_query(pixel_features, query, output_size)
+
+
 class OrganSlot(nn.Module):
     """One collector, local TGEnc, AHER, head, and calibration pair."""
 
@@ -432,7 +549,9 @@ class OrganSlot(nn.Module):
                 else MultiScaleBinaryHead3D
             )
             self.head = head_class(decoder_dim, grid_size, channels=head_channels)
-        elif self.head_type in ("query_dot", "multi_query_dot"):
+        elif self.head_type in (
+            "query_dot", "multi_query_dot", "arm_e_multiscale_query"
+        ):
             self.head = SlotQueryEmbedding(head_channels)
         else:
             raise ValueError("unsupported slot head type: {}".format(head_type))
@@ -454,8 +573,12 @@ class OrganSlot(nn.Module):
         return canvas, tokens, collector_attention, aher_attention
 
     def forward_head(self, canvas, output_size):
-        if self.head_type in ("query_dot", "multi_query_dot"):
-            raise RuntimeError("query heads require tokens and shared pixel features")
+        if self.head_type in (
+            "query_dot", "multi_query_dot", "arm_e_multiscale_query"
+        ):
+            raise RuntimeError(
+                "query heads require tokens and shared pixel features"
+            )
         raw_logits = self.head(canvas, output_size)
         calibrated_logits = (
             self.calibration_scale * raw_logits + self.calibration_bias
@@ -463,7 +586,9 @@ class OrganSlot(nn.Module):
         return raw_logits, calibrated_logits
 
     def forward_query_head(self, tokens, pixel_features, decoder, output_size):
-        if self.head_type not in ("query_dot", "multi_query_dot"):
+        if self.head_type not in (
+            "query_dot", "multi_query_dot", "arm_e_multiscale_query"
+        ):
             raise RuntimeError("forward_query_head requires a query slot")
         raw_logits = decoder.forward_mask(
             pixel_features,

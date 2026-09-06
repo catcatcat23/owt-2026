@@ -58,7 +58,13 @@ def get_args_parser():
     parser.add_argument("--slot_tg_depth", default=1, type=int)
     parser.add_argument(
         "--slot_head_type",
-        choices=("linear", "multiscale_conv", "query_dot", "multi_query_dot"),
+        choices=(
+            "linear",
+            "multiscale_conv",
+            "query_dot",
+            "multi_query_dot",
+            "arm_e_multiscale_query",
+        ),
         default="linear",
     )
     parser.add_argument("--slot_head_channels", default=128, type=int)
@@ -293,9 +299,32 @@ def _load_initial_checkpoint(model, path, args):
         for key, value in full_state.items()
         if not key.startswith("perceptual_loss.")
     }
-    result = model.load_state_dict(state, strict=True)
-    if result.missing_keys or result.unexpected_keys:
-        raise RuntimeError("initial checkpoint load was not exact: {}".format(result))
+    allow_arm_e_spatial_init = (
+        args.slot_head_type == "arm_e_multiscale_query"
+        and _checkpoint_value(checkpoint, "slot_head_type") == "query_dot"
+    )
+    result = model.load_state_dict(
+        state, strict=not allow_arm_e_spatial_init
+    )
+    allowed_missing_prefixes = (
+        "pixel_query_decoder.spatial_stem.",
+        "pixel_query_decoder.p8_proj.",
+        "pixel_query_decoder.p4_proj.",
+    )
+    invalid_missing = [
+        key for key in result.missing_keys
+        if not any(key.startswith(prefix) for prefix in allowed_missing_prefixes)
+    ]
+    if result.unexpected_keys or invalid_missing:
+        raise RuntimeError(
+            "initial checkpoint load was incompatible: {}".format(result)
+        )
+    if result.missing_keys:
+        print(
+            "Arm E initialized new spatial tensors: {}".format(
+                result.missing_keys
+            )
+        )
     return {
         "path": str(Path(path).resolve()),
         "sha256": _sha256(path),
@@ -303,7 +332,8 @@ def _load_initial_checkpoint(model, path, args):
         "source_tensor_count": len(full_state),
         "loaded_tensor_count": len(state),
         "stripped_lpips_tensor_count": len(full_state) - len(state),
-        "exact": True,
+        "exact": not result.missing_keys,
+        "compatible_missing_keys": list(result.missing_keys),
     }
 
 

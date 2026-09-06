@@ -44,6 +44,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         fusion_reference_count=None,
         slot_head_type="linear",
         slot_head_channels=128,
+        pixel_pe="none",
     ):
         if slot_specs is None:
             raise ValueError("slot_specs are required")
@@ -108,6 +109,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                 grid_size,
                 channels=slot_head_channels,
                 multi_query=slot_head_type == "multi_query_dot",
+                pixel_pe=pixel_pe,
             )
 
         for spec in slot_specs:

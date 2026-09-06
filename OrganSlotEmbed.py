@@ -229,6 +229,7 @@ class SharedPixelQueryDecoder(nn.Module):
         channels=128,
         upsample_stages=2,
         multi_query=False,
+        pixel_pe="none",
     ):
         super().__init__()
         self.grid_size = tuple(int(value) for value in grid_size)
@@ -242,6 +243,24 @@ class SharedPixelQueryDecoder(nn.Module):
         if self.upsample_stages < 1:
             raise ValueError("upsample_stages must be positive")
         self.multi_query = bool(multi_query)
+        self.pixel_pe = pixel_pe
+        if pixel_pe not in ("none", "spatial", "temporal", "spatiotemporal"):
+            raise ValueError("unknown pixel PE mode")
+        if self.spatial_dims == 2 and pixel_pe in ("temporal", "spatiotemporal"):
+            raise ValueError("temporal pixel PE requires 3D")
+        if pixel_pe in ("spatial", "spatiotemporal"):
+            from util.pos_embed import get_2d_sincos_pos_embed
+            h, w = self.grid_size[-2:]
+            if h != w or self.channels % 4:
+                raise ValueError("spatial PE requires square grid and channels divisible by 4")
+            pe = torch.from_numpy(get_2d_sincos_pos_embed(self.channels, h)).float()
+            self.spatial_pe = nn.Parameter(pe.T.reshape(1, self.channels, h, w))
+        if pixel_pe in ("temporal", "spatiotemporal"):
+            # Local slab coordinates, matching OWT's temporal PE convention.
+            # fork_rng preserves initialization of all shared baseline parameters.
+            self.temporal_pe = nn.Parameter(torch.empty(1, self.channels, self.grid_size[0], 1, 1))
+            with torch.random.fork_rng(devices=[]):
+                nn.init.normal_(self.temporal_pe, std=0.02)
 
         self.pixel_norm = nn.LayerNorm(embed_dim)
         self.pixel_proj = nn.Linear(embed_dim, self.channels)
@@ -278,6 +297,11 @@ class SharedPixelQueryDecoder(nn.Module):
         features = features.transpose(1, 2).reshape(
             batch_size, self.channels, *self.grid_size
         )
+        if hasattr(self, "spatial_pe"):
+            pe = self.spatial_pe if self.spatial_dims == 2 else self.spatial_pe.unsqueeze(2)
+            features = features + pe.to(dtype=features.dtype)
+        if hasattr(self, "temporal_pe"):
+            features = features + self.temporal_pe.to(dtype=features.dtype)
         for block in self.blocks:
             if self.spatial_dims == 2:
                 features = F.interpolate(

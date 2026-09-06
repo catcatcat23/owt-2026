@@ -62,6 +62,7 @@ def get_args_parser():
         default="linear",
     )
     parser.add_argument("--slot_head_channels", default=128, type=int)
+    parser.add_argument("--pixel_pe", default="none", choices=["none", "spatial", "temporal", "spatiotemporal"])
     parser.add_argument(
         "--fusion_mode",
         choices=FUSION_MODES,
@@ -547,6 +548,7 @@ def main(args):
         fusion_reference_count=args.fusion_reference_count,
         slot_head_type=args.slot_head_type,
         slot_head_channels=args.slot_head_channels,
+        pixel_pe=args.pixel_pe,
     )
     initial_checkpoint_report = None
     if args.init_checkpoint:

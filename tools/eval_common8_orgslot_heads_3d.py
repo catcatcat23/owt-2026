@@ -124,6 +124,7 @@ def build_3d_model(checkpoint_path, slot_specs, input_size, fusion_mode, fix_fra
         fusion_reference_count=fusion_reference_count,
         slot_head_type=slot_head_type,
         slot_head_channels=slot_head_channels,
+        pixel_pe=checkpoint_value(checkpoint, "pixel_pe", "none"),
     )
     full_state = checkpoint["model"]
     state = {

@@ -25,3 +25,19 @@ eight organs, small-organ mean, precision/recall, volume ratio, and per-z counts
 Spatial-only vs none isolates space; temporal-only vs none isolates time;
 both vs each single mode tests combination. An improvement does not by itself
 prove PE absence was the sole cause of collapse.
+
+## Submitted matrix (2026-09-06)
+
+Code snapshot ab7742b. 23 unit/regression tests passed; full tiny 3D PE
+forward/backward passed. Allocated-GPU execution remains pending.
+
+| Arm | Account/cluster | Train | Eval | Dependency |
+|---|---|---|---|---|
+| 2D spatial | bolinren19/SIP | 2910849 | 2910855 | none |
+| 3D none, slice loss | antengcai23/XEC | 132071 | 132072 | held for diagnostics review |
+| 3D spatial | antengcai23/XEC | 132096 | 132097 | afterok:132072 |
+| 3D temporal | antengcai23/XEC | 132098 | 132099 | afterok:132072 |
+| 3D spatial+temporal | antengcai23/XEC | 132100 | 132101 | afterok:132072 |
+
+All training requests are 4 A800 / 24 CPU / 192 GB, four-day limit.
+No historical job was cancelled or modified. No new accuracy results yet.

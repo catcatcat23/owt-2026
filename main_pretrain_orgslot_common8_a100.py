@@ -41,6 +41,7 @@ from util.label_visibility import (
 )
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 from util.orgslot_lossbalance_v3 import build_class_frequency_weights
+from util.mae_transfer import load_mae_transfer_checkpoint
 
 
 def get_args_parser():
@@ -81,6 +82,12 @@ def get_args_parser():
         default="reconstruction",
     )
     parser.add_argument("--init_checkpoint", default="")
+    parser.add_argument("--mae_init_checkpoint", default="")
+    parser.add_argument(
+        "--mae_init_scope",
+        choices=("encoder", "encoder_decoder"),
+        default="encoder_decoder",
+    )
 
     parser.add_argument("--weight_decay", default=0.05, type=float)
     parser.add_argument("--lr", default=None, type=float)
@@ -432,6 +439,12 @@ def main(args):
             raise ValueError("head_only requires --lambda_lpips 0")
         if args.lambda_seg <= 0:
             raise ValueError("head_only requires --lambda_seg > 0")
+    if args.init_checkpoint and args.mae_init_checkpoint:
+        raise ValueError(
+            "--init_checkpoint and --mae_init_checkpoint are mutually exclusive"
+        )
+    if args.training_scope == "head_only" and args.mae_init_checkpoint:
+        raise ValueError("head_only does not support partial MAE initialization")
     if args.disable_train_augmentation and args.organ_roi_aug:
         raise ValueError("disabled augmentation cannot be combined with ROI augmentation")
     for path in (
@@ -446,6 +459,8 @@ def main(args):
         raise FileNotFoundError(args.roi_index)
     if args.init_checkpoint and not Path(args.init_checkpoint).is_file():
         raise FileNotFoundError(args.init_checkpoint)
+    if args.mae_init_checkpoint and not Path(args.mae_init_checkpoint).is_file():
+        raise FileNotFoundError(args.mae_init_checkpoint)
     if args.lambda_lpips and not Path(args.lpips_state).is_file():
         raise FileNotFoundError(args.lpips_state)
     with open(args.preprocess_summary, "r", encoding="utf-8") as handle:
@@ -581,9 +596,14 @@ def main(args):
         pixel_pe=args.pixel_pe,
     )
     initial_checkpoint_report = None
+    mae_checkpoint_report = None
     if args.init_checkpoint:
         initial_checkpoint_report = _load_initial_checkpoint(
             model, args.init_checkpoint, args
+        )
+    elif args.mae_init_checkpoint:
+        mae_checkpoint_report = load_mae_transfer_checkpoint(
+            model, args.mae_init_checkpoint, args.mae_init_scope
         )
     if args.lambda_lpips:
         perceptual_loss = LPIPS(vgg_pretrained=False).eval()
@@ -707,6 +727,13 @@ def main(args):
                 encoding="utf-8",
             ) as handle:
                 json.dump(initial_checkpoint_report, handle, indent=2, sort_keys=True)
+        if mae_checkpoint_report is not None:
+            with open(
+                output_dir / "mae_initial_checkpoint_load.json",
+                "w",
+                encoding="utf-8",
+            ) as handle:
+                json.dump(mae_checkpoint_report, handle, indent=2, sort_keys=True)
 
     log_writer = None
     if misc.is_main_process() and args.log_dir is not None:

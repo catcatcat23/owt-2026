@@ -8,7 +8,11 @@ import torch
 import torch.nn as nn
 
 import OWT_models
-from OrganSlotEmbed import OrganSlot, OrganSlotBank
+from OrganSlotEmbed import (
+    OrganSlot,
+    OrganSlotBank,
+    SharedPixelQueryDecoder,
+)
 
 
 FUSION_MODES = (
@@ -40,6 +44,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         fusion_reference_count=None,
         slot_head_type="linear",
         slot_head_channels=128,
+        pixel_pe="none",
     ):
         if slot_specs is None:
             raise ValueError("slot_specs are required")
@@ -97,6 +102,16 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             "head_type": slot_head_type,
             "head_channels": slot_head_channels,
         }
+        self.pixel_query_decoder = None
+        if slot_head_type in ("query_dot", "multi_query_dot"):
+            self.pixel_query_decoder = SharedPixelQueryDecoder(
+                embed_dim,
+                grid_size,
+                channels=slot_head_channels,
+                multi_query=slot_head_type == "multi_query_dot",
+                pixel_pe=pixel_pe,
+            )
+
         for spec in slot_specs:
             self.append_slot(
                 spec["name"],
@@ -213,6 +228,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         output_size,
         slot_keep_mask=None,
         head_compute_mask=None,
+        pixel_features=None,
         decode_heads=True,
         return_diagnostics=False,
     ):
@@ -290,9 +306,24 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                     head_compute_mask[:, slot_index], as_tuple=False
                 ).flatten()
                 if active_head_rows.numel():
-                    active_raw, active_calibrated = slot.forward_head(
-                        canvas.index_select(0, active_head_rows), output_size
-                    )
+                    if slot.head_type in ("query_dot", "multi_query_dot"):
+                        if (
+                            pixel_features is None
+                            or self.pixel_query_decoder is None
+                        ):
+                            raise RuntimeError(
+                                "query heads require shared pixel features"
+                            )
+                        active_raw, active_calibrated = slot.forward_query_head(
+                            tokens.index_select(0, active_head_rows),
+                            pixel_features.index_select(0, active_head_rows),
+                            self.pixel_query_decoder,
+                            output_size,
+                        )
+                    else:
+                        active_raw, active_calibrated = slot.forward_head(
+                            canvas.index_select(0, active_head_rows), output_size
+                        )
                     full_shape = (batch_size,) + tuple(active_raw.shape[1:])
                     raw = active_raw.new_zeros(full_shape).index_copy(
                         0, active_head_rows, active_raw
@@ -359,11 +390,15 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
     ):
         z, _ = self.forward_encoder(images)
         output_size = tuple(images.shape[2:])
+        pixel_features = None
+        if decode_heads and self.pixel_query_decoder is not None:
+            pixel_features = self.pixel_query_decoder.forward_pixels(z)
         slot_output = self.forward_slots(
             z,
             output_size,
             slot_keep_mask=slot_keep_mask,
             head_compute_mask=head_compute_mask,
+            pixel_features=pixel_features,
             decode_heads=decode_heads,
             return_diagnostics=return_diagnostics,
         )
@@ -440,6 +475,9 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             if train_calibration:
                 slot.calibration_scale.requires_grad = True
                 slot.calibration_bias.requires_grad = True
+        if self.pixel_query_decoder is not None:
+            for parameter in self.pixel_query_decoder.parameters():
+                parameter.requires_grad = True
         return self.parameter_report()
 
     def unfreeze_all(self):

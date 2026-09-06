@@ -26,7 +26,11 @@ from datasets.orgslot_highres import (
 )
 from datasets.orgslot_manifest import OrganSlotManifestDataset
 from engine_pretrain_orgslot_common8_a100 import train_one_epoch
-from OWT_models_orgslot import FUSION_MODES, mae_vit_base_patch16
+from OWT_models_orgslot import (
+    FUSION_MODES,
+    mae_vit_base_patch16,
+    mae_vit_basefix16_patch16,
+)
 from VQ.lpips import LPIPS
 import timm.optim.optim_factory as optim_factory
 import util.misc as misc
@@ -47,14 +51,18 @@ def get_args_parser():
     parser.add_argument("--epochs", default=798, type=int)
     parser.add_argument("--accum_iter", default=12, type=int)
     parser.add_argument("--input_size", default=448, type=int)
+    parser.add_argument("--dimension", choices=("2D", "3D"), default="2D")
+    parser.add_argument("--fix_frame", default=4, type=int)
+    parser.add_argument("--temp_stride", default=1, type=int)
     parser.add_argument("--token_factor", default=20, type=int)
     parser.add_argument("--slot_tg_depth", default=1, type=int)
     parser.add_argument(
         "--slot_head_type",
-        choices=("linear", "multiscale_conv"),
+        choices=("linear", "multiscale_conv", "query_dot", "multi_query_dot"),
         default="linear",
     )
     parser.add_argument("--slot_head_channels", default=128, type=int)
+    parser.add_argument("--pixel_pe", default="none", choices=["none", "spatial", "temporal", "spatiotemporal"])
     parser.add_argument(
         "--fusion_mode",
         choices=FUSION_MODES,
@@ -140,6 +148,18 @@ def get_args_parser():
     parser.add_argument("--balanced_focal_weight", default=0.5, type=float)
     parser.add_argument("--hard_negative_ratio", default=0.02, type=float)
     parser.add_argument("--negative_slice_weight", default=0.1, type=float)
+    parser.add_argument(
+        "--amp_dtype",
+        choices=("fp16", "bf16", "fp32"),
+        default="fp16",
+        help="autocast precision; bf16 is recommended on A800 for stability",
+    )
+    parser.add_argument(
+        "--clip_grad", type=float, default=1.0,
+        help="global gradient norm cap; set <=0 to disable",
+    )
+    parser.add_argument("--finite_check_interval", type=int, default=50)
+
 
     parser.add_argument(
         "--seg_supervision",
@@ -230,11 +250,11 @@ def _model_args(args, slot_count):
     return SimpleNamespace(
         LA=True,
         arch_version="v11",
-        dataset_type="2D",
+        dataset_type=args.dimension,
         token_factor=args.token_factor,
         organ_token_total=args.token_factor * slot_count,
-        fix_frame=0,
-        temp_stride=0,
+        fix_frame=(args.fix_frame if args.dimension == "3D" else 0),
+        temp_stride=(args.temp_stride if args.dimension == "3D" else 0),
         loss_version=[name for name in args.loss_version.split("-") if name != "LPIPS"],
         text_encoding="None",
     )
@@ -297,7 +317,8 @@ def _seed_worker(worker_id):
 def _build_dataset(args, csv_path, classes, stage, training, max_samples):
     raw = OrganSlotManifestDataset(
         csv_path,
-        dataset_type="2D",
+        dataset_type=args.dimension,
+        fix_frame=args.fix_frame,
         intensity_norm="fixed_255",
         expected_size=None,
         max_samples=max_samples,
@@ -340,6 +361,12 @@ def main(args):
 
     if args.device != "cuda":
         raise ValueError("the formal A100 entry point requires --device cuda")
+    if args.amp_dtype == "bf16" and not torch.cuda.is_bf16_supported():
+        raise RuntimeError("BF16 requested but this CUDA device does not support it")
+    if args.clip_grad is not None and args.clip_grad <= 0:
+        args.clip_grad = None
+    if args.finite_check_interval < 0:
+        raise ValueError("finite_check_interval must be non-negative")
     if args.lambda_lpips and "LPIPS" not in args.loss_version.split("-"):
         raise ValueError("lambda_lpips > 0 requires LPIPS in --loss_version")
     if args.lambda_seg < 0:
@@ -407,6 +434,13 @@ def main(args):
         raise ValueError("preprocessing must retain the native resampled matrix")
     if args.input_size != 448 or args.global_crop_size != 448:
         raise ValueError("this experiment requires 448 crop and 448 model input")
+    if args.dimension == "3D":
+        if args.fix_frame < 2:
+            raise ValueError("3D training requires fix_frame >= 2")
+        if args.temp_stride < 1 or args.fix_frame % args.temp_stride:
+            raise ValueError("temp_stride must be a positive divisor of fix_frame")
+    elif args.fix_frame != 4 or args.temp_stride != 1:
+        raise ValueError("fix_frame/temp_stride are only configurable in 3D mode")
     if args.organ_roi_aug:
         with open(args.roi_index, "r", encoding="utf-8") as handle:
             roi_metadata = json.load(handle)
@@ -499,7 +533,12 @@ def main(args):
         raise ValueError("epochs is too small for the requested update budget")
 
     model_args = _model_args(args, len(slot_specs))
-    model = mae_vit_base_patch16(
+    model_factory = (
+        mae_vit_basefix16_patch16
+        if args.dimension == "3D"
+        else mae_vit_base_patch16
+    )
+    model = model_factory(
         img_size=args.input_size,
         norm_pix_loss=False,
         model_args=model_args,
@@ -509,6 +548,7 @@ def main(args):
         fusion_reference_count=args.fusion_reference_count,
         slot_head_type=args.slot_head_type,
         slot_head_channels=args.slot_head_channels,
+        pixel_pe=args.pixel_pe,
     )
     initial_checkpoint_report = None
     if args.init_checkpoint:
@@ -529,6 +569,7 @@ def main(args):
             for name, parameter in model.named_parameters()
             if parameter.requires_grad
             and ".head." not in name
+            and not name.startswith("pixel_query_decoder.")
             and not name.endswith("calibration_scale")
             and not name.endswith("calibration_bias")
         ]
@@ -541,6 +582,9 @@ def main(args):
                 parameter.requires_grad = False
             slot.calibration_scale.requires_grad = False
             slot.calibration_bias.requires_grad = False
+        if model.pixel_query_decoder is not None:
+            for parameter in model.pixel_query_decoder.parameters():
+                parameter.requires_grad = False
 
     device = torch.device(args.device)
     model.to(device)
@@ -558,6 +602,11 @@ def main(args):
     print("warmup updates: {}".format(args.warmup_updates))
     print("slots: {}".format(model.slot_names))
     print("training scope: {}".format(args.training_scope))
+    print(
+        "training dimension: {} (fix_frame={}, temp_stride={})".format(
+            args.dimension, args.fix_frame, args.temp_stride
+        )
+    )
     print("segmentation supervision: {}".format(args.seg_supervision))
     print(
         "slot head: {} (channels={})".format(
@@ -586,6 +635,11 @@ def main(args):
             )
         )
     print("organ ROI augmentation: {}".format(args.organ_roi_aug))
+    print(
+        "numeric policy: amp={} clip_grad={} finite_check_interval={}".format(
+            args.amp_dtype, args.clip_grad, args.finite_check_interval
+        )
+    )
 
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(
@@ -600,7 +654,7 @@ def main(args):
     optimizer = torch.optim.AdamW(
         parameter_groups, lr=args.lr, betas=(0.9, 0.95)
     )
-    loss_scaler = NativeScaler()
+    loss_scaler = NativeScaler(enabled=args.amp_dtype == "fp16")
     misc.load_model(
         args=args,
         model_without_ddp=model_without_ddp,

@@ -34,8 +34,14 @@ TVERSKY_EPS=${TVERSKY_EPS:-1e-6}
 BALANCED_FOCAL_WEIGHT=${BALANCED_FOCAL_WEIGHT:-0.5}
 HARD_NEGATIVE_RATIO=${HARD_NEGATIVE_RATIO:-0.02}
 NEGATIVE_SLICE_WEIGHT=${NEGATIVE_SLICE_WEIGHT:-0.1}
+AMP_DTYPE=${AMP_DTYPE:-fp16}
+CLIP_GRAD=${CLIP_GRAD:-1.0}
+FINITE_CHECK_INTERVAL=${FINITE_CHECK_INTERVAL:-50}
 SLOT_HEAD_TYPE=${SLOT_HEAD_TYPE:-linear}
 SLOT_HEAD_CHANNELS=${SLOT_HEAD_CHANNELS:-128}
+DIMENSION=${DIMENSION:-2D}
+FIX_FRAME=${FIX_FRAME:-4}
+TEMP_STRIDE=${TEMP_STRIDE:-1}
 ORGAN_ROI_PROBABILITY=${ORGAN_ROI_PROBABILITY:-0.2}
 TGR_MODE=${TGR_MODE:-legacy_batch}
 DISABLE_TRAIN_AUGMENTATION=${DISABLE_TRAIN_AUGMENTATION:-0}
@@ -55,6 +61,7 @@ TARGET_EFFECTIVE_BATCH=${TARGET_EFFECTIVE_BATCH:-192}
 MAX_UPDATES=${MAX_UPDATES:-118800}
 WARMUP_UPDATES=${WARMUP_UPDATES:-5940}
 BASE_LR=${BASE_LR:-1e-4}
+ACTUAL_LR=${ACTUAL_LR:-}
 WEIGHT_DECAY=${WEIGHT_DECAY:-0.05}
 WORKERS=${WORKERS:-10}
 SAVE_FREQ=${SAVE_FREQ:-100}
@@ -80,6 +87,10 @@ if [[ "${EFFECTIVE_BATCH}" -ne "${TARGET_EFFECTIVE_BATCH}" ]]; then
   echo "Effective batch ${EFFECTIVE_BATCH} != required ${TARGET_EFFECTIVE_BATCH}" >&2
   exit 2
 fi
+if [[ "${DIMENSION}" != "2D" && "${DIMENSION}" != "3D" ]]; then
+  echo "DIMENSION must be 2D or 3D" >&2
+  exit 2
+fi
 for required in "${PYTHON}" "${TRAIN_CSV}" "${VAL_CSV}" "${PREPROCESS_SUMMARY}" "${LPIPS_STATE}"; do
   if [[ ! -e "${required}" ]]; then
     echo "Missing required path: ${required}" >&2
@@ -101,7 +112,7 @@ if [[ "${ARM}" == "roi20" && ! -f "${ROI_INDEX}" ]]; then
 fi
 
 RUN_NAME=${RUN_NAME:-OrgSlot_WORD112_input448_${ARM}_${FUSION_MODE}_seg${LAMBDA_SEG}_eb${TARGET_EFFECTIVE_BATCH}_u${MAX_UPDATES}}
-OUTPUT_DIR=${OUTPUT_DIR:-${REPO_ROOT}/Results/OrganSlotBank/Common8/WORD_2D/${RUN_NAME}}
+OUTPUT_DIR=${OUTPUT_DIR:-${REPO_ROOT}/Results/OrganSlotBank/Common8/WORD_${DIMENSION}/${RUN_NAME}}
 if [[ -e "${OUTPUT_DIR}" ]]; then
   echo "Refusing to reuse output directory: ${OUTPUT_DIR}" >&2
   exit 2
@@ -116,6 +127,9 @@ COMMAND=(
   --batch_size "${MICRO_BATCH}"
   --accum_iter "${ACCUM_ITER}"
   --input_size 448
+  --dimension "${DIMENSION}"
+  --fix_frame "${FIX_FRAME}"
+  --temp_stride "${TEMP_STRIDE}"
   --global_crop_size 448
   --roi_crop_size 384
   --expected_spacing "${SPACING_ARRAY[@]}"
@@ -129,6 +143,7 @@ COMMAND=(
   --slot_tg_depth 1
   --slot_head_type "${SLOT_HEAD_TYPE}"
   --slot_head_channels "${SLOT_HEAD_CHANNELS}"
+  --pixel_pe "${PIXEL_PE:-none}"
   --fusion_mode "${FUSION_MODE}"
   --fusion_reference_count "${FUSION_REFERENCE_COUNT}"
   --loss_version L2-LPIPS
@@ -146,6 +161,9 @@ COMMAND=(
   --balanced_focal_weight "${BALANCED_FOCAL_WEIGHT}"
   --hard_negative_ratio "${HARD_NEGATIVE_RATIO}"
   --negative_slice_weight "${NEGATIVE_SLICE_WEIGHT}"
+  --amp_dtype "${AMP_DTYPE}"
+  --clip_grad "${CLIP_GRAD}"
+  --finite_check_interval "${FINITE_CHECK_INTERVAL}"
   --tgr_mode "${TGR_MODE}"
   --positive_roi_loss_weight "${POSITIVE_ROI_LOSS_WEIGHT}"
   --roi_frequency_alpha "${ROI_FREQUENCY_ALPHA}"
@@ -197,6 +215,9 @@ fi
 if [[ -n "${RESUME_CHECKPOINT}" ]]; then
   COMMAND+=(--resume "${RESUME_CHECKPOINT}")
 fi
+if [[ -n "${ACTUAL_LR}" ]]; then
+  COMMAND+=(--lr "${ACTUAL_LR}")
+fi
 
 {
   echo "arm=${ARM}"
@@ -212,9 +233,12 @@ fi
   echo "tversky_alpha_fp=${TVERSKY_ALPHA_FP} tversky_beta_fn=${TVERSKY_BETA_FN} tversky_eps=${TVERSKY_EPS}"
   echo "balanced_focal_weight=${BALANCED_FOCAL_WEIGHT} hard_negative_ratio=${HARD_NEGATIVE_RATIO} negative_slice_weight=${NEGATIVE_SLICE_WEIGHT}"
   echo "slot_head_type=${SLOT_HEAD_TYPE} slot_head_channels=${SLOT_HEAD_CHANNELS}"
+  echo "amp_dtype=${AMP_DTYPE} clip_grad=${CLIP_GRAD} finite_check_interval=${FINITE_CHECK_INTERVAL}"
+  echo "dimension=${DIMENSION} fix_frame=${FIX_FRAME} temp_stride=${TEMP_STRIDE}"
   echo "positive_roi_loss_weight=${POSITIVE_ROI_LOSS_WEIGHT} frequency_alpha=${ROI_FREQUENCY_ALPHA} max_weight_ratio=${ROI_MAX_WEIGHT_RATIO}"
   echo "micro_batch=${MICRO_BATCH} accum_iter=${ACCUM_ITER} effective_batch=${EFFECTIVE_BATCH}"
   echo "base_lr=${BASE_LR} weight_decay=${WEIGHT_DECAY}"
+  echo "actual_lr_override=${ACTUAL_LR:-<auto>}"
   echo "max_updates=${MAX_UPDATES} warmup_updates=${WARMUP_UPDATES}"
   echo "resume_checkpoint=${RESUME_CHECKPOINT:-<none>}"
   printf 'command='

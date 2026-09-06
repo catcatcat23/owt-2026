@@ -41,7 +41,12 @@ class LPIPS(nn.Module):
         model.load_state_dict(torch.load(ckpt, map_location=torch.device("cpu")), strict=False)
         return model
 
+    @torch.cuda.amp.autocast(enabled=False)
     def forward(self, input, target):
+        # LPIPS eps=1e-10 underflows to zero in float16. Keep the reference
+        # epsilon while running the frozen perceptual path in float32.
+        input = input.float()
+        target = target.float()
         in0_input, in1_input = (self.scaling_layer(input), self.scaling_layer(target))
         outs0, outs1 = self.net(in0_input), self.net(in1_input)
         feats0, feats1, diffs = {}, {}, {}
@@ -117,9 +122,10 @@ class vgg16(torch.nn.Module):
         return out
 
 
-def normalize_tensor(x,eps=1e-10):
-    norm_factor = torch.sqrt(torch.sum(x**2,dim=1,keepdim=True))
-    return x/(norm_factor+eps)
+def normalize_tensor(x, eps=1e-10):
+    x = x.float()
+    norm_factor = torch.sqrt(torch.sum(x ** 2, dim=1, keepdim=True))
+    return x / (norm_factor + eps)
 
 
 def spatial_average(x, keepdim=True):

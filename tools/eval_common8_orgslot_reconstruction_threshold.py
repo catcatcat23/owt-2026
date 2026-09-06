@@ -187,6 +187,7 @@ def build_model(
             fusion_reference_count=fusion_reference_count,
             slot_head_type=slot_head_type,
             slot_head_channels=slot_head_channels,
+            pixel_pe=checkpoint_value(checkpoint, "pixel_pe", "none"),
         )
     else:
         model = OWT_models.mae_vit_base_patch16(

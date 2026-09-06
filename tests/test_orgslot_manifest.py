@@ -78,6 +78,17 @@ class OrganSlotManifestTests(unittest.TestCase):
             self.assertEqual(sample["image"].shape, (3, 4, 32, 32))
             self.assertEqual(sample["label"].shape, (1, 4, 32, 32))
             self.assertEqual(sample["slice_index"], 0)
+            self.assertEqual(sample["slice_indices"].tolist(), [0, 1, 2, 3])
+
+    def test_3d_window_is_centered_and_boundary_safe(self):
+        with tempfile.TemporaryDirectory() as root:
+            csv_path = self._make_manifest(root, frames=6)
+            raw = OrganSlotManifestDataset(
+                csv_path, dataset_type="3D", fix_frame=4, expected_size=32
+            )
+            self.assertEqual(raw[3]["slice_indices"].tolist(), [1, 2, 3, 4])
+            self.assertEqual(raw[5]["slice_indices"].tolist(), [2, 3, 4, 5])
+            self.assertEqual(raw[5]["slice_index"], 5)
 
 
 if __name__ == "__main__":

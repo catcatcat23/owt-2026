@@ -6,6 +6,10 @@ import torch
 import torch.nn as nn
 
 from losses_orgslot import base_segmentation_loss
+from OrganSlotEmbed import (
+    FP32CompatibleDepthwiseConv3d,
+    _trilinear_interpolate_fp32,
+)
 from OWT_models_orgslot import OrganSlotMaskedAutoencoderViT
 from util.checkpoint_orgslot import (
     compare_parameter_hashes,
@@ -153,6 +157,184 @@ class OrganSlotModelTests(unittest.TestCase):
             model.slot_bank.get_slot("kidney").head.proj.weight.grad
         )
 
+    def test_query_dot_uses_shared_pixels_and_slot_queries(self):
+        torch.manual_seed(5)
+        model = tiny_model(slot_head_type="query_dot", slot_head_channels=16)
+        images = torch.rand(2, 3, 32, 32)
+        keep = torch.tensor([[1, 0, 1], [0, 1, 1]], dtype=torch.bool)
+        output = model(
+            images,
+            slot_keep_mask=keep,
+            head_compute_mask=keep,
+            decode_reconstruction=False,
+        )
+        for index, name in enumerate(model.slot_names):
+            logits = output["calibrated_logits"][name]
+            self.assertEqual(logits.shape, (2, 1, 32, 32))
+            dropped_rows = ~keep[:, index]
+            self.assertTrue(torch.equal(
+                logits[dropped_rows], torch.zeros_like(logits[dropped_rows])
+            ))
+
+        loss = sum(
+            logits.square().mean()
+            for logits in output["calibrated_logits"].values()
+        )
+        loss.backward()
+        self.assertTrue(torch.isfinite(loss))
+        self.assertGreater(
+            model.pixel_query_decoder.pixel_proj.weight.grad.abs().sum(), 0
+        )
+        self.assertGreater(model.patch_embed.proj.weight.grad.abs().sum(), 0)
+        for index, name in enumerate(model.slot_names):
+            slot = model.slot_bank.get_slot(name)
+            if keep[:, index].any():
+                self.assertGreater(slot.head.embedding.grad.abs().sum(), 0)
+            self.assertTrue(all(
+                parameter.grad is None for parameter in slot.aher.parameters()
+            ))
+        self.assertIsNone(model.decoder_pred.weight.grad)
+
+    def test_multi_query_uses_all_token_queries(self):
+        torch.manual_seed(6)
+        model = tiny_model(
+            slot_head_type="multi_query_dot", slot_head_channels=16
+        )
+        images = torch.rand(2, 3, 32, 32)
+        keep = torch.tensor([[1, 0, 1], [0, 1, 1]], dtype=torch.bool)
+        output = model(
+            images,
+            slot_keep_mask=keep,
+            head_compute_mask=keep,
+            decode_reconstruction=False,
+        )
+        for index, name in enumerate(model.slot_names):
+            logits = output["calibrated_logits"][name]
+            self.assertEqual(logits.shape, (2, 1, 32, 32))
+            dropped_rows = ~keep[:, index]
+            self.assertTrue(torch.equal(
+                logits[dropped_rows], torch.zeros_like(logits[dropped_rows])
+            ))
+
+        loss = sum(
+            logits.square().mean()
+            for logits in output["calibrated_logits"].values()
+        )
+        loss.backward()
+        self.assertTrue(torch.isfinite(loss))
+        self.assertGreater(
+            model.pixel_query_decoder.query_proj.weight.grad.abs().sum(), 0
+        )
+        self.assertGreater(
+            model.pixel_query_decoder.pixel_proj.weight.grad.abs().sum(), 0
+        )
+        for index, name in enumerate(model.slot_names):
+            slot = model.slot_bank.get_slot(name)
+            if keep[:, index].any():
+                self.assertGreater(slot.head.embedding.grad.abs().sum(), 0)
+            self.assertTrue(all(
+                parameter.grad is None for parameter in slot.aher.parameters()
+            ))
+        self.assertIsNone(model.decoder_pred.weight.grad)
+
+    def test_multi_query_matches_single_query_for_identical_tokens(self):
+        torch.manual_seed(7)
+        single = tiny_model(
+            slot_head_type="query_dot", slot_head_channels=16
+        ).pixel_query_decoder
+        multi = tiny_model(
+            slot_head_type="multi_query_dot", slot_head_channels=16
+        ).pixel_query_decoder
+        multi.load_state_dict(single.state_dict(), strict=True)
+        pixels = torch.randn(2, 16, 8, 8)
+        one_token = torch.randn(2, 1, 32)
+        tokens = one_token.expand(-1, 4, -1).clone()
+        identity = torch.randn(16)
+        expected = single.forward_mask(pixels, tokens, identity, (32, 32))
+        actual = multi.forward_mask(pixels, tokens, identity, (32, 32))
+        self.assertTrue(torch.allclose(
+            actual, expected, atol=1e-6, rtol=1e-6
+        ))
+
+
+    def test_3d_query_heads_forward_backward_and_gradient_isolation(self):
+        images = torch.rand(2, 3, 4, 32, 32)
+        keep = torch.tensor([[1, 0, 1], [0, 1, 1]], dtype=torch.bool)
+        for head_type in ("query_dot", "multi_query_dot"):
+            with self.subTest(head_type=head_type):
+                torch.manual_seed(8)
+                model = tiny_model(
+                    "3D", slot_head_type=head_type, slot_head_channels=16
+                )
+                output = model(
+                    images,
+                    slot_keep_mask=keep,
+                    head_compute_mask=keep,
+                    decode_reconstruction=False,
+                )
+                for index, name in enumerate(model.slot_names):
+                    logits = output["calibrated_logits"][name]
+                    self.assertEqual(logits.shape, (2, 1, 4, 32, 32))
+                    dropped_rows = ~keep[:, index]
+                    self.assertTrue(torch.equal(
+                        logits[dropped_rows], torch.zeros_like(
+                            logits[dropped_rows]
+                        )
+                    ))
+                loss = sum(
+                    logits.square().mean()
+                    for logits in output["calibrated_logits"].values()
+                )
+                loss.backward()
+                self.assertTrue(torch.isfinite(loss))
+                self.assertGreater(
+                    model.pixel_query_decoder.pixel_proj.weight.grad.abs().sum(),
+                    0,
+                )
+                self.assertGreater(
+                    model.pixel_query_decoder.query_proj.weight.grad.abs().sum(),
+                    0,
+                )
+                self.assertGreater(
+                    model.patch_embed.proj.weight.grad.abs().sum(), 0
+                )
+                for index, name in enumerate(model.slot_names):
+                    slot = model.slot_bank.get_slot(name)
+                    if keep[:, index].any():
+                        self.assertGreater(
+                            slot.head.embedding.grad.abs().sum(), 0
+                        )
+                    self.assertTrue(all(
+                        parameter.grad is None
+                        for parameter in slot.aher.parameters()
+                    ))
+                self.assertTrue(all(
+                    parameter.grad is None
+                    for parameter in model.decoder_pred.parameters()
+                ))
+
+    def test_3d_multi_query_matches_single_for_identical_tokens(self):
+        torch.manual_seed(9)
+        single = tiny_model(
+            "3D", slot_head_type="query_dot", slot_head_channels=16
+        ).pixel_query_decoder
+        multi = tiny_model(
+            "3D", slot_head_type="multi_query_dot", slot_head_channels=16
+        ).pixel_query_decoder
+        multi.load_state_dict(single.state_dict(), strict=True)
+        pixels = torch.randn(2, 16, 4, 8, 8)
+        one_token = torch.randn(2, 1, 32)
+        tokens = one_token.expand(-1, 4, -1).clone()
+        identity = torch.randn(16)
+        output_size = (4, 32, 32)
+        expected = single.forward_mask(
+            pixels, tokens, identity, output_size
+        )
+        actual = multi.forward_mask(pixels, tokens, identity, output_size)
+        self.assertTrue(torch.allclose(
+            actual, expected, atol=1e-6, rtol=1e-6
+        ))
+
     def test_decode_heads_false_skips_every_head(self):
         model = tiny_model(slot_head_type="multiscale_conv")
         output = model(
@@ -174,6 +356,48 @@ class OrganSlotModelTests(unittest.TestCase):
             self.assertEqual(logits.shape, (1, 1, 4, 32, 32))
         output["reconstruction"].mean().backward()
         self.assertIsNotNone(model.patch_embed.proj.weight.grad)
+
+    def test_3d_multiscale_head_forward_backward_shapes(self):
+        torch.manual_seed(4)
+        model = tiny_model(
+            "3D", slot_head_type="multiscale_conv", slot_head_channels=32
+        )
+        images = torch.rand(1, 3, 4, 32, 32)
+        output = model(images, decode_reconstruction=False)
+        for logits in output["slot_logits"].values():
+            self.assertEqual(logits.shape, (1, 1, 4, 32, 32))
+        loss = sum(logits.mean() for logits in output["slot_logits"].values())
+        loss.backward()
+        self.assertTrue(torch.isfinite(loss))
+        head = model.slot_bank.get_slot("kidney").head
+        self.assertIsNotNone(head.proj.weight.grad)
+
+    def test_bf16_trilinear_resize_uses_differentiable_fp32_fallback(self):
+        features = torch.randn(
+            1, 3, 2, 4, 4, dtype=torch.bfloat16, requires_grad=True
+        )
+        resized = _trilinear_interpolate_fp32(features, size=(4, 8, 8))
+        self.assertEqual(resized.dtype, torch.bfloat16)
+        self.assertEqual(resized.shape, (1, 3, 4, 8, 8))
+        resized.float().square().mean().backward()
+        self.assertIsNotNone(features.grad)
+        self.assertTrue(torch.isfinite(features.grad.float()).all())
+
+    def test_bf16_depthwise_conv3d_uses_differentiable_fp32_fallback(self):
+        layer = FP32CompatibleDepthwiseConv3d(
+            4, 4, kernel_size=3, padding=1, groups=4, bias=False
+        )
+        features = torch.randn(
+            1, 4, 2, 4, 4, dtype=torch.bfloat16, requires_grad=True
+        )
+        output = layer(features)
+        self.assertEqual(output.dtype, torch.bfloat16)
+        self.assertEqual(output.shape, features.shape)
+        output.float().square().mean().backward()
+        self.assertIsNotNone(features.grad)
+        self.assertTrue(torch.isfinite(features.grad.float()).all())
+        self.assertIsNotNone(layer.weight.grad)
+        self.assertTrue(torch.isfinite(layer.weight.grad).all())
 
     def test_fixed_fusion_2d_and_3d_forward_backward(self):
         for dataset_type in ("2D", "3D"):

@@ -29,6 +29,9 @@ def main():
     parser.add_argument("--expected-balanced-focal-weight", default=0.5, type=float)
     parser.add_argument("--expected-hard-negative-ratio", default=0.02, type=float)
     parser.add_argument("--expected-negative-slice-weight", default=0.1, type=float)
+    parser.add_argument(
+        "--allow-unsupervised-slots", action="store_true"
+    )
     args = parser.parse_args()
     run_dir = Path(args.run_dir)
     config = json.loads((run_dir / "resolved_config.json").read_text())
@@ -106,6 +109,8 @@ def main():
         if not math.isfinite(float(latest[loss_name])):
             raise RuntimeError("non-finite {}".format(loss_name))
         if float(latest[count_name]) <= 0:
+            if args.allow_unsupervised_slots:
+                continue
             raise RuntimeError("{} received no supervision".format(slot))
         observed_slots.append(slot)
         for suffix in (

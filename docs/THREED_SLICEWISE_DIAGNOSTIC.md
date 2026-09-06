@@ -29,5 +29,19 @@ Tests: mixed slab 1 positive + 3 empty, exact separate means, finite backward,
 equivalence to the old 2D formula, and excluded-slab zero gradient.
 
 No temporal PE, convolution, collector, or reconstruction architecture change.
+Implementation snapshot: 678f97e. Local tests: 3 new loss checks and 20 existing
+loss/TGR checks passed. Tiny 3D reconstruction via collected canvases is equal
+to the existing selected-slot reconstruction forward, with finite output.
+
+Submitted jobs (XEC): B head pilot 131959 -> full head/reconstruction 132069;
+D head pilot 131960 -> full head/reconstruction 132070. Pilot cases=2, full=24.
+Arm D loss-only training 132071 is USER HOLD: release only after diagnostics
+are reviewed, preserving the requested no-retrain-first order. It is registered,
+not training. No claim of loss correction improving Dice has been established.
+Its same-protocol formal head evaluation is 132072, afterok:132071.
+At 2026-09-06 21:30 CST, both pilots await QOSMaxGRESPerUser (MAE occupies
+each account GPU quota). Full diagnostics await pilot success. No new
+checkpoint diagnostic result is available yet.
+
 Only consider temporal PE, then 1x3x3 conv as separate later experiments after
 the loss-only result and evaluator controls are reviewed.

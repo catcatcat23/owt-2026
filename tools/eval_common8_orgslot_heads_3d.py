@@ -62,6 +62,9 @@ def parse_args():
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--print-freq", type=int, default=20)
     parser.add_argument("--fusion-mode", choices=FUSION_MODES, default="linear_sqrt")
+    parser.add_argument("--diagnostics", action="store_true")
+    parser.add_argument("--diagnostic-case-limit", type=int, default=0)
+    parser.add_argument("--amp-dtype", choices=("fp16", "bf16", "fp32"), default="fp16")
     return parser.parse_args()
 
 
@@ -346,6 +349,9 @@ def summarize(rows, class_ids, class_names):
 
 def main():
     args = parse_args()
+    if args.diagnostics:
+        from tools.orgslot_3d_diagnostics import run
+        return run(args)
     checkpoint_path = Path(args.checkpoint).resolve()
     test_csv = Path(args.test_csv).resolve()
     preprocess_summary = Path(args.preprocess_summary).resolve()

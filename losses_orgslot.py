@@ -229,6 +229,15 @@ def base_segmentation_loss(
     for slot_index, name in enumerate(slot_names):
         logits = slot_logits[name]
         target = visible_masks[name].to(logits.device)
+        keep_for_slot = slot_keep_mask[:, slot_index]
+        # Preserve 2D behavior; independently supervise temporal planes in 3D.
+        if loss_type == "small_organ" and logits.ndim == 5:
+            frames = logits.shape[2]
+            logits = logits.permute(0, 2, 1, 3, 4).reshape(
+                -1, logits.shape[1], logits.shape[3], logits.shape[4]
+            )
+            target = target.permute(0, 2, 1, 3, 4).reshape_as(logits)
+            keep_for_slot = keep_for_slot.repeat_interleave(frames)
         zero = logits.sum() * 0.0
         sample_losses = []
         positive_losses = []
@@ -248,8 +257,8 @@ def base_segmentation_loss(
                 "hard_negative_focal_loss": zero,
                 "empty_negative_loss": zero,
             }
-        for sample_index in range(batch_size):
-            if not bool(slot_keep_mask[sample_index, slot_index]):
+        for sample_index in range(logits.shape[0]):
+            if not bool(keep_for_slot[sample_index]):
                 continue
             sample_logits = logits[sample_index:sample_index + 1]
             sample_target = target[sample_index:sample_index + 1]

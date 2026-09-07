@@ -13,6 +13,7 @@
 #SBATCH --error=/gpfs/work/aac/antengcai23/slurm/logs/OrganSlot/WORD070_ArmD3D/%x_%j.err
 
 set -euo pipefail
+export SEGMENTATION_UNIT=slice
 ROOT=/gpfs/work/aac/antengcai23
 WORKDIR=${ROOT}/worktrees/orgslot_pixel_pe
 export PIXEL_PE=${PIXEL_PE:?select spatial, temporal, or spatiotemporal}

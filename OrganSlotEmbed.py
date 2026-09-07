@@ -395,7 +395,7 @@ class SpatialStem2D(nn.Module):
         return p4, p8
 
 
-class MultiScalePixelQueryDecoder2D(SharedPixelQueryDecoder2D):
+class MultiScalePixelQueryDecoder2D(SharedPixelQueryDecoder):
     """Arm E pixel path: ViT P16 semantics fused with image P8/P4 detail."""
 
     def __init__(self, in_channels, embed_dim, grid_size, channels=128):

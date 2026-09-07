@@ -13,6 +13,7 @@
 #SBATCH --error=/gpfs/work/aac/antengcai23/slurm/logs/OrganSlot/WORD070_ArmD3D/%x_%j.err
 
 set -euo pipefail
+export SEGMENTATION_UNIT=slice
 ROOT=/gpfs/work/aac/antengcai23
 WORKDIR=${ROOT}/worktrees/orgslot_3d_slicewise
 RUN_TAG=OrgSlot_WORD07072_ROI20_MultiQueryDot3D_SliceWise_SmallOrgan_L0.01_BF16_Clip1

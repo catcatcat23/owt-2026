@@ -8,6 +8,7 @@ def compute(x, y, diagnostics=None, keep=None):
     return base_segmentation_loss(
         {"pancreas": x}, {"pancreas": y}, ["pancreas"], keep,
         loss_type="small_organ", diagnostics=diagnostics,
+        segmentation_unit="slice",
     )[0]
 
 

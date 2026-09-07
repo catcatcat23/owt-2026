@@ -220,6 +220,7 @@ def base_segmentation_loss(
     hard_negative_ratio=0.02,
     negative_slice_weight=0.1,
     diagnostics=None,
+    segmentation_unit="slab",
 ):
     """Average losses selected by an explicit per-sample/per-slot mask."""
     batch_size = slot_keep_mask.shape[0]
@@ -231,7 +232,9 @@ def base_segmentation_loss(
         target = visible_masks[name].to(logits.device)
         keep_for_slot = slot_keep_mask[:, slot_index]
         # Preserve 2D behavior; independently supervise temporal planes in 3D.
-        if loss_type == "small_organ" and logits.ndim == 5:
+        if segmentation_unit not in ("slab", "slice"):
+            raise ValueError("segmentation_unit must be slab or slice")
+        if loss_type == "small_organ" and logits.ndim == 5 and segmentation_unit == "slice":
             frames = logits.shape[2]
             logits = logits.permute(0, 2, 1, 3, 4).reshape(
                 -1, logits.shape[1], logits.shape[3], logits.shape[4]

@@ -1,4 +1,21 @@
-# OrganSlot WORD Common8：Arm E 多尺度 Pixel Decoder
+# OrganSlot：统一开发入口
+
+本地与GitHub统一使用 `feature/orgslot`。已整合2D/3D Arm A/B/C/D/E、
+AutoPET MAE迁移、3D诊断、逐slice损失和Pixel PE。旧实验使用归档tag追溯。
+
+| 配置 | 参数 |
+|---|---|
+| 2D / 3D | `--dimension 2D/3D` |
+| Arm A/B/C/D/E | `--slot_head_type linear/multiscale_conv/query_dot/multi_query_dot/arm_e_multiscale_query` |
+| 无PE / Spatial / Temporal / 两者 | `--pixel_pe none/spatial/temporal/spatiotemporal`，仅C/D；2D不支持Temporal |
+| 旧3D监督 / 新逐slice监督 | `--segmentation_unit slab/slice`；默认slab保持旧实验语义，2D不受影响 |
+| MAE迁移 | `--mae_init_checkpoint`、`--mae_init_scope` |
+
+Arm E目前仅支持2D。各实验现有Slurm脚本记录原账号路径；整合不会自动迁移
+正在运行或排队的任务。新实验应从统一分支建立代码快照并显式设置上述参数。
+
+详见 [PE排表](docs/PIXEL_PE_ABLATION.md)、
+[3D诊断](docs/THREED_SLICEWISE_DIAGNOSTIC.md)。以下保留Arm E历史说明。
 
 更新时间：2026-09-03
 

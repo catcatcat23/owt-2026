@@ -69,6 +69,7 @@ def get_args_parser():
         default="linear",
     )
     parser.add_argument("--slot_head_channels", default=128, type=int)
+    parser.add_argument("--segmentation_unit", default="slab", choices=["slab", "slice"])
     parser.add_argument("--pixel_pe", default="none", choices=["none", "spatial", "temporal", "spatiotemporal"])
     parser.add_argument(
         "--fusion_mode",

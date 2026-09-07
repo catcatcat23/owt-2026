@@ -1,10 +1,16 @@
 # Branch consolidation: 2026-09-07
 
-Active branches: main, feature/orgslot, experiment/psem, experiment/lossbalance.
+Recommended development branches: main, feature/orgslot, experiment/psem, experiment/lossbalance.
 feature/orgslot contains all OrganSlot histories/configurations. Development
-worktree: .worktrees/orgslot_integrated. Historical worktrees remain detached at
-their original commits, preserving logs, checkpoints and uncommitted changes.
+worktree: .worktrees/orgslot_integrated. Historical experiment worktrees remain at
+their original commits and branches, preserving logs, checkpoints and uncommitted changes.
 Existing Slurm tasks continue to use their original directories.
+
+Consolidation and eight archive tags have been pushed to GitHub. Removal of old
+branch refs is NOT completed: automatic approval rejected deletion because
+the user's consolidation request did not explicitly authorize branch deletion.
+Six old remote and eight local experiment branches remain until explicit approval.
+The old orgslot_head_ab worktree is detached at 1b104f4; its files are preserved.
 
 Archive tags use prefix archive/20260907/ and the suffix below:
 

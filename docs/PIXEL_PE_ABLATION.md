@@ -1,5 +1,24 @@
 # Arm D pixel PE controlled ablation
 
+## Scheduling update — 2026-09-08 (supersedes original dependencies below)
+
+Released baseline 132071 from user hold. Removed the baseline-evaluation
+dependency from PE training 132096, 132098 and 132100: all four now queue
+independently. Each evaluation retains afterok on its own training job.
+Changed these eight antengcai23/XEC jobs to QoS 8gpus using scontrol:
+132071/132072, 132096/132097, 132098/132099, 132100/132101.
+Training still requests four A800 GPUs, not eight; no model/data/loss change.
+The submitted script may still say 4gpus: scontrol's current job record is
+authoritative for this scheduling override. New submissions must select QoS
+explicitly after checking permissions, wall-time and live capacity.
+
+At this audit SIP and XEC A800 nodes had no unallocated GPUs. bolinren19/SIP
+retains Arm E and 2D PE; sifansong/XEC retains MAE encoder-only;
+antengcai23/XEC retains MAE encoder-decoder plus these 3D jobs.
+No cross-account data/code migration or duplicate training was submitted.
+Eight-GPU per-user QoS permits up to two four-GPU jobs within that QoS,
+subject to other limits and physical availability; it does not reserve GPUs.
+
 2D: existing no-PE Arm D 82.12% (historical reported score; match its exact
 threshold/postprocess protocol before comparing) versus spatial PE, same seed 0,
 WORD 0.7/0.7/2, ROI20, original small-organ loss, batch192, 118800 updates.

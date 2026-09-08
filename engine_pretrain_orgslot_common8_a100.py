@@ -328,9 +328,16 @@ def train_one_epoch(
                 update_grad=update_grad,
             )
         except RuntimeError as error:
+            bad_gradients = [
+                name for name, parameter in model.named_parameters()
+                if parameter.grad is not None
+                and not bool(torch.isfinite(parameter.grad).all())
+            ]
             raise FloatingPointError(
-                "non-finite gradient at epoch {} step {} samples {}: {}".format(
-                    epoch, data_iter_step, sample_indices, error
+                "backward/update failed at epoch {} step {} samples {}; "
+                "amp_dtype={}; nonfinite_gradient_parameters={}; scaler={}: {}".format(
+                    epoch, data_iter_step, sample_indices, args.amp_dtype,
+                    bad_gradients, loss_scaler.state_dict(), error
                 )
             ) from error
         if update_grad:

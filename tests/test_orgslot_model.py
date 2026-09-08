@@ -40,6 +40,7 @@ def tiny_model(
     fusion_reference_count=None,
     slot_head_type="linear",
     slot_head_channels=128,
+    query_refinement="none",
 ):
     if specs is None:
         specs = [
@@ -66,6 +67,7 @@ def tiny_model(
         fusion_reference_count=fusion_reference_count,
         slot_head_type=slot_head_type,
         slot_head_channels=slot_head_channels,
+        query_refinement=query_refinement,
     )
 
 

@@ -395,10 +395,63 @@ class SpatialStem2D(nn.Module):
         return p4, p8
 
 
+class QueryCrossAttention(nn.Module):
+    """One pre-norm query-to-image block; FP32 attention, no extra PE."""
+
+    def __init__(self, channels, heads=4):
+        super().__init__()
+        if channels % heads:
+            raise ValueError("cross-attention channels must divide heads")
+        self.heads = heads
+        self.q_norm = nn.LayerNorm(channels)
+        self.memory_norm = nn.LayerNorm(channels)
+        self.q_proj = nn.Linear(channels, channels)
+        self.k_proj = nn.Linear(channels, channels)
+        self.v_proj = nn.Linear(channels, channels)
+        self.out_proj = nn.Linear(channels, channels)
+        self.ffn_norm = nn.LayerNorm(channels)
+        self.ffn = nn.Sequential(
+            nn.Linear(channels, channels * 2), nn.GELU(),
+            nn.Linear(channels * 2, channels),
+        )
+
+    def forward(self, query, pixels, mode="normal"):
+        if mode not in ("normal", "uniform", "bypass"):
+            raise ValueError("unknown attention intervention")
+        # This is pooled fused P4, NOT the separate P8 lateral feature.
+        with torch.cuda.amp.autocast(enabled=False):
+            memory_map = F.avg_pool2d(pixels.float(), 2)
+            memory = self.memory_norm(memory_map.flatten(2).transpose(1, 2))
+            batch, locations, channels = memory.shape
+            head_dim = channels // self.heads
+            q = self.q_proj(self.q_norm(query.float())).reshape(
+                batch, self.heads, 1, head_dim
+            )
+            k = self.k_proj(memory).reshape(
+                batch, locations, self.heads, head_dim
+            ).transpose(1, 2)
+            v = self.v_proj(memory).reshape(
+                batch, locations, self.heads, head_dim
+            ).transpose(1, 2)
+            weights = torch.softmax(
+                (q @ k.transpose(-1, -2)) / math.sqrt(head_dim), dim=-1
+            )
+            if mode == "uniform":
+                weights = torch.ones_like(weights) / locations
+            context = (weights @ v).reshape(batch, channels)
+            updated = query.float() + self.out_proj(context)
+            updated = updated + self.ffn(self.ffn_norm(updated))
+            if mode == "bypass":
+                updated = query.float()
+            attention = weights.reshape(batch, self.heads, *memory_map.shape[-2:])
+        return updated, attention
+
+
 class MultiScalePixelQueryDecoder2D(SharedPixelQueryDecoder):
     """Arm E pixel path: ViT P16 semantics fused with image P8/P4 detail."""
 
-    def __init__(self, in_channels, embed_dim, grid_size, channels=128):
+    def __init__(self, in_channels, embed_dim, grid_size, channels=128,
+                 query_refinement="none"):
         super().__init__(
             embed_dim,
             grid_size,
@@ -408,6 +461,13 @@ class MultiScalePixelQueryDecoder2D(SharedPixelQueryDecoder):
         self.spatial_stem = SpatialStem2D(in_channels, self.channels)
         self.p8_proj = nn.Conv2d(self.channels, self.channels, 1, bias=False)
         self.p4_proj = nn.Conv2d(self.channels, self.channels, 1, bias=False)
+        if query_refinement not in ("none", "cross_attn"):
+            raise ValueError("unknown query_refinement")
+        self.query_refinement = query_refinement
+        if query_refinement == "cross_attn":
+            # Preserve RNG for subsequently initialized organ slots.
+            with torch.random.fork_rng(devices=[]):
+                self.query_cross_attention = QueryCrossAttention(self.channels)
 
     def forward_pixels(self, images, z, return_intermediates=False):
         if images.ndim != 4:
@@ -471,6 +531,8 @@ class MultiScalePixelQueryDecoder2D(SharedPixelQueryDecoder):
         if pixel_features.shape[0] != tokens.shape[0]:
             raise ValueError("pixel features and tokens must share a batch size")
         query = self.forward_query(tokens, slot_identity)
+        if self.query_refinement == "cross_attn":
+            query, _ = self.query_cross_attention(query, pixel_features)
         return self.forward_mask_from_query(pixel_features, query, output_size)
 
 

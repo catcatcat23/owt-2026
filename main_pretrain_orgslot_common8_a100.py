@@ -69,6 +69,8 @@ def get_args_parser():
         default="linear",
     )
     parser.add_argument("--slot_head_channels", default=128, type=int)
+    parser.add_argument("--query_refinement", default="none",
+                        choices=("none", "cross_attn"))
     parser.add_argument("--segmentation_unit", default="slab", choices=["slab", "slice"])
     parser.add_argument("--pixel_pe", default="none", choices=["none", "spatial", "temporal", "spatiotemporal"])
     parser.add_argument(
@@ -595,6 +597,7 @@ def main(args):
         slot_head_type=args.slot_head_type,
         slot_head_channels=args.slot_head_channels,
         pixel_pe=args.pixel_pe,
+        query_refinement=args.query_refinement,
     )
     initial_checkpoint_report = None
     mae_checkpoint_report = None

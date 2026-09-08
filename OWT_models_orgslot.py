@@ -46,9 +46,14 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         slot_head_type="linear",
         slot_head_channels=128,
         pixel_pe="none",
+        query_refinement="none",
     ):
         if slot_specs is None:
             raise ValueError("slot_specs are required")
+        if query_refinement not in ("none", "cross_attn"):
+            raise ValueError("unknown query_refinement")
+        if query_refinement != "none" and slot_head_type != "arm_e_multiscale_query":
+            raise ValueError("query refinement is currently Arm E only")
         if not model_args.LA:
             raise ValueError("OrganSlotBank v0 requires linear attention")
         if not model_args.arch_version.startswith("v1"):
@@ -122,6 +127,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                 embed_dim,
                 grid_size,
                 channels=slot_head_channels,
+                query_refinement=query_refinement,
             )
 
         for spec in slot_specs:

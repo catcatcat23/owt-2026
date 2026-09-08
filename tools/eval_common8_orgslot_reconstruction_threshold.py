@@ -188,6 +188,7 @@ def build_model(
             slot_head_type=slot_head_type,
             slot_head_channels=slot_head_channels,
             pixel_pe=checkpoint_value(checkpoint, "pixel_pe", "none"),
+            query_refinement=checkpoint_value(checkpoint, "query_refinement", "none"),
         )
     else:
         model = OWT_models.mae_vit_base_patch16(

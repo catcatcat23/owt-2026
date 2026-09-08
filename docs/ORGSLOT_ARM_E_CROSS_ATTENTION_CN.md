@@ -62,9 +62,16 @@ uniform保留value、输出投影、FFN，只取消位置选择；bypass连同FF
 再运行原24病例统一评估。最终无真实训练checkpoint前，不提供“已证明有效”图。
 
 ## 验证
+已提交：bolinren19/SIP，account angelosstefanidis，QoS 8a800。
+训练2920724（4 A800、24 CPU、192 GB）；热图与统一评估2920726
+（1 A800、10 CPU、128 GB），afterok:2920724。
+运行快照：`.worktrees/orgslot_arm_e_crossattn`，detached commit `4cbd096`。
+此次未推送GitHub。5项cross-attention测试、26项整模型回归、2项Arm E回归通过。
+PNG/PDF合成渲染测试通过，但图片查看受沙箱限制，未完成视觉排版验收。
+真实GPU预检查和训练后热图仍等待调度，不能记为已通过/已产生。
+
 已增加：共享参数初始化一致性、严格state dict roundtrip、
 attention逐head空间归一化、normal/uniform/bypass干预差异、
 query对memory依赖、部分器官head参与的整模型finite backward。
 渲染测试仅用合成未训练输入，并明确标注非实验证据。
 GPU预检查通过与否必须读取任务日志，CPU测试不能代替长程稳定性审核。
-

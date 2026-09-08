@@ -214,6 +214,26 @@ def _sha256(path):
     return digest.hexdigest()
 
 
+def _git_provenance():
+    """Return Git metadata without making source-control availability fatal."""
+    commands = {
+        "commit": ["git", "rev-parse", "HEAD"],
+        "status": ["git", "status", "--short"],
+        "diff": ["git", "diff", "--binary"],
+    }
+    values = {}
+    errors = {}
+    for name, command in commands.items():
+        try:
+            values[name] = subprocess.run(
+                command, check=True, capture_output=True, text=True
+            ).stdout
+        except (OSError, subprocess.CalledProcessError) as error:
+            values[name] = ""
+            errors[name] = "{}: {}".format(type(error).__name__, error)
+    return values, errors
+
+
 def _write_provenance(args, output_dir):
     if not misc.is_main_process():
         return
@@ -223,29 +243,35 @@ def _write_provenance(args, output_dir):
     (output_dir / "command.txt").write_text(
         shlex.join([sys.executable, *sys.argv]) + "\n", encoding="utf-8"
     )
-    commit = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    status = subprocess.run(
-        ["git", "status", "--short"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    diff = subprocess.run(
-        ["git", "diff", "--binary"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
+    git_values, git_errors = _git_provenance()
+    commit = git_values["commit"].strip() or "unavailable"
+    status = git_values["status"]
+    diff = git_values["diff"]
     (output_dir / "git_commit.txt").write_text(commit + "\n", encoding="utf-8")
     (output_dir / "git_status.txt").write_text(
-        status if status else "clean\n", encoding="utf-8"
+        status if status else ("not-a-git-worktree\n" if git_errors else "clean\n"),
+        encoding="utf-8",
     )
     (output_dir / "git_diff.patch").write_text(diff, encoding="utf-8")
+    (output_dir / "git_provenance_errors.json").write_text(
+        json.dumps(git_errors, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    source_root = Path(__file__).resolve().parent
+    source_files = (
+        "main_pretrain_orgslot_common8_a100.py",
+        "engine_pretrain_orgslot_common8_a100.py",
+        "OWT_models_orgslot.py",
+        "OrganSlotEmbed.py",
+        "losses_orgslot.py",
+    )
+    (output_dir / "source_checksums.json").write_text(
+        json.dumps(
+            {name: _sha256(source_root / name) for name in source_files},
+            indent=2,
+            sort_keys=True,
+        ) + "\n",
+        encoding="utf-8",
+    )
     shutil.copyfile(args.visibility_config, output_dir / "class_map.json")
     shutil.copyfile(args.preprocess_summary, output_dir / "preprocess_summary.json")
     checksums = {

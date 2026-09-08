@@ -2,7 +2,7 @@
 #SBATCH --job-name=xec_3dD_PE
 #SBATCH --partition=gpua800,gpua8001t
 #SBATCH --account=sifansong
-#SBATCH --qos=4gpus
+#SBATCH --qos=8gpus
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:a800:4
@@ -15,7 +15,7 @@
 set -euo pipefail
 export SEGMENTATION_UNIT=slice
 ROOT=/gpfs/work/aac/antengcai23
-WORKDIR=${ROOT}/worktrees/orgslot_pixel_pe
+WORKDIR=${EXPERIMENT_WORKDIR:?export the verified frozen snapshot directory}
 export PIXEL_PE=${PIXEL_PE:?select spatial, temporal, or spatiotemporal}
 case "${PIXEL_PE}" in spatial|temporal|spatiotemporal) ;; *) exit 2 ;; esac
 RUN_TAG=OrgSlot_WORD07072_ROI20_MultiQueryDot3D_SliceWise_PE_${PIXEL_PE}

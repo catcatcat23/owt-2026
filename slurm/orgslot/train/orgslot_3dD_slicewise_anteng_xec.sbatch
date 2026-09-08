@@ -2,7 +2,7 @@
 #SBATCH --job-name=xec_os070_3dD_slice
 #SBATCH --partition=gpua800,gpua8001t
 #SBATCH --account=sifansong
-#SBATCH --qos=4gpus
+#SBATCH --qos=8gpus
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:a800:4
@@ -15,7 +15,7 @@
 set -euo pipefail
 export SEGMENTATION_UNIT=slice
 ROOT=/gpfs/work/aac/antengcai23
-WORKDIR=${ROOT}/worktrees/orgslot_3d_slicewise
+WORKDIR=${EXPERIMENT_WORKDIR:?export the verified frozen snapshot directory}
 RUN_TAG=OrgSlot_WORD07072_ROI20_MultiQueryDot3D_SliceWise_SmallOrgan_L0.01_BF16_Clip1
 RUN_NAME=${RUN_TAG}_${SLURM_JOB_ID}
 OUTPUT_DIR=${WORKDIR}/Results/OrganSlotBank/Common8/WORD_3D/${RUN_NAME}

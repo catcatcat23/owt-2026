@@ -226,9 +226,10 @@ def _git_provenance():
     for name, command in commands.items():
         try:
             values[name] = subprocess.run(
-                command, check=True, capture_output=True, text=True
+                command, check=True, capture_output=True, text=True,
+                cwd=Path(__file__).resolve().parent, timeout=15,
             ).stdout
-        except (OSError, subprocess.CalledProcessError) as error:
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
             values[name] = ""
             errors[name] = "{}: {}".format(type(error).__name__, error)
     return values, errors

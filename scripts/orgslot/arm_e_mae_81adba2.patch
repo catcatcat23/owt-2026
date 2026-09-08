@@ -1,0 +1,106 @@
+diff --git a/main_pretrain_orgslot_common8_a100.py b/main_pretrain_orgslot_common8_a100.py
+index eb535d0..7d460ff 100644
+--- a/main_pretrain_orgslot_common8_a100.py
++++ b/main_pretrain_orgslot_common8_a100.py
+@@ -37,6 +37,7 @@ from util.label_visibility import (
+ )
+ from util.misc import NativeScalerWithGradNormCount as NativeScaler
+ from util.orgslot_lossbalance_v3 import build_class_frequency_weights
++from util.mae_transfer import load_mae_transfer_checkpoint
+ 
+ 
+ def get_args_parser():
+@@ -73,6 +74,8 @@ def get_args_parser():
+         default="reconstruction",
+     )
+     parser.add_argument("--init_checkpoint", default="")
++    parser.add_argument("--mae_init_checkpoint", default="")
++    parser.add_argument("--mae_init_scope", choices=("encoder", "encoder_decoder"), default="encoder")
+ 
+     parser.add_argument("--weight_decay", default=0.05, type=float)
+     parser.add_argument("--lr", default=None, type=float)
+@@ -193,24 +196,24 @@ def _write_provenance(args, output_dir):
+     (output_dir / "command.txt").write_text(
+         shlex.join([sys.executable, *sys.argv]) + "\n", encoding="utf-8"
+     )
+-    commit = subprocess.run(
+-        ["git", "rev-parse", "HEAD"],
+-        check=True,
+-        capture_output=True,
+-        text=True,
+-    ).stdout.strip()
+-    status = subprocess.run(
+-        ["git", "status", "--short"],
+-        check=True,
+-        capture_output=True,
+-        text=True,
+-    ).stdout
+-    diff = subprocess.run(
+-        ["git", "diff", "--binary"],
+-        check=True,
+-        capture_output=True,
+-        text=True,
+-    ).stdout
++    def git_output(command):
++        try:
++            return subprocess.run(
++                ["git", *command], check=True, capture_output=True, text=True,
++                cwd=Path(__file__).resolve().parent, timeout=15,
++            ).stdout
++        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
++            return "unavailable: {}\n".format(error)
++
++    source_root = Path(__file__).resolve().parent
++    source_hashes = {name: _sha256(source_root / name) for name in (
++        "main_pretrain_orgslot_common8_a100.py", "engine_pretrain_orgslot_common8_a100.py",
++        "OWT_models_orgslot.py", "OrganSlotEmbed.py", "util/mae_transfer.py",
++    )}
++    (output_dir / "source_checksums.json").write_text(json.dumps(source_hashes, indent=2))
++    commit = git_output(["rev-parse", "HEAD"]).strip()
++    status = git_output(["status", "--short"])
++    diff = git_output(["diff", "--binary"])
+     (output_dir / "git_commit.txt").write_text(commit + "\n", encoding="utf-8")
+     (output_dir / "git_status.txt").write_text(
+         status if status else "clean\n", encoding="utf-8"
+@@ -541,6 +544,13 @@ def main(args):
+         slot_head_channels=args.slot_head_channels,
+     )
+     initial_checkpoint_report = None
++    mae_checkpoint_report = None
++    if args.mae_init_checkpoint:
++        if args.init_checkpoint or args.resume or args.training_scope != "reconstruction":
++            raise ValueError("MAE initialization requires a fresh joint-training run")
++        mae_checkpoint_report = load_mae_transfer_checkpoint(
++            model, args.mae_init_checkpoint, args.mae_init_scope
++        )
+     if args.init_checkpoint:
+         initial_checkpoint_report = _load_initial_checkpoint(
+             model, args.init_checkpoint, args
+@@ -646,6 +656,10 @@ def main(args):
+     _write_provenance(args, output_dir)
+     if misc.is_main_process():
+         (output_dir / "vis").mkdir(parents=True, exist_ok=True)
++        if mae_checkpoint_report is not None:
++            (output_dir / "mae_initial_checkpoint_load.json").write_text(
++                json.dumps(mae_checkpoint_report, indent=2, sort_keys=True)
++            )
+         with open(output_dir / "parameter_report.json", "w", encoding="utf-8") as handle:
+             json.dump(model_without_ddp.parameter_report(), handle, indent=2)
+         with open(output_dir / "slot_metadata.json", "w", encoding="utf-8") as handle:
+diff --git a/scripts/orgslot/run_word_112_448_a100.sh b/scripts/orgslot/run_word_112_448_a100.sh
+index b55b244..9e2b4aa 100755
+--- a/scripts/orgslot/run_word_112_448_a100.sh
++++ b/scripts/orgslot/run_word_112_448_a100.sh
+@@ -198,6 +198,12 @@ if [[ -n "${RESUME_CHECKPOINT}" ]]; then
+   COMMAND+=(--resume "${RESUME_CHECKPOINT}")
+ fi
+ 
++if [[ -n "${MAE_INIT_CHECKPOINT:-}" ]]; then
++  test -s "${MAE_INIT_CHECKPOINT}"
++  test -z "${RESUME_CHECKPOINT}"
++  COMMAND+=(--mae_init_checkpoint "${MAE_INIT_CHECKPOINT}" --mae_init_scope "${MAE_INIT_SCOPE:?}")
++fi
++
+ {
+   echo "arm=${ARM}"
+   echo "data_root=${DATA_ROOT}"

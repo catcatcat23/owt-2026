@@ -82,6 +82,12 @@ spacing 0.7 x 0.7 x 2.0、input/ROI 448/384、ROI probability 0.2、token
 factor 20、retained supervision、small-organ loss、segmentation weight 0.01、
 effective batch 192、118800 updates、AdamW、seed 0 均与 Arm A/B 相同。
 
+## MAE 迁移与 recon 最新补充（2026-09-08）
+
+Arm B MAE encoder / encoder+decoder 的 recon 已完整核验，分别80.57% / 81.42%。
+Arm E MAE 三臂配置、八类表及任务编号见 [专项记录](docs/ARM_E_MAE_AND_RECON_20260908_CN.md)。
+下面部分状态是历史记录，最新三臂提交状态以专项记录为准。
+
 ## 状态
 
 | Arm | 账号 / 集群 | Job | 状态 | 正式结果 |

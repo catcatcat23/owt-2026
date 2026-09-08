@@ -1,5 +1,28 @@
 # Arm D pixel PE controlled ablation
 
+## Restart after provenance failure — 2026-09-08
+
+Supersedes the earlier job matrix. All jobs below: antengcai23/XEC,
+account sifansong, QoS 8gpus; four A800/24 CPU/192 GB per training,
+one A800/10 CPU/128 GB per evaluation. Training queues independently;
+each evaluation has afterok on its own training. No smoke job submitted.
+
+| Mode | Training | Evaluation |
+|---|---|---|
+| none, slice-wise baseline | 133848 | 133849 |
+| spatial | 133850 | 133851 |
+| temporal | 133852 | 133853 |
+| spatiotemporal | 133854 | 133855 |
+
+Frozen code: /gpfs/work/aac/antengcai23/worktrees/orgslot_3d_restart_01f1666.
+Commit 01f1666; archive SHA256 1ae368a12e0495937a1c65d5f4729c8a414fddeab0241794fd0be9f75730893b.
+Git metadata is optional with a 15-second timeout; actual source hashes
+and dataset checksums remain recorded. Full real non-Git provenance writing,
+three provenance tests, three slice-loss checks and target data identity passed.
+Submission exports conda lib plus shared Mesa lib in LD_LIBRARY_PATH.
+All eight new jobs verified pending (training Priority, evaluation Dependency).
+Old 132071/132072/132097/132099/132101 cancelled; failed runs and files retained.
+
 ## Scheduling update — 2026-09-08 (supersedes original dependencies below)
 
 Released baseline 132071 from user hold. Removed the baseline-evaluation

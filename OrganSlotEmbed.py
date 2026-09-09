@@ -21,6 +21,14 @@ def sanitize_slot_name(name):
     return sanitized
 
 
+def _interpolate_bf16_safe(tensor, **kwargs):
+    """Use FP32 for BF16 bilinear resize; preserve dtype and gradients."""
+    if tensor.dtype == torch.bfloat16 and kwargs.get("mode") == "bilinear":
+        with torch.cuda.amp.autocast(enabled=False):
+            return F.interpolate(tensor.float(), **kwargs).to(dtype=tensor.dtype)
+    return F.interpolate(tensor, **kwargs)
+
+
 def _trilinear_interpolate_fp32(tensor, **kwargs):
     """Run 3D trilinear interpolation in FP32 for AMP compatibility.
 
@@ -31,11 +39,11 @@ def _trilinear_interpolate_fp32(tensor, **kwargs):
     """
     original_dtype = tensor.dtype
     if original_dtype in (torch.float16, torch.bfloat16):
-        resized = F.interpolate(
+        resized = _interpolate_bf16_safe(
             tensor.float(), mode="trilinear", align_corners=False, **kwargs
         )
         return resized.to(dtype=original_dtype)
-    return F.interpolate(
+    return _interpolate_bf16_safe(
         tensor, mode="trilinear", align_corners=False, **kwargs
     )
 
@@ -79,7 +87,7 @@ class PatchBinaryHead(nn.Module):
             raise ValueError("output_size dimensionality does not match grid")
         if len(output_size) == 3:
             return _trilinear_interpolate_fp32(logits, size=output_size)
-        return F.interpolate(
+        return _interpolate_bf16_safe(
             logits, size=output_size, mode="bilinear", align_corners=False
         )
 
@@ -135,13 +143,13 @@ class MultiScaleBinaryHead2D(nn.Module):
             batch_size, self.channels, *self.grid_size
         )
         for block in self.blocks:
-            features = F.interpolate(
+            features = _interpolate_bf16_safe(
                 features, scale_factor=2.0, mode="bilinear", align_corners=False
             )
             features = block(features)
         logits = self.proj(features)
         if tuple(logits.shape[-2:]) != output_size:
-            logits = F.interpolate(
+            logits = _interpolate_bf16_safe(
                 logits, size=output_size, mode="bilinear", align_corners=False
             )
         return logits
@@ -304,7 +312,7 @@ class SharedPixelQueryDecoder(nn.Module):
             features = features + self.temporal_pe.to(dtype=features.dtype)
         for block in self.blocks:
             if self.spatial_dims == 2:
-                features = F.interpolate(
+                features = _interpolate_bf16_safe(
                     features, scale_factor=2.0, mode="bilinear",
                     align_corners=False,
                 )
@@ -352,7 +360,7 @@ class SharedPixelQueryDecoder(nn.Module):
         output_size = tuple(int(value) for value in output_size)
         if self.spatial_dims == 3:
             return _trilinear_interpolate_fp32(logits, size=output_size)
-        return F.interpolate(
+        return _interpolate_bf16_safe(
             logits, size=output_size, mode="bilinear", align_corners=False
         )
 
@@ -484,11 +492,11 @@ class MultiScalePixelQueryDecoder2D(SharedPixelQueryDecoder):
         p16 = p16.transpose(1, 2).reshape(
             batch_size, self.channels, *self.grid_size
         )
-        p8_fused = F.interpolate(
+        p8_fused = _interpolate_bf16_safe(
             p16, size=p8_raw.shape[-2:], mode="bilinear", align_corners=False
         )
         p8_fused = self.blocks[0](p8_fused + self.p8_proj(p8_raw))
-        p4_fused = F.interpolate(
+        p4_fused = _interpolate_bf16_safe(
             p8_fused,
             size=p4_raw.shape[-2:],
             mode="bilinear",
@@ -523,7 +531,7 @@ class MultiScalePixelQueryDecoder2D(SharedPixelQueryDecoder):
             logits = torch.einsum("bdhw,bkd->bkhw", pixel_features, query)
         logits = logits.mul(math.sqrt(self.channels))
         output_size = tuple(int(value) for value in output_size)
-        return F.interpolate(
+        return _interpolate_bf16_safe(
             logits, size=output_size, mode="bilinear", align_corners=False
         )
 

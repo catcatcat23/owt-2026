@@ -48,6 +48,7 @@ export PYTHONNOUSERSITE=1
 test "$((N_GPU * MICRO_BATCH * ACCUM_ITER))" -eq 192
 # Same full data/ROI pool and accumulation in the preflight; fresh formal run follows.
 ${PYTHON} -c "import torch; assert torch.cuda.device_count() == 4 and torch.cuda.is_bf16_supported()"
+${PYTHON} -m unittest discover -s tests -p test_bf16_resize.py -v
 (
   export RUN_NAME="${RUN_NAME}_preflight" OUTPUT_DIR="${OUTPUT_DIR}_preflight"
   export MAX_UPDATES=2 WARMUP_UPDATES=0 SAVE_FREQ=1

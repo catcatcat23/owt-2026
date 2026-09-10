@@ -96,6 +96,13 @@ No SOTA or efficacy claim before full evaluation.
 
 Future formal jobs use maximum allowed walltime, verified on submission: SIP
 4a800/8a800 7 days; XEC 8gpus 5 days, 4gpus 7 days. Existing jobs unchanged.
-The repository's default revision gate requires origin/feature/orgslot, so this
-experimental branch must be integrated there before formal submission under the
-current policy. Do not bypass that gate to launch this branch.
+Formal submission scripts: `slurm/orgslot/train/arm_f.sbatch` and
+`slurm/orgslot/eval/arm_f.sbatch`, with explicit `ARM_F_TARGET`,
+`ARM_F_DIMENSION`, `EXPERIMENT_WORKDIR`, `ARM_F_COMMIT` exports.
+2D: microbatch 2 x 4 GPUs x accumulation 24 = 192 slices.
+3D: microbatch 1 x 4 GPUs x accumulation 12 = 48 slabs (192 slices).
+Both use scratch initialization, actual LR 7.5e-5, 118800 updates. Smaller
+microbatches may change legacy_batch TGR behavior; do not claim exact equivalence
+from matching effective batch alone. The first evaluation is fixed threshold 0.5.
+The branch is fast-forwarded to origin/feature/orgslot before runtime snapshots
+are created and checked; existing worktrees are not updated.

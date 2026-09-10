@@ -136,7 +136,9 @@ mkdir -p "${OUTPUT_DIR}"
 COMMAND=(
   "${PYTHON}" -m torch.distributed.run
   --nproc_per_node="${N_GPU}"
-  --master_port="${MASTER_PORT}"
+  --rdzv_backend=c10d
+  --rdzv_endpoint="localhost:${MASTER_PORT}"
+  --rdzv_id="${SLURM_JOB_ID:-local}"
   main_pretrain_orgslot_common8_a100.py
   --batch_size "${MICRO_BATCH}"
   --accum_iter "${ACCUM_ITER}"

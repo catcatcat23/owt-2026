@@ -121,6 +121,8 @@ def get_args_parser():
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument("--resume", default="")
+    parser.add_argument("--no_ddp_buffer_broadcast", action="store_true",
+                        help="Only for models with immutable buffers; reject unknown buffers")
     parser.add_argument("--start_epoch", default=0, type=int)
     parser.add_argument("--num_workers", default=10, type=int)
     parser.add_argument("--pin_mem", action="store_true")
@@ -724,10 +726,16 @@ def main(args):
     )
 
     if args.distributed:
+        if args.no_ddp_buffer_broadcast:
+            allowed = {"perceptual_loss.scaling_layer.shift", "perceptual_loss.scaling_layer.scale"}
+            unexpected = set(dict(model.named_buffers())) - allowed
+            if unexpected:
+                raise ValueError("Cannot disable broadcast for unknown buffers: {}".format(unexpected))
         model = torch.nn.parallel.DistributedDataParallel(
             model,
             device_ids=[args.gpu],
             find_unused_parameters=(args.lambda_seg != 0),
+            broadcast_buffers=not args.no_ddp_buffer_broadcast,
         )
         model_without_ddp = model.module
     parameter_groups = optim_factory.add_weight_decay(

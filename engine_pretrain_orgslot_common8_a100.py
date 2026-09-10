@@ -10,6 +10,7 @@ import torch.distributed as dist
 from engine_pretrain_orgslot import perceptual_reconstruction_loss
 from losses_orgslot import base_reconstruction_loss, base_segmentation_loss
 import util.misc as misc
+from util.distributed_metrics import reduce_metrics
 from util.orgslot_lossbalance_v3 import state_separated_mask_roi_l2
 from util.slot_tgr import build_base_reconstruction_target, sample_base_slot_keep_mask
 
@@ -341,13 +342,14 @@ def train_one_epoch(
                 )
             ) from error
         if update_grad:
-            _check_finite(
-                {"grad_norm": grad_norm},
-                device,
-                "non-finite gradient norm at epoch {} step {} samples {}".format(
-                    epoch, data_iter_step, sample_indices
-                ),
-            )
+            # With unclipped FP16, GradScaler owns overflow detection and skips
+            # the optimizer step. Preserve that policy for legacy resumes.
+            if args.amp_dtype != "fp16" or args.clip_grad is not None:
+                _check_finite(
+                    {"grad_norm": grad_norm}, device,
+                    "non-finite gradient norm at epoch {} step {} samples {}".format(
+                        epoch, data_iter_step, sample_indices),
+                )
             if (
                 args.finite_check_interval > 0
                 and completed_updates % args.finite_check_interval == 0
@@ -385,7 +387,9 @@ def train_one_epoch(
             "lr": optimizer.param_groups[0]["lr"],
         }
         if update_grad:
-            values["grad_norm"] = float(grad_norm.detach())
+            finite_norm = bool(torch.isfinite(grad_norm))
+            values["grad_norm"] = float(grad_norm.detach()) if finite_norm else 0.0
+            values["amp_overflow"] = float(not finite_norm)
         for slot_index, slot_name in enumerate(slot_names):
             if float(roi_class_weights[slot_index]) <= 0:
                 continue
@@ -477,11 +481,7 @@ def train_one_epoch(
         metric_logger.update(**values)
 
         if update_grad:
-            reduced = {
-                name: misc.all_reduce_mean(value)
-                for name, value in values.items()
-                if name != "lr"
-            }
+            reduced = reduce_metrics(values, device)
             if log_writer is not None:
                 epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
                 for name, value in reduced.items():

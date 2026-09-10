@@ -227,6 +227,9 @@ fi
 if [[ -n "${MAX_STEPS_PER_EPOCH}" ]]; then
   COMMAND+=(--max_steps_per_epoch "${MAX_STEPS_PER_EPOCH}")
 fi
+if [[ "${NO_DDP_BUFFER_BROADCAST:-0}" == 1 ]]; then
+  COMMAND+=(--no_ddp_buffer_broadcast)
+fi
 if [[ "${NO_SAVE}" == "1" ]]; then
   COMMAND+=(--no_save)
 fi

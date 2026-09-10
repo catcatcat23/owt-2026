@@ -113,3 +113,9 @@ head 主结果使用固定 0.5 阈值，训练集校准阈值只能作为次要�
 C/D 的历史结果与 E 的新结果必须分别写入运行账号对应的 worktree
 `Results/OrganSlotBank/...`。不得混用 `bolinren19 / SIP`、`sifansong / XEC`
 或其他账号的数据绝对路径。运行日志和 checkpoint 不纳入 Git。
+# Arm F experimental branch
+
+2D/3D organ-conditioned two-stage attention is available through
+`--slot_head_type arm_f_attention`; `arm_f_linear` is the matched linear-readout
+control. See [configuration, architecture and validation](docs/ARM_F_2D_3D.md).
+No formal Arm F training or benchmark results are available yet.

@@ -65,6 +65,7 @@ def get_args_parser():
             "query_dot",
             "multi_query_dot",
             "arm_e_multiscale_query",
+            "arm_f_attention", "arm_f_linear",
         ),
         default="linear",
     )

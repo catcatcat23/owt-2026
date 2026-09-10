@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 
 import OWT_models
+from ArmFDecoder import ArmFDecoder
 from OrganSlotEmbed import (
     MultiScalePixelQueryDecoder2D,
     OrganSlot,
@@ -54,6 +55,8 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             raise ValueError("unknown query_refinement")
         if query_refinement != "none" and slot_head_type != "arm_e_multiscale_query":
             raise ValueError("query refinement is currently Arm E only")
+        if slot_head_type in ("arm_f_attention", "arm_f_linear") and pixel_pe != "none":
+            raise ValueError("Arm F uses fixed axial attention PE; set pixel_pe=none")
         if not model_args.LA:
             raise ValueError("OrganSlotBank v0 requires linear attention")
         if not model_args.arch_version.startswith("v1"):
@@ -109,6 +112,12 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             "head_channels": slot_head_channels,
         }
         self.pixel_query_decoder = None
+        if slot_head_type in ("arm_f_attention", "arm_f_linear"):
+            self.pixel_query_decoder = ArmFDecoder(
+                in_chans, embed_dim, grid_size, slot_head_channels,
+                int(model_args.token_factor),
+                readout="attention" if slot_head_type == "arm_f_attention" else "linear",
+            )
         if slot_head_type in ("query_dot", "multi_query_dot"):
             self.pixel_query_decoder = SharedPixelQueryDecoder(
                 embed_dim,
@@ -328,6 +337,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                         "query_dot",
                         "multi_query_dot",
                         "arm_e_multiscale_query",
+                        "arm_f_attention", "arm_f_linear",
                     ):
                         if (
                             pixel_features is None
@@ -338,7 +348,9 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                             )
                         active_raw, active_calibrated = slot.forward_query_head(
                             tokens.index_select(0, active_head_rows),
-                            pixel_features.index_select(0, active_head_rows),
+                            ([p.index_select(0, active_head_rows) for p in pixel_features]
+                             if isinstance(pixel_features, list) else
+                             pixel_features.index_select(0, active_head_rows)),
                             self.pixel_query_decoder,
                             output_size,
                         )
@@ -414,7 +426,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         output_size = tuple(images.shape[2:])
         pixel_features = None
         if decode_heads and self.pixel_query_decoder is not None:
-            if self._slot_factory["head_type"] == "arm_e_multiscale_query":
+            if self._slot_factory["head_type"] in ("arm_e_multiscale_query", "arm_f_attention", "arm_f_linear"):
                 pixel_features = self.pixel_query_decoder.forward_pixels(
                     images, z
                 )

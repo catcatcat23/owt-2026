@@ -234,7 +234,7 @@ if [[ "${NO_SAVE}" == "1" ]]; then
   COMMAND+=(--no_save)
 fi
 if [[ -n "${RESUME_CHECKPOINT}" ]]; then
-  COMMAND+=(--resume "${RESUME_CHECKPOINT}")
+  COMMAND+=(--resume "${RESUME_CHECKPOINT}" --mae_init_scope "${MAE_INIT_SCOPE}")
 fi
 if [[ -n "${ACTUAL_LR}" ]]; then
   COMMAND+=(--lr "${ACTUAL_LR}")

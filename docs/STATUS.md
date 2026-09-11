@@ -25,7 +25,7 @@ SIP squeue WorkDir可能只是父目录，实际脚本引用的源码快照需�
 
 ## 下次按顺序检查
 
-1. sacct确认134494退出原因；不能因队列消失就认定完成。
+1. 134494已确认epoch541附近NCCL超时，134495依赖失效。checkpoint-500已CPU加载核验，模型/优化器有限，GradScaler完整。使用arm_e_mae_encoder_resume500.sbatch从501恢复；保持FP16、有效batch192、loss、采样和更新预算，复用固定schema指标归约与冻结LPIPS buffer免广播修复。新运行必须检查跨过541并保存550；根因尚未完全确认，不能只凭提交成功宣称修复验证完成。
 2. 读取E/F/3D正在训练组的最新日志，核对epoch、checkpoint、finite与剩余时间。
 3. 核验所有训练—评估依赖是否有效；失败链不会自己改成新训练。
 4. 完成评估后同时收录head/recon、八类、完整性和阈值，更新RESULTS而非再开日期文档。

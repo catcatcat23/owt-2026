@@ -9,7 +9,7 @@
 | D 2D spatial PE | bolinren19/SIP | 2922771 → 2922773 | PENDING；查BF16插值修复与真实配置 |
 | E cross-attention | bolinren19/SIP | 2923562 → 2923565 | PENDING；查梯度、显存、热图生成 |
 | F 2D 双向交互 | bolinren19/SIP | 2925500 → 2925501 | PENDING；运行快照 arm_f_runtime_0ba5304 |
-| E MAE encoder-only | sifansong/XEC | 134494 → 134495 | 训练未出现在本次squeue；须sacct判定，评估PENDING |
+| E MAE encoder-only 从500恢复 | sifansong/XEC | 135283 → 135284 | 9月11日23:41核验：训练PENDING Priority；评估afterok:135283；旧134495已取消 |
 | E MAE encdec 从500恢复 | sifansong/XEC | 134915 → 134916 | PENDING；确认501续跑与跨原541故障区间 |
 | F 3D 双向交互 | sifansong/XEC | 134901 → 134902 | 训练RUNNING；查slab监督、速度、最高时限内可达预算 |
 | D 3D slice-wise baseline | antengcai23/XEC | 133848 → 133849 | 训练RUNNING；先看precision/recall/volume ratio恢复情况 |
@@ -24,6 +24,14 @@ worktrees/arm_f_runtime_0ba5304；E encdec为worktrees/arme_mae_runtime_43cad30�
 SIP squeue WorkDir可能只是父目录，实际脚本引用的源码快照需另外核验。
 
 ## 下次按顺序检查
+
+Encoder-only恢复提交：代码`f70b8319d10a719772e08ee85ec4ba6e7bd6b1cc`，不可变目录
+`/gpfs/work/aac/sifansong/worktrees/arme_mae_encoder_runtime_f70b831`；入口
+`slurm/orgslot/train/arm_e_mae_encoder_resume500.sbatch`。训练4×A800/24CPU/192GB，
+评估1×A800/10CPU/128GB；均sifansong账户、8gpus QoS、5天。
+版本门禁、checkpoint模型/优化器有限性、双进程CPU Gloo测试通过；GPU尚未启动。
+评估包含checkpoint802的head固定/校准阈值和reconstruction；输出名
+`ArmE_MAE_encoder_resume500_135283`。此记录为提交后文档更新，不修改已排队运行源码。
 
 1. 134494已确认epoch541附近NCCL超时，134495依赖失效。checkpoint-500已CPU加载核验，模型/优化器有限，GradScaler完整。使用arm_e_mae_encoder_resume500.sbatch从501恢复；保持FP16、有效batch192、loss、采样和更新预算，复用固定schema指标归约与冻结LPIPS buffer免广播修复。新运行必须检查跨过541并保存550；根因尚未完全确认，不能只凭提交成功宣称修复验证完成。
 2. 读取E/F/3D正在训练组的最新日志，核对epoch、checkpoint、finite与剩余时间。

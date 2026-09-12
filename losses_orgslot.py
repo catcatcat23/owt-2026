@@ -95,7 +95,11 @@ def small_organ_segmentation_loss(
     hard_negative_ratio=0.02,
     negative_slice_weight=0.1,
 ):
-    """Small-organ loss for one sample, separating positive and empty slices."""
+    """Use dense background focal and dense empty BCE for one sample.
+
+    ``hard_negative_ratio`` and diagnostic names are retained for caller/log
+    compatibility; this dense-loss experiment does not perform top-k mining.
+    """
     logits = logits.float()
     target = target.to(device=logits.device, dtype=logits.dtype)
     if logits.shape[0] != 1:
@@ -107,7 +111,7 @@ def small_organ_segmentation_loss(
         empty_bce = F.binary_cross_entropy_with_logits(
             logits, torch.zeros_like(logits), reduction="none"
         )
-        hard_negative_bce = _topk_mean(empty_bce, hard_negative_ratio)
+        hard_negative_bce = empty_bce.mean()
         return float(negative_slice_weight) * hard_negative_bce, {
             "is_positive": False,
             "tversky_loss": zero,
@@ -132,9 +136,7 @@ def small_organ_segmentation_loss(
             * probabilities[background].pow(float(focal_gamma))
             * cross_entropy[background]
         )
-        hard_negative_focal = _topk_mean(
-            negative_focal_values, hard_negative_ratio
-        )
+        hard_negative_focal = negative_focal_values.mean()
     else:
         hard_negative_focal = zero
     overlap = tversky_loss(

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "${EXPERIMENT_WORKDIR:?}"
+source scripts/orgslot/arm_f_environment.sh
+export OMP_NUM_THREADS=2
+for BACKGROUND_REDUCTION in topk mean; do
+  export BACKGROUND_REDUCTION
+  "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=4 -m tools.smoke_arm_f_batch4
+done

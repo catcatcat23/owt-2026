@@ -179,6 +179,7 @@ COMMAND=(
   --balanced_focal_weight "${BALANCED_FOCAL_WEIGHT}"
   --hard_negative_ratio "${HARD_NEGATIVE_RATIO}"
   --negative_slice_weight "${NEGATIVE_SLICE_WEIGHT}"
+  --background_reduction "${BACKGROUND_REDUCTION:-mean}"
   --amp_dtype "${AMP_DTYPE}"
   --clip_grad "${CLIP_GRAD}"
   --finite_check_interval "${FINITE_CHECK_INTERVAL}"

@@ -232,6 +232,7 @@ def train_one_epoch(
                     negative_slice_weight=args.negative_slice_weight,
                     diagnostics=segmentation_diagnostics,
                     segmentation_unit=getattr(args, "segmentation_unit", "slab"),
+                    background_reduction=getattr(args, "background_reduction", "mean"),
                 )
                 reconstruction_loss = segmentation_loss.detach() * 0.0
                 perceptual_loss = segmentation_loss.detach() * 0.0
@@ -269,6 +270,7 @@ def train_one_epoch(
                         negative_slice_weight=args.negative_slice_weight,
                         diagnostics=segmentation_diagnostics,
                         segmentation_unit=getattr(args, "segmentation_unit", "slab"),
+                        background_reduction=getattr(args, "background_reduction", "mean"),
                     )
                 total_loss = (
                     reconstruction_loss

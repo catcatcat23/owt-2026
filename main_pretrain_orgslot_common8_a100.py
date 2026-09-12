@@ -167,6 +167,7 @@ def get_args_parser():
     parser.add_argument("--balanced_focal_weight", default=0.5, type=float)
     parser.add_argument("--hard_negative_ratio", default=0.02, type=float)
     parser.add_argument("--negative_slice_weight", default=0.1, type=float)
+    parser.add_argument("--background_reduction", choices=("mean", "topk"), default="mean")
     parser.add_argument(
         "--amp_dtype",
         choices=("fp16", "bf16", "fp32"),

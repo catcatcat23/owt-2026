@@ -94,12 +94,15 @@ def small_organ_segmentation_loss(
     balanced_focal_weight=0.5,
     hard_negative_ratio=0.02,
     negative_slice_weight=0.1,
+    background_reduction="mean",
 ):
     """Use dense background focal and dense empty BCE for one sample.
 
-    ``hard_negative_ratio`` and diagnostic names are retained for caller/log
-    compatibility; this dense-loss experiment does not perform top-k mining.
+    ``background_reduction=topk`` preserves the historical loss for resumes.
+    Diagnostic names remain compatible with existing logs.
     """
+    if background_reduction not in ("mean", "topk"):
+        raise ValueError("background_reduction must be mean or topk")
     logits = logits.float()
     target = target.to(device=logits.device, dtype=logits.dtype)
     if logits.shape[0] != 1:
@@ -111,7 +114,8 @@ def small_organ_segmentation_loss(
         empty_bce = F.binary_cross_entropy_with_logits(
             logits, torch.zeros_like(logits), reduction="none"
         )
-        hard_negative_bce = empty_bce.mean()
+        hard_negative_bce = (empty_bce.mean() if background_reduction == "mean"
+                             else _topk_mean(empty_bce, hard_negative_ratio))
         return float(negative_slice_weight) * hard_negative_bce, {
             "is_positive": False,
             "tversky_loss": zero,
@@ -136,7 +140,8 @@ def small_organ_segmentation_loss(
             * probabilities[background].pow(float(focal_gamma))
             * cross_entropy[background]
         )
-        hard_negative_focal = negative_focal_values.mean()
+        hard_negative_focal = (negative_focal_values.mean() if background_reduction == "mean"
+                               else _topk_mean(negative_focal_values, hard_negative_ratio))
     else:
         hard_negative_focal = zero
     overlap = tversky_loss(
@@ -223,6 +228,7 @@ def base_segmentation_loss(
     negative_slice_weight=0.1,
     diagnostics=None,
     segmentation_unit="slab",
+    background_reduction="mean",
 ):
     """Average losses selected by an explicit per-sample/per-slot mask."""
     batch_size = slot_keep_mask.shape[0]
@@ -289,6 +295,7 @@ def base_segmentation_loss(
                 balanced_focal_weight=balanced_focal_weight,
                 hard_negative_ratio=hard_negative_ratio,
                 negative_slice_weight=negative_slice_weight,
+                background_reduction=background_reduction,
             )
             if details["is_positive"]:
                 positive_losses.append(sample_loss)

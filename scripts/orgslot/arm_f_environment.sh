@@ -15,6 +15,12 @@ case "$ARM_F_TARGET" in
     export ROI_INDEX=${PROCESSED_ROOT}/metadata/small_organ_roi_index_verified.json
     export LPIPS_STATE=/gpfs/work/aac/sifansong/data/pretrained/owt_lpips_vgg16.pth
     ;;
+  anteng-xec)
+    export PYTHON=/gpfs/work/aac/antengcai23/envs/abdpet/bin/python
+    export PROCESSED_ROOT=/gpfs/work/aac/antengcai23/data/OWT_Common8_07072_NATIVE/WORD
+    export ROI_INDEX=${PROCESSED_ROOT}/metadata/small_organ_roi_index_verified.json
+    export LPIPS_STATE=/gpfs/work/aac/antengcai23/worktrees/orgslotbank/Results/OrganSlotBank/_assets/owt_lpips_vgg16.pth
+    ;;
   *) exit 2 ;;
 esac
 export DIMENSION=$ARM_F_DIMENSION MANIFEST_TAG=native07072 EXPECTED_SPACING="0.7 0.7 2"

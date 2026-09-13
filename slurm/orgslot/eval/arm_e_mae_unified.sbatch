@@ -17,15 +17,15 @@ CAL_OUTPUT=${EVAL_ROOT}/${RUN_NAME}_ckpt802_heads_train_calibration
 HEAD_OUTPUT=${EVAL_ROOT}/${RUN_NAME}_ckpt802_heads_test
 RECON_OUTPUT=${EVAL_ROOT}/${RUN_NAME}_ckpt802_reconstruction_fixedthr002
 test -s "${CHECKPOINT}"
-"${PYTHON}" - "${CHECKPOINT}" <<'PY'
+"${PYTHON}" - "${CHECKPOINT}" "${EXPECTED_SLOT_HEAD_TYPE:-arm_e_multiscale_query}" <<'PY'
 import sys, torch
 c = torch.load(sys.argv[1], map_location="cpu")
 a = c["args"]
-assert c["epoch"] == 802 and a.slot_head_type == "arm_e_multiscale_query"
+assert c["epoch"] == 802 and a.slot_head_type == sys.argv[2]
 assert list(a.expected_spacing) == [0.7, 0.7, 2.0]
 assert a.input_size == 448 and a.global_crop_size == 448
 assert a.lambda_seg == 0.01 and a.organ_roi_probability == 0.2
-print("Matched Arm E checkpoint", c["epoch"])
+print("Matched checkpoint", a.slot_head_type, c["epoch"])
 PY
 "${PYTHON}" -m tools.eval_common8_orgslot_heads \
  --checkpoint "${CHECKPOINT}" --data-csv "${DATA}/csv/WORD_Training_2D_native07072.csv" \

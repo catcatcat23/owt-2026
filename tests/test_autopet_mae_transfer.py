@@ -11,7 +11,7 @@ from OWT_models_orgslot import OrganSlotMaskedAutoencoderViT
 from util.mae_transfer import load_mae_transfer_checkpoint
 
 
-def _target_model(img_size=64):
+def _target_model(img_size=64, head="linear"):
     model_args = SimpleNamespace(
         LA=True,
         arch_version="v11",
@@ -40,11 +40,30 @@ def _target_model(img_size=64):
         slot_tg_depth=1,
         fusion_mode="linear_sqrt",
         fusion_reference_count=2,
-        slot_head_type="linear",
+        slot_head_type=head,
     )
 
 
 class AutoPETMAETransferTests(unittest.TestCase):
+    def test_arm_f_transfer_preserves_pixel_and_slot_modules(self):
+        source = ArchitectureMatchedMAE(
+            img_size=32, patch_size=16, embed_dim=48, encoder_depth=2,
+            encoder_heads=4, decoder_dim=48, decoder_depth=2, decoder_heads=4,
+        )
+        for scope in ("encoder", "encoder_decoder"):
+            target = _target_model(head="arm_f_attention")
+            before = {k: v.clone() for k, v in target.state_dict().items()}
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "mae.pth"
+                torch.save({"model": source.state_dict()}, path)
+                report = load_mae_transfer_checkpoint(target, path, scope)
+            loaded = {item["target"] for item in report["loaded"]}
+            self.assertTrue(any(k.startswith("blocks1.") for k in loaded))
+            self.assertEqual(any(k.startswith("decoder_blocks.") for k in loaded), scope == "encoder_decoder")
+            for key, value in target.state_dict().items():
+                if key not in loaded:
+                    self.assertTrue(torch.equal(before[key], value), key)
+
     def test_mae_forward_backward_is_finite(self):
         model = ArchitectureMatchedMAE(
             img_size=32,

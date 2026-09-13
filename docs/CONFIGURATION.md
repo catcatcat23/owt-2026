@@ -66,6 +66,14 @@ reconstruction Direct-post 与 head 分开排行；不得测试集逐器官选�
 checkpoint 必须 strict/exact 加载；评估完成标记和病例完整性核验后才入结果表。
 # 后续提交 batch 约定（2026-09-13）
 
+Arm F 2D MAE两臂：`slurm/orgslot/train/arm_f_mae.sbatch`，MAE_INIT_SCOPE为
+encoder或encoder_decoder；复用AutoPET checkpoint-final，初始化不加载optimizer。
+保留topk背景loss、BF16、clip1、ROI20、0.7/0.7/2、118800更新、seed0。
+每卡16/累积3/有效192；运行中无MAE F每卡8，需报告micro-batch差异，不称严格单变量。
+只迁移ViT以及可选重建decoder，不迁移F pixel/attention/slot模块。
+统一评估`slurm/orgslot/eval/arm_f_mae_unified.sbatch`：ckpt802，head固定0.5及
+训练集6000样本阈值校准、完整测试集head与reconstruction固定0.02。
+
 用户指定：后续四卡2D训练每卡batch16、累积3、有效batch192；
 四卡3D训练每卡batch6、累积2、有效batch48 slabs。Arm F共享环境入口已实现。
 其他实验专用脚本新提交前也须按此约定核对，不能沿用旧脚本的batch覆盖值。

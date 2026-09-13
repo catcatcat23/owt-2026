@@ -73,3 +73,12 @@ CPU配置检查与版本门禁通过；未新增GPU smoke，batch6显存/吞吐�
 无MAE正在运行组每卡8，micro-batch不同须披露。评估含ckpt802 head固定/训练集校准及recon。
 7项CPU MAE测试通过（含F两种scope与未加载模块权重不变）；数据门禁及MAE SHA256通过。
 GPU未启动，batch16显存与真实加载报告待检查；不修改已有训练和评估。
+# 2026-09-13 19:10：MAE encdec调度分散
+
+Arm F MAE encoder+decoder已迁到antengcai23/XEC，4gpus QoS，训练137880 → 评估137881。
+原sifansong/XEC 137869/137870已取消；encoder-only 137867/137868保持不变。
+新runtime `/gpfs/work/aac/antengcai23/worktrees/arm_f_mae_encdec_20260913`，
+代码5cee1e95de7e9c758df0e3cb3fc569cdc0fa8d57。训练4A800/24CPU/192GB，评估1A800/10CPU/128GB，均7天。
+MAE使用该账号Results/AutoPET_MAE/TransferredFromSifan下checkpoint-final；SHA256与原账号一致，数据身份门禁通过。
+每卡16/累积3/topk/BF16/更新预算不变。新链已释放hold，PENDING；GPU未验证。
+此时XEC所有A800已分配，SIP普通A800仅2卡零散空余。空闲QoS不代表立即能启动。

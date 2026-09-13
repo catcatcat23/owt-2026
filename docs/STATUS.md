@@ -58,3 +58,18 @@ Encoder-only恢复提交：代码`f70b8319d10a719772e08ee85ec4ba6e7bd6b1cc`，�
 评估均1A800/6CPU/128GB，afterok指向对应新训练；队列已解除hold，提交后PENDING。
 CPU配置检查与版本门禁通过；未新增GPU smoke，batch6显存/吞吐尚待正式启动验证。
 已有checkpoint和日志保留；运行快照不随后续文档提交更新。
+# 2026-09-13：Arm F 2D MAE两臂已提交
+
+| 初始化 | 账号/集群 | 训练 → 统一评估 | 状态 |
+|---|---|---|---|
+| AutoPET MAE encoder-only | sifansong/XEC | 137867 → 137868 | PENDING Priority / afterok:137867 |
+| AutoPET MAE encoder+重建decoder | sifansong/XEC | 137869 → 137870 | PENDING Priority / afterok:137869 |
+
+代码df7ed39cb8529afebb8f1dd982eb8daf382c8c6d；独立目录
+`/gpfs/work/aac/sifansong/worktrees/arm_f_mae_encoder_df7ed39`和
+`/gpfs/work/aac/sifansong/worktrees/arm_f_mae_encoder_decoder_df7ed39`。
+训练4A800/24CPU/192GB，评估1A800/10CPU/128GB；均8gpus QoS、5天。
+每卡16、累积3、有效192，BF16/clip1/topk背景loss/ROI20/WORD070/118800更新不变。
+无MAE正在运行组每卡8，micro-batch不同须披露。评估含ckpt802 head固定/训练集校准及recon。
+7项CPU MAE测试通过（含F两种scope与未加载模块权重不变）；数据门禁及MAE SHA256通过。
+GPU未启动，batch16显存与真实加载报告待检查；不修改已有训练和评估。

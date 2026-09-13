@@ -64,3 +64,10 @@ reconstruction Direct-post 与 head 分开排行；不得测试集逐器官选�
 旧 recon 固定阈值0.02、min component20/opening1，仍需核验具体协议。
 3D 记录 slab overlap fusion、volume ratio、precision/recall、per-z，以及 head/recon 路径。
 checkpoint 必须 strict/exact 加载；评估完成标记和病例完整性核验后才入结果表。
+# 后续提交 batch 约定（2026-09-13）
+
+用户指定：后续四卡2D训练每卡batch16、累积3、有效batch192；
+四卡3D训练每卡batch6、累积2、有效batch48 slabs。Arm F共享环境入口已实现。
+其他实验专用脚本新提交前也须按此约定核对，不能沿用旧脚本的batch覆盖值。
+已运行或已归档任务保持原快照；资源不足时先报告，不静默改变有效batch。
+改变micro-batch可能改变阳性/阴性分组loss归约权重，不能称为严格梯度等价。

@@ -44,3 +44,17 @@ Encoder-only恢复提交：代码`f70b8319d10a719772e08ee85ec4ba6e7bd6b1cc`，�
 只更新开发分支文档；不修改任务、运行快照、checkpoint、训练代码。
 旧 orgslot_integrated 工作区存在未提交改动，原样保留，不能自动当作最新分支。
 定位当前分支工作区请用 git worktree list，而不是依赖历史绝对路径。
+# 2026-09-13：batch6替换排队3D任务
+
+用户约定后续四卡2D每卡16×累积3=有效192，3D每卡6×累积2=有效48。
+运行中2D快照不改。两组3D新运行代码均为2697b05642d527bfd137debc0f9ed175e9ae345f。
+
+| 实验 | 账号/集群 | 新训练 → 评估 | 旧链 | 配置 |
+|---|---|---|---|---|
+| Arm F 3D topk，从checkpoint30续训 | sifansong/XEC | 137410 → 137411 | 136312/136313已取消 | 4A800/20CPU/192GB，4gpus，7天 |
+| Arm F 3D mean背景，从头训练 | antengcai23/XEC | 137412 → 137413 | 136355/136356已取消 | 4A800/20CPU/192GB，8gpus，5天 |
+
+各账号独立目录`/gpfs/work/aac/<用户名>/worktrees/arm_f_batch6_20260913`。
+评估均1A800/6CPU/128GB，afterok指向对应新训练；队列已解除hold，提交后PENDING。
+CPU配置检查与版本门禁通过；未新增GPU smoke，batch6显存/吞吐尚待正式启动验证。
+已有checkpoint和日志保留；运行快照不随后续文档提交更新。

@@ -1,5 +1,7 @@
 # OrganSlot
 
+最新实验汇总（2026-09-14）：Arm E MAE encoder-only head固定阈值84.58%、训练集校准84.99%、recon Direct-post81.17%。PCDD论文Offline参考85.47%，尚非同协议复现。八类与三臂对比见[RESULTS](docs/RESULTS.md)，任务、资源、估时和下次审核见[STATUS](docs/STATUS.md)。
+
 请从 [docs/README.md](docs/README.md) 开始。该入口按任务指向架构、配置、结果或交接，避免重复加载历史记录。
 
 | 分支 | 职责 |

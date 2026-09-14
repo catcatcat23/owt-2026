@@ -1,5 +1,53 @@
 # 已记录结果与证据
 
+## 2026-09-14 最新：Arm E MAE三臂
+
+24病例/6990切片，checkpoint802精确加载。主指标为case Dice presence mean；
+fixed0.5 binary_post与训练集校准selected_post分列，禁止测试集逐器官拼接最优输出。
+
+| 初始化 | 固定0.5 post | 训练集校准 post | Recon Direct-post |
+|---|---:|---:|---:|
+| Encoder-only | **84.58** | **84.99** | **81.17** |
+| Encoder+reconstruction decoder | 84.48 | 84.76 | 80.29 |
+| Scratch | 83.53 | 83.72 | 79.54 |
+| PCDD论文Offline全量监督参考 | **85.47** | — | — |
+
+PCDD来源：[AAAI2026论文Table2](https://ojs.aaai.org/index.php/AAAI/article/download/38406/42368)。
+85.47是Offline，不是增量方法成绩。WORD增量4-4/4-2/2-2/7-1的All分别83.42/83.50/72.02/72.89。
+该行是跨协议参考，尚未同划分复现；不能用全量监督胜过增量行来宣称抗遗忘优势。
+encoder-only距Offline固定阈值0.89、校准0.48个百分点。单seed的小差异不能认定稳定优势。
+
+| 初始化/输出 | 脾 | 右肾 | 左肾 | 胆囊 | 食管 | 胰腺 | 肝 | 胃 | 均值 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Encoder fixed | 94.24 | 93.55 | 93.68 | 60.72 | 75.82 | 76.61 | 95.34 | 86.72 | 84.58 |
+| Encdec fixed | 94.34 | 93.84 | 93.95 | 59.56 | 75.72 | 76.47 | 95.36 | 86.58 | 84.48 |
+| Scratch fixed | 94.11 | 93.80 | 93.35 | 57.34 | 74.53 | 75.34 | 95.05 | 84.71 | 83.53 |
+| Encoder calibrated | 94.66 | 94.56 | 94.38 | 60.76 | 76.81 | 76.86 | 95.34 | 86.55 | 84.99 |
+| Encdec calibrated | 94.74 | 94.79 | 94.50 | 59.04 | 77.28 | 76.14 | 95.36 | 86.21 | 84.76 |
+| Scratch calibrated | 94.61 | 94.45 | 93.86 | 57.19 | 76.09 | 74.54 | 95.05 | 83.96 | 83.72 |
+| Encoder recon Direct-post | 93.13 | 92.01 | 92.37 | 53.14 | 72.17 | 71.53 | 94.65 | 80.37 | 81.17 |
+| Encdec recon Direct-post | 92.64 | 92.37 | 91.56 | 50.57 | 69.85 | 70.06 | 94.56 | 80.74 | 80.29 |
+| Scratch recon Direct-post | 92.76 | 91.50 | 91.02 | 48.46 | 69.37 | 70.09 | 94.38 | 78.72 | 79.54 |
+
+Encoder-only head/recon都略高，暂不支持“decoder提升重建但牺牲分割”解释。
+迁移decoder输入分布不匹配和训练波动仍是假设。此处decoder是重建Transformer，
+不是pixel decoder、AHER或分割head。Encoder recon Indirect-post仅7.53，scratch为7.21；
+不能把Direct正常概括为所有重建分割输出正常。
+
+证据入口（各目录内heads_test、reconstruction_fixedthr002的results.json）：
+
+- sifansong/XEC，runtime worktrees/arme_mae_encoder_runtime_f70b831，
+  Results/OrganSlotBank/evaluation/Common8/WORD_2D/ArmE_MAE_encoder_resume500_135283_ckpt802_*；
+  评估135284 COMPLETED exit0，head完整6990，recon6990，均exact。
+- sifansong/XEC，runtime worktrees/arme_mae_runtime_43cad30，
+  同上评估父目录/ArmE_MAE_encdec_resume500_134915_ckpt802_*；134916 COMPLETED exit0。
+- bolinren19/SIP，.worktrees/orgslot_querymask_multiscale_pixel，
+  同上评估父目录/OrgSlot_WORD07072_ROI20_ArmE_Resume500_2922770_ckpt802_*。
+
+以下保留历史结果；旧局部排名不代表最新全项目排名。
+
+
+
 本页合并既有已提交文档，不是本次重新推理或重新审核全部 JSON。
 只称“项目内已记录结果”；没有外部 PCDD 同协议复核，不能声称公开 SOTA。
 八类顺序：脾、右肾、左肾、胆囊、食管、胰腺、肝、胃。数值单位为百分比。

@@ -30,8 +30,8 @@ MASTER_PORT=$((21000 + SLURM_JOB_ID % 20000))
   --output_dir "${OUTPUT_DIR}" \
   --input_size 224 \
   --mask_ratio 0.75 \
-  --batch_size 4 \
-  --accum_iter 12 \
+  --batch_size 6 \
+  --accum_iter 8 \
   --max_optimizer_updates 100000 \
   --warmup_updates 5000 \
   --blr 1e-4 \

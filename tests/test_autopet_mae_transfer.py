@@ -44,7 +44,87 @@ def _target_model(img_size=64, head="linear"):
     )
 
 
+def _target_model_3d(img_size=64, head="arm_f_attention"):
+    model_args = SimpleNamespace(
+        LA=True,
+        arch_version="v11",
+        dataset_type="3D",
+        token_factor=2,
+        organ_token_total=4,
+        fix_frame=4,
+        temp_stride=1,
+        loss_version=["L2"],
+        text_encoding="None",
+    )
+    return OrganSlotMaskedAutoencoderViT(
+        img_size=img_size,
+        patch_size=16,
+        embed_dim=48,
+        depth=4,
+        num_heads=4,
+        decoder_embed_dim=48,
+        decoder_depth=2,
+        decoder_num_heads=4,
+        model_args=model_args,
+        slot_specs=[
+            {"name": "background", "raw_class_id": 0},
+            {"name": "organ", "raw_class_id": 1},
+        ],
+        slot_tg_depth=1,
+        fusion_mode="linear_sqrt",
+        fusion_reference_count=2,
+        slot_head_type=head,
+    )
+
+
 class AutoPETMAETransferTests(unittest.TestCase):
+    def test_3d_mae_forward_backward_and_transfer_are_finite(self):
+        source = ArchitectureMatchedMAE(
+            img_size=32,
+            patch_size=16,
+            embed_dim=48,
+            encoder_depth=2,
+            encoder_heads=4,
+            decoder_dim=48,
+            decoder_depth=2,
+            decoder_heads=4,
+            frames=4,
+            temporal_patch_size=1,
+        )
+        images = torch.rand(2, 3, 4, 32, 32)
+        loss, prediction, mask = source(images, mask_ratio=0.75)
+        self.assertTrue(torch.isfinite(loss))
+        self.assertEqual(tuple(prediction.shape), (2, 16, 768))
+        self.assertEqual(tuple(mask.shape), (2, 16))
+        loss.backward()
+        self.assertIsNotNone(source.patch_embed.proj.weight.grad)
+
+        target = _target_model_3d()
+        before_spatial = target.pos_embed_spatial.clone()
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint_path = Path(directory) / "mae3d.pth"
+            torch.save(
+                {
+                    "model": source.state_dict(),
+                    "dimension": "3D",
+                    "frames": 4,
+                    "temporal_patch_size": 1,
+                },
+                checkpoint_path,
+            )
+            report = load_mae_transfer_checkpoint(
+                target, checkpoint_path, "encoder_decoder"
+            )
+        loaded = {item["target"] for item in report["loaded"]}
+        self.assertIn("pos_embed_temporal", loaded)
+        self.assertIn("decoder_pos_embed_temporal", loaded)
+        self.assertTrue(torch.equal(before_spatial, target.pos_embed_spatial))
+        self.assertTrue(
+            torch.equal(
+                source.decoder_pred[2].weight, target.decoder_pred[2].weight
+            )
+        )
+
     def test_arm_f_transfer_preserves_pixel_and_slot_modules(self):
         source = ArchitectureMatchedMAE(
             img_size=32, patch_size=16, embed_dim=48, encoder_depth=2,

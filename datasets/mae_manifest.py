@@ -2,6 +2,7 @@
 
 import csv
 import random
+import re
 from pathlib import Path
 
 import cv2
@@ -12,6 +13,9 @@ from torchvision.transforms import InterpolationMode
 from torchvision.transforms import functional as vision_f
 
 from datasets.orgslot_manifest import parse_case_and_slice
+
+
+_MAE_SLICE_PATTERN = re.compile(r"_(\d+)\.(?:jpg|jpeg|png)$", re.IGNORECASE)
 
 
 def read_image_records(csv_path):
@@ -96,4 +100,82 @@ class MAEManifestDataset(Dataset):
             "sample_index": int(index),
             "case_name": case_name,
             "slice_index": int(slice_index),
+        }
+
+
+class MAEVolumeManifestDataset(Dataset):
+    """Four consecutive grayscale CT slices with one coherent spatial crop."""
+
+    def __init__(self, records, input_size=224, frames=4, training=True):
+        self.records = list(records)
+        self.input_size = int(input_size)
+        self.frames = int(frames)
+        self.training = bool(training)
+        if self.frames <= 0:
+            raise ValueError("frames must be positive")
+        self.case_ids = tuple(
+            sorted(
+                {
+                    parse_case_and_slice(row["image_pth"])[0]
+                    for row in self.records
+                }
+            )
+        )
+
+    def __len__(self):
+        return len(self.records)
+
+    @staticmethod
+    def _slice_path(path, slice_index):
+        path = Path(path)
+        match = _MAE_SLICE_PATTERN.search(path.name)
+        if match is None:
+            raise ValueError("cannot replace slice index in {}".format(path))
+        name = (
+            path.name[: match.start(1)]
+            + str(int(slice_index))
+            + path.name[match.end(1) :]
+        )
+        return path.with_name(name)
+
+    def _transform(self, image):
+        if self.training:
+            scale = 0.8 + 0.2 * float(torch.rand(()))
+            crop_size = max(16, int(round(min(image.shape[-2:]) * scale)))
+            max_top = image.shape[-2] - crop_size
+            max_left = image.shape[-1] - crop_size
+            top = int(torch.randint(0, max_top + 1, ()).item()) if max_top else 0
+            left = int(torch.randint(0, max_left + 1, ()).item()) if max_left else 0
+            image = image[..., top : top + crop_size, left : left + crop_size]
+        image = vision_f.resize(
+            image,
+            [self.input_size, self.input_size],
+            interpolation=InterpolationMode.BICUBIC,
+            antialias=True,
+        )
+        return image.clamp_(0.0, 1.0)
+
+    def __getitem__(self, index):
+        row = self.records[index]
+        case_name, start_slice = parse_case_and_slice(row["image_pth"])
+        images = []
+        for offset in range(self.frames):
+            image_path = self._slice_path(row["image_pth"], start_slice + offset)
+            image = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
+            if image is None:
+                raise FileNotFoundError("failed to read {}".format(image_path))
+            images.append(image)
+        image = torch.from_numpy(np.stack(images).astype(np.float32))
+        minimum = image.amin()
+        maximum = image.amax()
+        image = (image - minimum) / (maximum - minimum + 1e-8)
+        image = image.unsqueeze(0).repeat(3, 1, 1, 1)
+        return {
+            "image": self._transform(image),
+            "sample_index": int(index),
+            "case_name": case_name,
+            "slice_index": int(start_slice),
+            "slice_indices": torch.arange(
+                start_slice, start_slice + self.frames, dtype=torch.int64
+            ),
         }

@@ -27,8 +27,15 @@ def _build_mapping(source_state, scope):
             mapping[source_key] = "blocks1." + source_key[len("blocks.") :]
         elif source_key.startswith("encoder_norm."):
             mapping[source_key] = source_key
+        elif source_key == "pos_embed_temporal":
+            mapping[source_key] = source_key
         elif scope == "encoder_decoder" and source_key.startswith(
             ("decoder_blocks.", "decoder_norm.", "decoder_pred.")
+        ):
+            mapping[source_key] = source_key
+        elif (
+            scope == "encoder_decoder"
+            and source_key == "decoder_pos_embed_temporal"
         ):
             mapping[source_key] = source_key
     return mapping
@@ -78,10 +85,14 @@ def load_mae_transfer_checkpoint(model, checkpoint_path, scope):
         )
 
     required_prefixes = ["patch_embed.", "blocks1.", "encoder_norm."]
+    if "pos_embed_temporal" in target_state:
+        required_prefixes.append("pos_embed_temporal")
     if scope == "encoder_decoder":
         required_prefixes.extend(
             ["decoder_blocks.", "decoder_norm.", "decoder_pred."]
         )
+        if "decoder_pos_embed_temporal" in target_state:
+            required_prefixes.append("decoder_pos_embed_temporal")
     expected_targets = {"cls_token"}
     expected_targets.update(
         key
@@ -107,7 +118,11 @@ def load_mae_transfer_checkpoint(model, checkpoint_path, scope):
         ),
         "source_input_size": int(checkpoint.get("input_size", -1)),
         "target_input_size": int(getattr(model, "img_size", -1)),
-        "position_embedding_policy": "target regenerated; source pos embeddings ignored",
+        "position_embedding_policy": (
+            "spatial target regenerated; matching 3D temporal embeddings loaded"
+            if "pos_embed_temporal" in loaded_targets
+            else "target regenerated; source pos embeddings ignored"
+        ),
         "loaded_tensor_count": len(loaded),
         "loaded": loaded,
         "ignored_source_keys": ignored_source,

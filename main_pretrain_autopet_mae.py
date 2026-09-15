@@ -16,10 +16,14 @@ from torch.utils.data import DataLoader, DistributedSampler
 
 from datasets.mae_manifest import (
     MAEManifestDataset,
+    MAEVolumeManifestDataset,
     read_image_records,
     split_records_by_case,
 )
-from models_mae_transfer import mae_transfer_base_patch16
+from models_mae_transfer import (
+    mae_transfer_3d_base_patch16,
+    mae_transfer_base_patch16,
+)
 import util.misc as misc
 
 
@@ -28,6 +32,9 @@ def get_args_parser():
     parser.add_argument("--data_path", required=True)
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--input_size", default=224, type=int)
+    parser.add_argument("--dimension", choices=("2D", "3D"), default="2D")
+    parser.add_argument("--frames", default=4, type=int)
+    parser.add_argument("--temporal_patch_size", default=1, type=int)
     parser.add_argument("--mask_ratio", default=0.75, type=float)
     parser.add_argument("--norm_pix_loss", action="store_true")
     parser.add_argument("--validation_fraction", default=0.1, type=float)
@@ -123,6 +130,9 @@ def _save_checkpoint(path, model, optimizer, epoch, updates, args):
         "epoch": int(epoch),
         "optimizer_updates": int(updates),
         "input_size": int(args.input_size),
+        "dimension": args.dimension,
+        "frames": int(args.frames),
+        "temporal_patch_size": int(args.temporal_patch_size),
         "mask_ratio": float(args.mask_ratio),
         "encoder_depth": 6,
         "decoder_depth": 8,
@@ -145,6 +155,12 @@ def main(args):
 
     if args.input_size != 224:
         raise ValueError("the available AutoPET manifest is native 224; use input_size 224")
+    if args.dimension == "3D" and (
+        args.frames != 4 or args.temporal_patch_size != 1
+    ):
+        raise ValueError(
+            "Arm F 3D transfer requires frames=4 and temporal_patch_size=1"
+        )
     if not Path(args.data_path).is_file():
         raise FileNotFoundError(args.data_path)
     if args.resume and not Path(args.resume).is_file():
@@ -168,11 +184,17 @@ def main(args):
         train_records = train_records[: args.max_train_samples]
     if args.max_val_samples is not None:
         validation_records = validation_records[: args.max_val_samples]
-    train_dataset = MAEManifestDataset(
-        train_records, args.input_size, training=True
+    dataset_class = (
+        MAEVolumeManifestDataset
+        if args.dimension == "3D"
+        else MAEManifestDataset
     )
-    validation_dataset = MAEManifestDataset(
-        validation_records, args.input_size, training=False
+    dataset_kwargs = {"frames": args.frames} if args.dimension == "3D" else {}
+    train_dataset = dataset_class(
+        train_records, args.input_size, training=True, **dataset_kwargs
+    )
+    validation_dataset = dataset_class(
+        validation_records, args.input_size, training=False, **dataset_kwargs
     )
     if set(train_dataset.case_ids) & set(validation_dataset.case_ids):
         raise RuntimeError("AutoPET patient leakage between MAE train and validation")
@@ -210,7 +232,12 @@ def main(args):
         raise ValueError("not enough batches for one optimizer update")
 
     device = torch.device(args.device)
-    model = mae_transfer_base_patch16(
+    model_factory = (
+        mae_transfer_3d_base_patch16
+        if args.dimension == "3D"
+        else mae_transfer_base_patch16
+    )
+    model = model_factory(
         img_size=args.input_size, norm_pix_loss=args.norm_pix_loss
     ).to(device)
     model_without_ddp = model
@@ -247,8 +274,10 @@ def main(args):
                     "validation_fraction": args.validation_fraction,
                     "train_cases": list(train_dataset.case_ids),
                     "validation_cases": list(validation_dataset.case_ids),
-                    "train_slices": len(train_dataset),
-                    "validation_slices": len(validation_dataset),
+                    "dimension": args.dimension,
+                    "frames": args.frames if args.dimension == "3D" else 1,
+                    "train_samples": len(train_dataset),
+                    "validation_samples": len(validation_dataset),
                 },
                 handle,
                 indent=2,
@@ -257,7 +286,7 @@ def main(args):
         with open(output_dir / "args.json", "w", encoding="utf-8") as handle:
             json.dump(vars(args), handle, indent=2, sort_keys=True)
 
-    print("AutoPET MAE train/validation slices: {}/{}".format(
+    print("AutoPET MAE train/validation samples: {}/{}".format(
         len(train_dataset), len(validation_dataset)
     ))
     print("effective batch: {}, actual lr: {:.3e}".format(effective_batch, args.lr))

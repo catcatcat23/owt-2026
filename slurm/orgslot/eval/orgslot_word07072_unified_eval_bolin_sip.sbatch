@@ -20,28 +20,28 @@ set -euo pipefail
 : "${RUN_TAG:?export RUN_TAG without the trailing Slurm job id}"
 : "${TRAIN_JOB_ID:?export TRAIN_JOB_ID}"
 : "${EXPECTED_HEAD_TYPE:?export EXPECTED_HEAD_TYPE}"
+: "${PYTHON:=/gpfs/work/aac/bolinren19/.conda/envs/abdpet/bin/python}"
+: "${DATA_ROOT:=/gpfs/work/aac/bolinren19/2026-07/DATA/processed/OWT_Common8_07072_NATIVE/WORD}"
 
-ROOT=/gpfs/work/aac/bolinren19
-DATA=${ROOT}/2026-07/DATA/processed/OWT_Common8_07072_NATIVE/WORD
+DATA=${DATA_ROOT}
 RUN=${RUN_TAG}_${TRAIN_JOB_ID}
-CHECKPOINT=${TRAIN_WORKDIR}/Results/OrganSlotBank/Common8/WORD_2D/${RUN}/checkpoint-802.pth
+: "${CHECKPOINT:=${TRAIN_WORKDIR}/Results/OrganSlotBank/Common8/WORD_2D/${RUN}/checkpoint-802.pth}"
 EVAL_ROOT=${RESULTS_WORKDIR}/Results/OrganSlotBank/evaluation/Common8/WORD_2D
 CAL_OUTPUT=${EVAL_ROOT}/${RUN}_ckpt802_heads_train_calibration
 HEAD_OUTPUT=${EVAL_ROOT}/${RUN}_ckpt802_heads_test
 RECON_OUTPUT=${EVAL_ROOT}/${RUN}_ckpt802_reconstruction_fixedthr002
 CALIBRATION=${CAL_OUTPUT}/selected_thresholds.json
-PYTHON=${ROOT}/.conda/envs/abdpet/bin/python
 
 case "${EVAL_WORKDIR}" in
-  ${ROOT}/OD_OWT/.worktrees/*) ;;
+  /gpfs/work/aac/*/worktrees/*|/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/*) ;;
   *) echo "Refusing unexpected worktree: ${EVAL_WORKDIR}" >&2; exit 2 ;;
 esac
 case "${TRAIN_WORKDIR}" in
-  ${ROOT}/OD_OWT/.worktrees/*) ;;
+  /gpfs/work/aac/*/worktrees/*|/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/*) ;;
   *) echo "Refusing unexpected training worktree: ${TRAIN_WORKDIR}" >&2; exit 2 ;;
 esac
 case "${RESULTS_WORKDIR}" in
-  ${ROOT}/OD_OWT/.worktrees/*) ;;
+  /gpfs/work/aac/*/worktrees/*|/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/*) ;;
   *) echo "Refusing unexpected results worktree: ${RESULTS_WORKDIR}" >&2; exit 2 ;;
 esac
 
@@ -53,8 +53,10 @@ test -r "${DATA}/csv/WORD_Training_2D_native07072.csv"
 test -r "${DATA}/csv/WORD_Test_2D_native07072.csv"
 cd "${EVAL_WORKDIR}"
 
-export PATH=${ROOT}/.conda/envs/abdpet/bin:${PATH}
-export LD_LIBRARY_PATH=${ROOT}/.conda/envs/abdpet/lib:/gpfs/spack/opt/spack/linux-icelake/mesa-25.0.5-zygiclacf7ay3uqqvqizl3lsvuzkk4od/lib:${LD_LIBRARY_PATH:-}
+PYTHON_BIN_DIR="$(dirname "${PYTHON}")"
+PYTHON_ENV_DIR="$(dirname "${PYTHON_BIN_DIR}")"
+export PATH="${PYTHON_BIN_DIR}:${PATH}"
+export LD_LIBRARY_PATH="${PYTHON_ENV_DIR}/lib:/gpfs/spack/opt/spack/linux-icelake/mesa-25.0.5-zygiclacf7ay3uqqvqizl3lsvuzkk4od/lib:${LD_LIBRARY_PATH:-}"
 export PYTHONNOUSERSITE=1
 
 "${PYTHON}" - "${CHECKPOINT}" "${EXPECTED_HEAD_TYPE}" <<'PY'

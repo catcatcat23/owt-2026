@@ -15,6 +15,8 @@
 set -euo pipefail
 
 : "${EVAL_WORKDIR:?export EVAL_WORKDIR to the experiment worktree}"
+: "${TRAIN_WORKDIR:=${EVAL_WORKDIR}}"
+: "${RESULTS_WORKDIR:=${TRAIN_WORKDIR}}"
 : "${RUN_TAG:?export RUN_TAG without the trailing Slurm job id}"
 : "${TRAIN_JOB_ID:?export TRAIN_JOB_ID}"
 : "${EXPECTED_HEAD_TYPE:?export EXPECTED_HEAD_TYPE}"
@@ -22,8 +24,8 @@ set -euo pipefail
 ROOT=/gpfs/work/aac/bolinren19
 DATA=${ROOT}/2026-07/DATA/processed/OWT_Common8_07072_NATIVE/WORD
 RUN=${RUN_TAG}_${TRAIN_JOB_ID}
-CHECKPOINT=${EVAL_WORKDIR}/Results/OrganSlotBank/Common8/WORD_2D/${RUN}/checkpoint-802.pth
-EVAL_ROOT=${EVAL_WORKDIR}/Results/OrganSlotBank/evaluation/Common8/WORD_2D
+CHECKPOINT=${TRAIN_WORKDIR}/Results/OrganSlotBank/Common8/WORD_2D/${RUN}/checkpoint-802.pth
+EVAL_ROOT=${RESULTS_WORKDIR}/Results/OrganSlotBank/evaluation/Common8/WORD_2D
 CAL_OUTPUT=${EVAL_ROOT}/${RUN}_ckpt802_heads_train_calibration
 HEAD_OUTPUT=${EVAL_ROOT}/${RUN}_ckpt802_heads_test
 RECON_OUTPUT=${EVAL_ROOT}/${RUN}_ckpt802_reconstruction_fixedthr002
@@ -34,8 +36,18 @@ case "${EVAL_WORKDIR}" in
   ${ROOT}/OD_OWT/.worktrees/*) ;;
   *) echo "Refusing unexpected worktree: ${EVAL_WORKDIR}" >&2; exit 2 ;;
 esac
+case "${TRAIN_WORKDIR}" in
+  ${ROOT}/OD_OWT/.worktrees/*) ;;
+  *) echo "Refusing unexpected training worktree: ${TRAIN_WORKDIR}" >&2; exit 2 ;;
+esac
+case "${RESULTS_WORKDIR}" in
+  ${ROOT}/OD_OWT/.worktrees/*) ;;
+  *) echo "Refusing unexpected results worktree: ${RESULTS_WORKDIR}" >&2; exit 2 ;;
+esac
 
 test -d "${EVAL_WORKDIR}"
+test -d "${TRAIN_WORKDIR}"
+test -d "${RESULTS_WORKDIR}"
 test -r "${CHECKPOINT}"
 test -r "${DATA}/csv/WORD_Training_2D_native07072.csv"
 test -r "${DATA}/csv/WORD_Test_2D_native07072.csv"

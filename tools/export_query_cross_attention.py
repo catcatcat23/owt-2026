@@ -63,7 +63,7 @@ def main():
         raise ValueError("requires a trained cross_attn checkpoint, not original Arm E")
     size = int(checkpoint_value(checkpoint, "input_size", 448))
     specs, names = parse_class_configuration(args.class_map)
-    model, report = build_model("orgslot", checkpoint, specs, size,
+    model, report = build_model("orgslot", args.checkpoint, specs, size,
                                checkpoint_value(checkpoint, "fusion_mode", "linear_sqrt"))
     model.to(args.device).eval()
     dataset = build_dataset(args.data_csv, size, size)

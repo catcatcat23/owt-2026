@@ -55,17 +55,18 @@ class ArmFDecoder(nn.Module):
         del self.pixels.query_proj
         self.input_proj = nn.Linear(embed_dim, channels)
         self.blocks = nn.ModuleList([TokenBlock(channels) for _ in range(3)])
-        if readout == "attention":
+        if readout in ("attention", "reverse_dot"):
             self.reverse = nn.MultiheadAttention(channels, 4, batch_first=True)
             self.pixel_norm = nn.LayerNorm(channels)
             self.token_norm = nn.LayerNorm(channels)
             self.ffn_norm = nn.LayerNorm(channels)
             self.ffn = ffn(channels)
-            self.classifier = nn.Sequential(nn.LayerNorm(channels), nn.Linear(channels, 1))
+            if readout == "attention":
+                self.classifier = nn.Sequential(nn.LayerNorm(channels), nn.Linear(channels, 1))
         elif readout == "linear":
             self.mask_mlp = nn.Sequential(nn.LayerNorm(channels), nn.Linear(channels, channels), nn.GELU(), nn.Linear(channels, channels))
             self.token_fusion = nn.Linear(token_count, 1)
-        else:
+        elif readout != "query_dot":
             raise ValueError("unknown Arm F readout")
 
     def forward_pixels(self, images, z):
@@ -92,12 +93,22 @@ class ArmFDecoder(nn.Module):
                 pe = position_encoding(feature.shape[2:], self.channels, feature.device)
                 x = block(x, memory, pe)
             p = maps[-1].float().flatten(2).transpose(1, 2)
-            if self.readout == "attention":
+            if self.readout in ("attention", "reverse_dot"):
                 kv = self.token_norm(x)
                 z = p + self.reverse(self.pixel_norm(p) + pe, kv, kv, need_weights=False)[0]
                 z = z + self.ffn(self.ffn_norm(z))
-                logits = self.classifier(z)
+                if self.readout == "attention":
+                    logits = self.classifier(z)
+                else:
+                    logits = self.dot_readout(z, x)
+            elif self.readout == "query_dot":
+                logits = self.dot_readout(p, x)
             else:
                 logits = self.token_fusion(p @ self.mask_mlp(x).transpose(1, 2) / math.sqrt(self.channels))
             logits = logits.transpose(1, 2).reshape(tokens.shape[0], 1, *maps[-1].shape[2:])
             return _interpolate_bf16_safe(logits, size=tuple(output_size), mode="bilinear" if logits.ndim == 4 else "trilinear", align_corners=False)
+
+    def dot_readout(self, pixels, tokens):
+        query = F.normalize(tokens.float().mean(dim=1), dim=-1)
+        pixels = F.normalize(pixels.float(), dim=-1)
+        return (pixels * query[:, None, :]).sum(dim=-1, keepdim=True) * math.sqrt(self.channels)

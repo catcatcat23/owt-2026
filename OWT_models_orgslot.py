@@ -55,7 +55,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             raise ValueError("unknown query_refinement")
         if query_refinement != "none" and slot_head_type != "arm_e_multiscale_query":
             raise ValueError("query refinement is currently Arm E only")
-        if slot_head_type in ("arm_f_attention", "arm_f_linear") and pixel_pe != "none":
+        if slot_head_type in ("arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot") and pixel_pe != "none":
             raise ValueError("Arm F uses fixed axial attention PE; set pixel_pe=none")
         if not model_args.LA:
             raise ValueError("OrganSlotBank v0 requires linear attention")
@@ -112,11 +112,11 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             "head_channels": slot_head_channels,
         }
         self.pixel_query_decoder = None
-        if slot_head_type in ("arm_f_attention", "arm_f_linear"):
+        if slot_head_type in ("arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot"):
             self.pixel_query_decoder = ArmFDecoder(
                 in_chans, embed_dim, grid_size, slot_head_channels,
                 int(model_args.token_factor),
-                readout="attention" if slot_head_type == "arm_f_attention" else "linear",
+                readout=slot_head_type[len("arm_f_"):],
             )
         if slot_head_type in ("query_dot", "multi_query_dot"):
             self.pixel_query_decoder = SharedPixelQueryDecoder(
@@ -337,7 +337,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                         "query_dot",
                         "multi_query_dot",
                         "arm_e_multiscale_query",
-                        "arm_f_attention", "arm_f_linear",
+                        "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot",
                     ):
                         if (
                             pixel_features is None
@@ -426,7 +426,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         output_size = tuple(images.shape[2:])
         pixel_features = None
         if decode_heads and self.pixel_query_decoder is not None:
-            if self._slot_factory["head_type"] in ("arm_e_multiscale_query", "arm_f_attention", "arm_f_linear"):
+            if self._slot_factory["head_type"] in ("arm_e_multiscale_query", "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot"):
                 pixel_features = self.pixel_query_decoder.forward_pixels(
                     images, z
                 )

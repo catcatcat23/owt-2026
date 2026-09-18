@@ -7,10 +7,21 @@ import types
 import torch
 
 from test_orgslot_model import tiny_model
-from ArmFDecoder import ArmFDecoder, position_encoding
+from ArmFDecoder import ArmFDecoder, ArmEStyleDecoder3D, position_encoding
 
 
 class ArmFTests(unittest.TestCase):
+    def test_3d_baseline_matches_slice_wise_e_readout(self):
+        decoder = ArmEStyleDecoder3D(3, 32, (4, 2, 2), channels=16)
+        self.assertFalse(hasattr(decoder, 'blocks'))
+        self.assertFalse(hasattr(decoder, 'reverse'))
+        p4 = torch.randn(2, 16, 4, 8, 8)
+        tokens, identity = torch.randn(2, 20, 32), torch.randn(16)
+        actual = decoder.forward_mask([p4], tokens, identity, (4, 32, 32))
+        expected = torch.stack([decoder.pixels.forward_mask(
+            p4[:, :, t], tokens, identity, (32, 32)) for t in range(4)], dim=2)
+        torch.testing.assert_close(actual, expected)
+
     def test_legacy_decoder_unchanged(self):
         source = subprocess.check_output([
             'git', 'show', 'fd9cf91b5daeec415cd09d239f484d9b8500e712:ArmFDecoder.py'
@@ -46,7 +57,10 @@ class ArmFTests(unittest.TestCase):
     def test_model_backward_and_checkpoint(self):
         torch.set_num_threads(2)
         for dimension in ('2D', '3D'):
-            for head in ('arm_f_attention', 'arm_f_linear', 'arm_f_query_dot', 'arm_f_reverse_dot'):
+            heads = ['arm_f_attention', 'arm_f_linear', 'arm_f_query_dot', 'arm_f_reverse_dot']
+            if dimension == '3D':
+                heads.append('arm_e_multiscale_query_3d')
+            for head in heads:
                 with self.subTest(dimension=dimension, head=head):
                     model = tiny_model(dimension, slot_head_type=head, slot_head_channels=16)
                     shape = (2, 3, 32, 32) if dimension == '2D' else (2, 3, 4, 32, 32)

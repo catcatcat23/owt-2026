@@ -36,3 +36,19 @@ tests the refinement design as a package, not cross-attention alone.
 CPU tests cover new paths in 2D/3D, finite gradients and strict round-trip loading;
 legacy decoder tests compare keys, initialization and outputs against fd9cf91.
 No GPU training is implied by these tests.
+
+## 3D controlled extension
+
+The new `arm_e_multiscale_query_3d` baseline reuses F's slice-wise E spatial
+stem/fusion without token refinement or reverse attention. Its query is exactly
+E-style: token LayerNorm, mean, projection, slot identity; normalized dot with
+P4 followed by trilinear upsampling. It does not modify the existing 2D E head.
+The other two arms use `arm_f_query_dot` and `arm_f_reverse_dot` with dimension=3D.
+F attention blocks operate across the slab with existing axial temporal/spatial PE;
+the baseline adds no new PE or temporal convolution.
+
+Use ARM_F_DIMENSION=3D, ARM_F_HEAD_TYPE explicitly selected, BACKGROUND_REDUCTION=topk,
+scratch/seed0, microbatch6, four GPUs, accumulation2 (48 slabs), 118800 updates,
+WORD07072 and ROI20. All three use the unified 3D calibration/head/reconstruction
+evaluator, not the older post3d-only evaluator. No training jobs were submitted
+as part of implementing this extension.

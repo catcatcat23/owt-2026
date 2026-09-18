@@ -112,3 +112,26 @@ class ArmFDecoder(nn.Module):
         query = F.normalize(tokens.float().mean(dim=1), dim=-1)
         pixels = F.normalize(pixels.float(), dim=-1)
         return (pixels * query[:, None, :]).sum(dim=-1, keepdim=True) * math.sqrt(self.channels)
+
+
+class ArmEStyleDecoder3D(ArmFDecoder):
+    """E mean-query readout on F's slice-wise multiscale spatial pathway."""
+
+    def __init__(self, in_channels, embed_dim, grid_size, channels=128):
+        nn.Module.__init__(self)
+        if len(grid_size) != 3:
+            raise ValueError('arm_e_multiscale_query_3d requires a 3D grid')
+        self.grid_size = tuple(grid_size)
+        self.channels = channels
+        self.pixels = MultiScalePixelQueryDecoder2D(
+            in_channels, embed_dim, self.grid_size[-2:], channels)
+
+    def forward_mask(self, maps, tokens, slot_identity, output_size):
+        with torch.autocast(device_type=tokens.device.type, enabled=False):
+            query = self.pixels.forward_query(tokens.float(), slot_identity.float())
+            pixels = F.normalize(maps[-1].float(), dim=1)
+            query = F.normalize(query, dim=-1)
+            logits = torch.einsum('bdthw,bd->bthw', pixels, query).unsqueeze(1)
+            logits = logits * math.sqrt(self.channels)
+            return _interpolate_bf16_safe(logits, size=tuple(output_size),
+                                         mode='trilinear', align_corners=False)

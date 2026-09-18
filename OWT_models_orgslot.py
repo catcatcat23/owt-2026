@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 
 import OWT_models
-from ArmFDecoder import ArmFDecoder
+from ArmFDecoder import ArmFDecoder, ArmEStyleDecoder3D
 from OrganSlotEmbed import (
     MultiScalePixelQueryDecoder2D,
     OrganSlot,
@@ -112,6 +112,11 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             "head_channels": slot_head_channels,
         }
         self.pixel_query_decoder = None
+        if slot_head_type == "arm_e_multiscale_query_3d":
+            if model_args.dataset_type != "3D" or pixel_pe != "none":
+                raise ValueError("3D E baseline requires dimension=3D and pixel_pe=none")
+            self.pixel_query_decoder = ArmEStyleDecoder3D(
+                in_chans, embed_dim, grid_size, slot_head_channels)
         if slot_head_type in ("arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot"):
             self.pixel_query_decoder = ArmFDecoder(
                 in_chans, embed_dim, grid_size, slot_head_channels,
@@ -337,7 +342,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                         "query_dot",
                         "multi_query_dot",
                         "arm_e_multiscale_query",
-                        "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot",
+                        "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_e_multiscale_query_3d",
                     ):
                         if (
                             pixel_features is None
@@ -426,7 +431,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         output_size = tuple(images.shape[2:])
         pixel_features = None
         if decode_heads and self.pixel_query_decoder is not None:
-            if self._slot_factory["head_type"] in ("arm_e_multiscale_query", "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot"):
+            if self._slot_factory["head_type"] in ("arm_e_multiscale_query", "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_e_multiscale_query_3d"):
                 pixel_features = self.pixel_query_decoder.forward_pixels(
                     images, z
                 )

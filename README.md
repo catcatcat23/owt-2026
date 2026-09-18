@@ -1,6 +1,8 @@
 # OrganSlot
 
-最新实验汇总（2026-09-14）：Arm E MAE encoder-only head固定阈值84.58%、训练集校准84.99%、recon Direct-post81.17%。PCDD论文Offline参考85.47%，尚非同协议复现。八类与三臂对比见[RESULTS](docs/RESULTS.md)，任务、资源、估时和下次审核见[STATUS](docs/STATUS.md)。
+最新实验汇总（2026-09-18）：F 2D MAE encoder-only固定84.21%、校准84.93%；encoder+重建decoder固定83.88%、校准84.59%。F 3D top-k统一协议固定83.29%、校准84.46%。既有E MAE encoder-only校准84.99%仍略高，单seed不能判定稳定优势。PCDD Offline参考85.47%尚非同协议复现。八类与协议边界见[RESULTS](docs/RESULTS.md)。
+
+已提交2D/3D各三组受控读出对照：E式基线、F Query-Dot、F Reverse-Dot；保留旧F分类器路径，不覆盖旧实验。配置与机制见[读出消融](docs/QUERY_READOUT_ABLATION.md)，任务编号和核验时间见[STATUS](docs/STATUS.md)，3D统一校准/recon协议见[评估说明](docs/UNIFIED_3D_EVALUATION.md)。状态文档是带时间戳的快照，不是实时队列。
 
 请从 [docs/README.md](docs/README.md) 开始。该入口按任务指向架构、配置、结果或交接，避免重复加载历史记录。
 

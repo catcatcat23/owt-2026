@@ -1,5 +1,44 @@
 # 已记录结果与证据
 
+## 2026-09-18：F预训练与3D评估更新
+
+测试集均24病例/6990切片；下表主指标为病例级前景Dice均值（%）。
+校准只用训练集前6000切片；不使用测试集选阈值。2D checkpoint802、3D checkpoint199。
+
+| 实验 | 固定0.5 post | 校准post | Direct recon post | 备注 |
+|---|---:|---:|---:|---|
+| F 2D scratch | 82.91 | 未补 | 未补 | 2929821/2929822 |
+| F 2D MAE encoder | 84.21 | 84.93 | 79.81 | 137867/137868，完整结束 |
+| F 2D MAE encoder+recon decoder | 83.88 | 84.59 | 79.36 | 137880/137881，完整结束 |
+| F 3D top-k | 83.29 | 84.46 | 78.64 | 140443–140445统一协议 |
+
+F encoder比scratch固定阈值提高约1.31个百分点，但scratch microbatch8、MAE16，
+有效batch均192不消除small-organ分组归约差异。F encdec相比encoder固定/校准均低约0.34，
+主要落在胆囊、胰腺；单seed不证明decoder迁移普遍有害。既有E encoder校准84.99，
+F encoder84.93仅差0.06，不作稳定胜负或外部SOTA宣称。
+
+| 输出 | 脾 | 右肾 | 左肾 | 胆囊 | 食管 | 胰腺 | 肝 | 胃 | 均值 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| F2D scratch fixed | 94.15 | 93.23 | 93.29 | 55.34 | 74.87 | 73.82 | 95.16 | 83.39 | 82.91 |
+| F2D encoder calibrated | 94.83 | 94.77 | 94.31 | 60.62 | 77.29 | 75.92 | 95.32 | 86.39 | 84.93 |
+| F2D encdec fixed | 94.50 | 93.88 | 93.70 | 57.46 | 75.23 | 74.76 | 95.35 | 86.16 | 83.88 |
+| F2D encdec calibrated | 94.88 | 94.80 | 94.37 | 59.10 | 77.45 | 74.73 | 95.35 | 86.05 | 84.59 |
+| F3D topk fixed | 94.34 | 93.50 | 92.93 | 56.26 | 73.57 | 74.32 | 95.32 | 86.11 | 83.29 |
+| F3D topk calibrated | 94.83 | 94.52 | 93.96 | 59.40 | 77.30 | 74.53 | 95.32 | 85.84 | 84.46 |
+
+3D背景归约消融：旧post3d固定协议下topk83.25、mean78.77（137413），差4.48。
+mean Precision71.01%、Recall92.72%，胆囊预测/GT总体积比2.72。此结果支持topk更有效
+抑制假阳性，但不得把旧post3d均值与统一2D后处理/校准值当作同协议比较。
+Indirect仍异常：F3D topk6.95%、F2D encdec7.91%；Direct正常不意味着差分重建正常。
+
+结果证据（各账号路径独立，不互换）：
+
+- F scratch：bolinren19/SIP `.worktrees/arm_f_2d_batch8/Results/OrganSlotBank/evaluation/ArmF_2D_2929821/results.json`。
+- F encoder：sifansong/XEC `worktrees/arm_f_mae_encoder_df7ed39/Results/OrganSlotBank/evaluation/Common8/WORD_2D/ArmF_2D_137867_ckpt802_*`。
+- F encdec：antengcai23/XEC `worktrees/arm_f_mae_encdec_20260913/Results/OrganSlotBank/evaluation/Common8/WORD_2D/ArmF_2D_137880_ckpt802_*`。
+- 3D topk统一：sifansong/XEC `evaluations/arm_f_3d_137410_unified_d53bb66/{head,reconstruction}/results.json`。
+- 3D mean旧协议：antengcai23/XEC `worktrees/arm_f_batch6_20260913/Results/OrganSlotBank/evaluation/ArmF_3D_137412/results.json`。
+
 ## 2026-09-14 最新：Arm E MAE三臂
 
 24病例/6990切片，checkpoint802精确加载。主指标为case Dice presence mean；

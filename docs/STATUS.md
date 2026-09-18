@@ -1,5 +1,45 @@
 # 当前实验交接
 
+## 2026-09-18 13:53 已核验快照（当前入口）
+
+新六组：1组运行、5组排队；未发现失败。此次文档整理未再次刷新队列。
+每组训练4×A800/20CPU/192GB；scratch、seed0、top-k small-organ loss、ROI20、
+118800 updates。2D每卡8/累积6/有效192；3D每卡6/累积2/有效48 slabs。
+
+| 目的 | 账号/集群 | 训练 | 校准/Head/recon评估 | QoS/时限 | 状态 |
+|---|---|---|---|---|---|
+| 2D E单query点积基线 | bolinren19/SIP | 2955007 | 2955008（统一三阶段） | 4a800/7天 | Priority |
+| 2D F Query-Dot：细化tokens、不反向读取 | bolinren19/SIP | 2955009 | 2955010（统一三阶段） | 8a800/7天 | Priority |
+| 2D F Reverse-Dot：反向读取后点积 | bolinren19/SIP | 2955011 | 2955012（统一三阶段） | 8a800/7天 | Priority |
+| 3D E式点积基线 | sifansong/XEC | 140585 | 140586 / 140587 / 140588 | 4gpus/7天 | RUNNING epoch4，checkpoint-0存在 |
+| 3D F Query-Dot | sifansong/XEC | 140591 | 140592 / 140593 / 140594 | 8gpus/5天 | Priority |
+| 3D F Reverse-Dot | antengcai23/XEC | 140595 | 140596 / 140597 / 140598 | 4gpus/7天 | Resources |
+
+3D基线最新抽查：loss≈0.2511，seg≈0.7667，weighted_seg≈0.0077，ROI≈20.3%，
+日志torch峰值allocated33.57GiB，overflow0、错误日志空。非完整稳定性证明；
+checkpoint-0仅确认文件存在，未重新加载。其余五组尚无GPU运行验证。
+
+固定运行源（不要在排队/运行目录pull）：
+
+- 2D：bolinren19/SIP `/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/arm_f_linear_2d`，
+  `5f2d1cfb7fb20d499c79cb8e901d7279718cd8bc`。目录旧名linear不代表当前提交了arm_f_linear。
+- 3D：各账号XEC `/gpfs/work/aac/<账号>/worktrees/dot3d_ac8cf99`，
+  `ac8cf992cdac30c9d7bed33cc5e2f8b8ad4d8ecd`。
+- 训练入口 `slurm/orgslot/train/arm_f.sbatch`；2D评估 `arm_e_mae_unified.sbatch`；
+  3D评估 `unified_3d_protocol.sbatch`。3D校准/recon依赖训练afterok，Head依赖校准afterok。
+- 同seed不保证共有模块初始权重逐张量相同，本轮未配平；跨架构因果解释需保留此限制。
+
+已完成：F scratch 2929821/2929822；F encoder 137867/137868；F encdec137880/137881；
+3D topk137410及140443–140445统一评估；3D mean137412/137413（旧post3d协议）；
+3D MAE2951384完成100000updates，日志报告checkpoint验证通过，尚无其下游迁移任务。
+最新指标统一见RESULTS.md，不从训练校准分数推断测试成绩。
+
+下次：优先检查140585的checkpoint10；五组排队任务启动后核验head、batch、topk、
+梯度与首epoch；140591五天时限余量偏紧；3D mean若需校准比较须补统一协议。
+F2D scratch的校准/recon仍为缺口。Indirect异常需独立诊断，不能概括为recon全正常。
+
+## 历史快照：2026-09-14（以下状态已过期，仅保留背景）
+
 日志/结果核验时间：2026-09-14 14:05 Asia/Shanghai。之后队列复查仍为4组训练运行、2组训练排队。
 epoch为快照，不是实时页面；估时不含评估和排队。结果统一见[RESULTS.md](RESULTS.md)。
 

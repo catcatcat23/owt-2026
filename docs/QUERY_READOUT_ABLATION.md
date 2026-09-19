@@ -1,5 +1,21 @@
 # Controlled query/readout ablation
 
+## P4 Reverse-Dot batch16 correction (2026-09-20)
+
+Replace baseline2955011/2955012 and lambda_seg0.03 chain2964744/2964745.
+Both use arm_f_reverse_dot, four GPUs, microbatch16/accum3/effective192,
+scratch seed0, WORD07072 ROI20, topk small-organ loss, LR7.5e-5,
+118800 updates/warmup5940. Only lambda_seg differs: 0.01 vs 0.03.
+Baseline had only just started (about7min), with no checkpoint at inspection;
+both replacements start from epoch0, no resume or MAE. Retain old artifacts.
+Keep bolinren19/SIP associations: baseline sifansong/8a800;
+lambda0.03 angelosstefanidis/8a800. Train4A800/20CPU/192GB, seven days;
+unified head calibration/test/recon eval1A800/10CPU/128GB, seven days,
+afterok new training. Eval EXPECTED_LAMBDA_SEG must match each arm.
+Use latest origin/feature/orgslot in a new pinned worktree, not either old runtime.
+Microbatch16 GPU memory/throughput remain unverified. Do not call it a GPU-tested
+configuration based on CPU compatibility tests from earlier work.
+
 ## SIP E / Query-Dot batch16 resume (2026-09-20)
 
 User requested changing running 2D E2955007 and Query-Dot2955009 from

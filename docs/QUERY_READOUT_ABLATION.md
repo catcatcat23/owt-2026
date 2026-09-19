@@ -1,5 +1,22 @@
 # Controlled query/readout ablation
 
+## SIP E / Query-Dot batch16 resume (2026-09-20)
+
+User requested changing running 2D E2955007 and Query-Dot2955009 from
+microbatch8/accum6 to microbatch16/accum3, retaining four GPUs/effective192.
+Resume sources: arm_f_linear_2d/Results/OrganSlotBank/Common8/WORD_2D/
+ArmF_2D_2955007/checkpoint-110.pth and ArmF_2D_2955009/checkpoint-10.pth.
+Restore model/optimizer/scaler, start at epoch111 / epoch11 respectively.
+Both old/new microbatch settings yield148 optimizer updates per epoch;
+retain LR7.5e-5, total118800 updates, WORD07072 ROI20, topk small-organ loss,
+lambda_seg0.01, scratch lineage, no MAE. Resumed runs write separate job outputs.
+Use latest origin/feature/orgslot in a new immutable worktree. Cancel old
+training/evaluation chains only after checkpoint validation; rebuild afterok
+evaluations against the new job IDs. Preserve all old results/checkpoints.
+This is mixed-microbatch training, not a clean batch16-from-scratch experiment:
+group-reduced losses can change gradients despite equal effective batch.
+GPU peak memory/throughput at batch16 are not yet verified.
+
 ## Active P2 submissions — batch16 correction, 2026-09-20 01:16 CST
 
 | Experiment | Train | Unified eval | Status at submission |

@@ -1,5 +1,25 @@
 # Controlled query/readout ablation
 
+## Active P2 submissions — batch16 correction, 2026-09-20 01:16 CST
+
+| Experiment | Train | Unified eval | Status at submission |
+| --- | --- | --- | --- |
+| P2 baseline | 141130 | 141131, afterok:141130 | Priority / Dependency |
+| P2 + soft mask | 141132 | 141133, afterok:141132 | Priority / Dependency |
+
+Both: antengcai23/XEC, Slurm account sifansong, QoS8gpus, partition gpua8001t,
+4A800/20CPU/192GB training; 1A800/10CPU/128GB evaluation; five-day limit.
+Microbatch16 x 4 GPUs x accumulation3 = effective192. Scratch seed0,
+lambda_seg0.01, topk background, WORD07072 ROI20, 118800 optimizer updates.
+Pinned source efcef0739b581ec49c969c312d07c97574308cbb;
+runtime /gpfs/work/aac/antengcai23/worktrees/p2_b16_efcef07.
+Scripts: slurm/orgslot/train/arm_f.sbatch and
+slurm/orgslot/eval/arm_e_mae_unified.sbatch. Both job paths/dependencies verified.
+Seven CPU tests and dataset identity passed on XEC; revision gate passed.
+No GPU preflight performed. Peak memory for microbatch16 remains unknown.
+Cancelled the four still-pending batch8 jobs 141125/141126/141128/141129;
+no training progress lost, historical source snapshots retained.
+
 ## P2 + soft spatial attention prior (2026-09-20)
 
 Independent 2D head: `arm_f_reverse_dot_p2_softmask`. Control:

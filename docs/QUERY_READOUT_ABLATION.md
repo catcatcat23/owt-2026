@@ -50,6 +50,14 @@ Evaluate fixed0.5 and training-calibrated head masks plus reconstruction with
 the existing protocol. Increased loss weight alone is not evidence of improved
 Dice; compare segmentation gains and possible reconstruction degradation.
 
+Submitted 2026-09-20 00:04 CST on bolinren19/SIP, Slurm account
+angelosstefanidis, QoS8a800: train2964744 (4A800/20CPU/192GB/7days),
+eval2964745 (1A800/10CPU/128GB/7days), afterok:2964744 verified.
+Initial states: Priority / Dependency. Pinned source
+188555c2c18de95ebb76a21bb23ea3c50cba7db3 at
+/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/arm_f_reverse_dot_seg003_188555c.
+CPU configuration/metadata checks passed; GPU execution remains pending.
+
 ## 3D controlled extension
 
 The new `arm_e_multiscale_query_3d` baseline reuses F's slice-wise E spatial

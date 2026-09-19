@@ -37,6 +37,19 @@ CPU tests cover new paths in 2D/3D, finite gradients and strict round-trip loadi
 legacy decoder tests compare keys, initialization and outputs against fd9cf91.
 No GPU training is implied by these tests.
 
+## 2D Reverse-Dot segmentation-weight ablation (2026-09-20)
+
+Add one independent scratch run against Reverse-Dot train2955011/eval2955012.
+Only lambda_seg changes from 0.01 to 0.03. Set ARM_F_LAMBDA_SEG=0.03 for
+training and EXPECTED_LAMBDA_SEG=0.03 for the unified evaluator; both defaults
+remain 0.01 for existing experiments. The reconstruction/LPIPS weights, head,
+seed0, WORD07072 split, ROI20, topk small-organ loss, LR7.5e-5, 118800 updates,
+warmup5940, four GPUs and microbatch8/accum6/effective192 remain unchanged.
+No MAE initialization or resume. Keep the original run and evaluation chain.
+Evaluate fixed0.5 and training-calibrated head masks plus reconstruction with
+the existing protocol. Increased loss weight alone is not evidence of improved
+Dice; compare segmentation gains and possible reconstruction degradation.
+
 ## 3D controlled extension
 
 The new `arm_e_multiscale_query_3d` baseline reuses F's slice-wise E spatial

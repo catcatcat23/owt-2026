@@ -34,9 +34,10 @@ class TokenBlock(nn.Module):
         self.norms = nn.ModuleList([nn.LayerNorm(channels) for _ in range(4)])
         self.ffn = ffn(channels)
 
-    def forward(self, x, memory, pe):
+    def forward(self, x, memory, pe, attention_bias=None):
         memory = self.norms[1](memory)
-        x = x + self.cross(self.norms[0](x), memory + pe, memory, need_weights=False)[0]
+        x = x + self.cross(self.norms[0](x), memory + pe, memory,
+                           attn_mask=attention_bias, need_weights=False)[0]
         normalized = self.norms[2](x)
         x = x + self.self_attn(normalized, normalized, normalized, need_weights=False)[0]
         return x + self.ffn(self.norms[3](x))
@@ -47,6 +48,12 @@ class ArmFDecoder(nn.Module):
         super().__init__()
         self.grid_size = tuple(grid_size)
         self.channels = channels
+        self.soft_mask = readout == "reverse_dot_p2_softmask"
+        if self.soft_mask:
+            readout = "reverse_dot_p2"
+        # Fixed ablation recipe; no extra learned parameters or auxiliary loss.
+        self.soft_mask_alpha = 1.0
+        self.soft_mask_epsilon = 0.2
         self.readout = readout
         if readout == "reverse_dot_p2" and len(self.grid_size) != 2:
             raise ValueError("reverse_dot_p2 currently supports only 2D")
@@ -107,7 +114,10 @@ class ArmFDecoder(nn.Module):
             for block, feature in zip(self.blocks, maps):
                 memory = feature.float().flatten(2).transpose(1, 2)
                 pe = position_encoding(feature.shape[2:], self.channels, feature.device)
-                x = block(x, memory, pe)
+                bias = None
+                if self.soft_mask and self.soft_mask_alpha != 0:
+                    bias = self.soft_attention_bias(memory, x, block.cross.num_heads)
+                x = block(x, memory, pe, attention_bias=bias)
             mask_shape = maps[2].shape[2:]
             p = maps[2].float().flatten(2).transpose(1, 2)
             if self.readout in ("attention", "reverse_dot", "reverse_dot_p2"):
@@ -137,6 +147,21 @@ class ArmFDecoder(nn.Module):
         query = F.normalize(tokens.float().mean(dim=1), dim=-1)
         pixels = F.normalize(pixels.float(), dim=-1)
         return (pixels * query[:, None, :]).sum(dim=-1, keepdim=True) * math.sqrt(self.channels)
+
+    @torch.no_grad()
+    def soft_attention_bias(self, pixels, tokens, num_heads):
+        """Shared organ prior, not 20 unsupervised token-specific masks.
+
+        Recomputed from the current tokens at each scale. Detaching deliberately
+        tests routing only. A positive floor avoids hard exclusion of missed GT.
+        MHA expects [batch * heads, token_count, spatial_positions].
+        """
+        probability = self.dot_readout(pixels, tokens).squeeze(-1).sigmoid()
+        gate = self.soft_mask_epsilon + (1 - self.soft_mask_epsilon) * probability
+        bias = self.soft_mask_alpha * gate.log()
+        return bias[:, None, None, :].expand(
+            -1, num_heads, tokens.shape[1], -1).reshape(
+                pixels.shape[0] * num_heads, tokens.shape[1], pixels.shape[1])
 
 
 class ArmEStyleDecoder3D(ArmFDecoder):

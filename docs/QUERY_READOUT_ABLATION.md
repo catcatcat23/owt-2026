@@ -1,5 +1,42 @@
 # Controlled query/readout ablation
 
+## P2 + soft spatial attention prior (2026-09-20)
+
+Independent 2D head: `arm_f_reverse_dot_p2_softmask`. Control:
+`arm_f_reverse_dot_p2` (train141125); do not replace its runtime snapshot.
+Only token-to-pixel cross-attention changes. Before each P16/P8/P4 block,
+compute `M = sigmoid(sqrt(C) * normalize(memory) dot normalize(mean(tokens)))`
+from the current projected/refined organ tokens and that scale's original
+pixel features. Broadcast the same organ prior to all 20 tokens / 4 heads:
+`attention = softmax(QK/sqrt(d) + log(0.2 + 0.8*M))`.
+The prior is detached, alpha=1, epsilon=0.2; no GT masks, extra trainable
+parameters, auxiliary losses, mask threshold, mask annealing or token matching.
+The floor bounds the bias to [log(0.2), 0]; it does not guarantee recovery of
+missed organs. P16 uses input-projected tokens; later scales use refined tokens.
+This is same-scale self-guidance, not an exact Mask2Former/H-SAM reproduction
+or a previous-layer supervised mask decoder. Coarse dot priors are not separately
+supervised/calibrated and their usefulness remains an experimental hypothesis.
+
+P4 reverse attention, S2/P2 fusion, dot readout, reconstruction and loss remain
+identical. State-dict keys and initial values match P2 exactly. Checkpoint args
+must retain the new head name: identical tensor keys alone cannot identify routing.
+The existing FP32 attention region also computes this bias. 3D is rejected.
+
+Use existing training entry point with
+`ARM_F_HEAD_TYPE=arm_f_reverse_dot_p2_softmask`, `ARM_F_DIMENSION=2D`,
+`ARM_F_MICRO_BATCH=8`, `ARM_F_ACCUM_ITER=6`, `ARM_F_LAMBDA_SEG=0.01`,
+`BACKGROUND_REDUCTION=topk`, scratch seed0, no MAE init, and the same WORD07072
+ROI20 dataset / 118800 updates / effective batch192 as P2. Evaluation must use
+`EXPECTED_SLOT_HEAD_TYPE=arm_f_reverse_dot_p2_softmask` and the same unified
+train-calibrated head + reconstruction protocol. No job submitted in this change.
+
+Tests cover alpha=0 exact baseline equivalence, strict P2 weight loading,
+identical initialization, finite non-hard biases, preferential synthetic routing,
+BF16-input finite backward, full-model gradients and checkpoint roundtrip,
+and unchanged legacy heads. GPU validation and scientific benefit remain pending.
+Assess small-organ recall, empty-slice FP and predicted/GT volume as well as Dice;
+more concentrated attention alone is not evidence of better organ localization.
+
 ## P2 shallow-skip readout (2026-09-20)
 
 New 2D-only head `arm_f_reverse_dot_p2`. Keep P16/P8/P4 token refinement,

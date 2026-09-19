@@ -626,7 +626,7 @@ class OrganSlot(nn.Module):
             )
             self.head = head_class(decoder_dim, grid_size, channels=head_channels)
         elif self.head_type in (
-            "query_dot", "multi_query_dot", "arm_e_multiscale_query", "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_f_reverse_dot_p2", "arm_e_multiscale_query_3d"
+            "query_dot", "multi_query_dot", "arm_e_multiscale_query", "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_f_reverse_dot_p2", "arm_f_reverse_dot_p2_softmask", "arm_e_multiscale_query_3d"
         ):
             self.head = SlotQueryEmbedding(head_channels)
         else:
@@ -650,7 +650,7 @@ class OrganSlot(nn.Module):
 
     def forward_head(self, canvas, output_size):
         if self.head_type in (
-            "query_dot", "multi_query_dot", "arm_e_multiscale_query", "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_f_reverse_dot_p2", "arm_e_multiscale_query_3d"
+            "query_dot", "multi_query_dot", "arm_e_multiscale_query", "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_f_reverse_dot_p2", "arm_f_reverse_dot_p2_softmask", "arm_e_multiscale_query_3d"
         ):
             raise RuntimeError(
                 "query heads require tokens and shared pixel features"
@@ -663,7 +663,7 @@ class OrganSlot(nn.Module):
 
     def forward_query_head(self, tokens, pixel_features, decoder, output_size):
         if self.head_type not in (
-            "query_dot", "multi_query_dot", "arm_e_multiscale_query", "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_f_reverse_dot_p2", "arm_e_multiscale_query_3d"
+            "query_dot", "multi_query_dot", "arm_e_multiscale_query", "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_f_reverse_dot_p2", "arm_f_reverse_dot_p2_softmask", "arm_e_multiscale_query_3d"
         ):
             raise RuntimeError("forward_query_head requires a query slot")
         raw_logits = decoder.forward_mask(

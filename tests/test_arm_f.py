@@ -11,6 +11,47 @@ from ArmFDecoder import ArmFDecoder, ArmEStyleDecoder3D, position_encoding
 
 
 class ArmFTests(unittest.TestCase):
+    def test_p2_softmask_control_and_routing(self):
+        torch.set_num_threads(2)
+        torch.manual_seed(9)
+        baseline = ArmFDecoder(3, 32, (2, 2), channels=16, readout='reverse_dot_p2')
+        torch.manual_seed(9)
+        masked = ArmFDecoder(3, 32, (2, 2), channels=16, readout='reverse_dot_p2_softmask')
+        for name, value in baseline.state_dict().items():
+            torch.testing.assert_close(value, masked.state_dict()[name], rtol=0, atol=0)
+        masked.load_state_dict(baseline.state_dict(), strict=True)
+        images, z = torch.randn(2, 3, 32, 32), torch.randn(2, 4, 32)
+        maps = baseline.forward_pixels(images, z)
+        tokens, identity = torch.randn(2, 20, 32), torch.randn(16)
+        expected = baseline.forward_mask(maps, tokens, identity, (32, 32))
+        masked.soft_mask_alpha = 0
+        actual = masked.forward_mask(maps, tokens, identity, (32, 32))
+        torch.testing.assert_close(expected, actual, rtol=0, atol=0)
+        masked.soft_mask_alpha = 1
+        actual = masked.forward_mask(maps, tokens, identity, (32, 32))
+        self.assertGreater((actual - expected).abs().max().item(), 1e-6)
+        bf16_maps = [p.detach().to(torch.bfloat16).requires_grad_() for p in maps]
+        with torch.autocast('cpu', dtype=torch.bfloat16):
+            output = masked.forward_mask(bf16_maps, tokens, identity, (32, 32))
+        output.square().mean().backward()
+        for feature in bf16_maps:
+            self.assertIsNotNone(feature.grad)
+            self.assertTrue(torch.isfinite(feature.grad).all())
+        # Synthetic matched/unmatched pixels: bias favors matched locations,
+        # but even a nearly empty prior never produces -inf/NaN.
+        query = torch.ones(2, 20, 16, requires_grad=True)
+        pixels = torch.stack((torch.ones(2, 16), -torch.ones(2, 16)), dim=1)
+        bias = masked.soft_attention_bias(pixels, query, 4)
+        self.assertEqual(bias.shape, (8, 20, 2))
+        self.assertFalse(bias.requires_grad)
+        self.assertTrue(torch.isfinite(bias).all())
+        self.assertGreaterEqual(bias.min().item(), math.log(0.2))
+        weights = bias.softmax(-1)
+        self.assertTrue((weights[..., 0] > weights[..., 1]).all())
+        self.assertTrue((weights[..., 1] > 0).all())
+        with self.assertRaises(ValueError):
+            ArmFDecoder(3, 32, (4, 2, 2), channels=16, readout='reverse_dot_p2_softmask')
+
     def test_3d_baseline_matches_slice_wise_e_readout(self):
         decoder = ArmEStyleDecoder3D(3, 32, (4, 2, 2), channels=16)
         self.assertFalse(hasattr(decoder, 'blocks'))
@@ -95,6 +136,7 @@ class ArmFTests(unittest.TestCase):
             heads = ['arm_f_attention', 'arm_f_linear', 'arm_f_query_dot', 'arm_f_reverse_dot']
             if dimension == '2D':
                 heads.append('arm_f_reverse_dot_p2')
+                heads.append('arm_f_reverse_dot_p2_softmask')
             if dimension == '3D':
                 heads.append('arm_e_multiscale_query_3d')
             for head in heads:

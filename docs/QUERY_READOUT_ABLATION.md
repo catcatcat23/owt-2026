@@ -22,6 +22,13 @@ Use the existing unified2D calibration/head/recon evaluator with
 EXPECTED_SLOT_HEAD_TYPE=arm_f_reverse_dot_p2 and EXPECTED_LAMBDA_SEG=0.01.
 This tests the P2 fusion/readout package, not resolution alone.
 
+Submitted 2026-09-20 00:49 CST: antengcai23/XEC train141125
+(Priority), eval141126 (afterok:141125 verified), both QoS8gpus/5days.
+Runtime /gpfs/work/aac/antengcai23/worktrees/reverse_dot_p2_3150ff3,
+commit3150ff306ae47e57aa081b538c40de602a0c630a. Six CPU tests passed
+locally and on XEC; dataset identity and revision gates passed.
+GPU memory/throughput and training stability remain unverified until start.
+
 Existing E, `arm_f_attention`, and `arm_f_linear` implementations are retained.
 New heads are `arm_f_query_dot` and `arm_f_reverse_dot`.
 

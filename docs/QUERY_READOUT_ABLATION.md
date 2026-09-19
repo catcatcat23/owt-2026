@@ -5,8 +5,9 @@
 User requested changing running 2D E2955007 and Query-Dot2955009 from
 microbatch8/accum6 to microbatch16/accum3, retaining four GPUs/effective192.
 Resume sources: arm_f_linear_2d/Results/OrganSlotBank/Common8/WORD_2D/
-ArmF_2D_2955007/checkpoint-110.pth and ArmF_2D_2955009/checkpoint-10.pth.
-Restore model/optimizer/scaler, start at epoch111 / epoch11 respectively.
+ArmF_2D_2955007/checkpoint-120.pth and ArmF_2D_2955009/checkpoint-10.pth.
+E saved checkpoint120 during checks; validated and selected the newer file.
+Restore model/optimizer/scaler, start at epoch121 / epoch11 respectively.
 Both old/new microbatch settings yield148 optimizer updates per epoch;
 retain LR7.5e-5, total118800 updates, WORD07072 ROI20, topk small-organ loss,
 lambda_seg0.01, scratch lineage, no MAE. Resumed runs write separate job outputs.
@@ -16,6 +17,17 @@ evaluations against the new job IDs. Preserve all old results/checkpoints.
 This is mixed-microbatch training, not a clean batch16-from-scratch experiment:
 group-reduced losses can change gradients despite equal effective batch.
 GPU peak memory/throughput at batch16 are not yet verified.
+
+Submitted 2026-09-20 01:34 CST on bolinren19/SIP (Slurm account sifansong):
+E train2965273 / eval2965274 (4a800); Query-Dot train2965275 / eval2965276
+(8a800). Train4A800/20CPU/192GB; eval1A800/10CPU/128GB; seven days each.
+Both training jobs initially Priority; both afterok evaluation dependencies
+verified. Cancelled old2955007/2955008/2955009/2955010; old artifacts retained.
+Runtime /gpfs/work/aac/bolinren19/OD_OWT/.worktrees/sip_2d_b16_d7dedbe,
+source d7dedbe5a03d32224103fadf68f808d7f6266614; revision gate passed.
+CPU strict model/optimizer loading and tensor finiteness passed on real
+checkpoints, optimizer steps17908 / 1628. Scaler key present; training restores
+it through existing resume logic (BF16 scaler disabled). GPU resume not yet tested.
 
 ## Active P2 submissions — batch16 correction, 2026-09-20 01:16 CST
 

@@ -48,6 +48,8 @@ class ArmFDecoder(nn.Module):
         self.grid_size = tuple(grid_size)
         self.channels = channels
         self.readout = readout
+        if readout == "reverse_dot_p2" and len(self.grid_size) != 2:
+            raise ValueError("reverse_dot_p2 currently supports only 2D")
         # Reuse the exact Arm E spatial stem/fusion weights and architecture.
         # In 3D it runs slice-wise; no added temporal convolution confound.
         self.pixels = MultiScalePixelQueryDecoder2D(in_channels, embed_dim, self.grid_size[-2:], channels)
@@ -55,7 +57,7 @@ class ArmFDecoder(nn.Module):
         del self.pixels.query_proj
         self.input_proj = nn.Linear(embed_dim, channels)
         self.blocks = nn.ModuleList([TokenBlock(channels) for _ in range(3)])
-        if readout in ("attention", "reverse_dot"):
+        if readout in ("attention", "reverse_dot", "reverse_dot_p2"):
             self.reverse = nn.MultiheadAttention(channels, 4, batch_first=True)
             self.pixel_norm = nn.LayerNorm(channels)
             self.token_norm = nn.LayerNorm(channels)
@@ -68,6 +70,16 @@ class ArmFDecoder(nn.Module):
             self.token_fusion = nn.Linear(token_count, 1)
         elif readout != "query_dot":
             raise ValueError("unknown Arm F readout")
+        if readout == "reverse_dot_p2":
+            # Do not shift initialization of organ slots constructed afterwards.
+            with torch.random.fork_rng(devices=[]):
+                self.p2_proj = nn.Conv2d(max(16, channels // 2), channels, 1, bias=False)
+                self.p2_fusion = nn.Sequential(
+                    nn.Conv2d(2 * channels, channels, 3, padding=1, bias=False),
+                    nn.GroupNorm(1, channels), nn.GELU(),
+                    nn.Conv2d(channels, channels, 3, padding=1, bias=False),
+                    nn.GroupNorm(1, channels), nn.GELU(),
+                )
 
     def forward_pixels(self, images, z):
         if images.ndim == 5:
@@ -78,8 +90,12 @@ class ArmFDecoder(nn.Module):
                 time = self.grid_size[0]
             images = images.permute(0, 2, 1, 3, 4).reshape(batch * time, cin, height, width)
             z = z.reshape(batch * time, -1, z.shape[-1])
-        _, features = self.pixels.forward_pixels(images, z, return_intermediates=True)
+        _, features = self.pixels.forward_pixels(
+            images, z, return_intermediates=True,
+            return_p2=getattr(self, "readout", None) == "reverse_dot_p2")
         maps = [features[key] for key in ("p16", "p8_fused", "p4_fused")]
+        if getattr(self, "readout", None) == "reverse_dot_p2":
+            maps.append(features["p2_raw"])
         if len(self.grid_size) == 3:
             maps = [p.reshape(batch, time, self.channels, *p.shape[-2:]).permute(0, 2, 1, 3, 4) for p in maps]
         return maps
@@ -92,11 +108,20 @@ class ArmFDecoder(nn.Module):
                 memory = feature.float().flatten(2).transpose(1, 2)
                 pe = position_encoding(feature.shape[2:], self.channels, feature.device)
                 x = block(x, memory, pe)
-            p = maps[-1].float().flatten(2).transpose(1, 2)
-            if self.readout in ("attention", "reverse_dot"):
+            mask_shape = maps[2].shape[2:]
+            p = maps[2].float().flatten(2).transpose(1, 2)
+            if self.readout in ("attention", "reverse_dot", "reverse_dot_p2"):
                 kv = self.token_norm(x)
                 z = p + self.reverse(self.pixel_norm(p) + pe, kv, kv, need_weights=False)[0]
                 z = z + self.ffn(self.ffn_norm(z))
+                if self.readout == "reverse_dot_p2":
+                    s2 = maps[3].float()
+                    z = z.transpose(1, 2).reshape(tokens.shape[0], self.channels, *mask_shape)
+                    z = _interpolate_bf16_safe(
+                        z, size=s2.shape[2:], mode="bilinear", align_corners=False)
+                    z = self.p2_fusion(torch.cat((z, self.p2_proj(s2)), dim=1))
+                    mask_shape = z.shape[2:]
+                    z = z.flatten(2).transpose(1, 2)
                 if self.readout == "attention":
                     logits = self.classifier(z)
                 else:
@@ -105,7 +130,7 @@ class ArmFDecoder(nn.Module):
                 logits = self.dot_readout(p, x)
             else:
                 logits = self.token_fusion(p @ self.mask_mlp(x).transpose(1, 2) / math.sqrt(self.channels))
-            logits = logits.transpose(1, 2).reshape(tokens.shape[0], 1, *maps[-1].shape[2:])
+            logits = logits.transpose(1, 2).reshape(tokens.shape[0], 1, *mask_shape)
             return _interpolate_bf16_safe(logits, size=tuple(output_size), mode="bilinear" if logits.ndim == 4 else "trilinear", align_corners=False)
 
     def dot_readout(self, pixels, tokens):

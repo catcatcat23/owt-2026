@@ -1,5 +1,27 @@
 # Controlled query/readout ablation
 
+## P2 shallow-skip readout (2026-09-20)
+
+New 2D-only head `arm_f_reverse_dot_p2`. Keep P16/P8/P4 token refinement,
+P4 reverse attention, 20-token mean query and normalized dot scale unchanged.
+Return existing stem S2 (64 channels at standard width128); bilinearly upsample
+organ-conditioned refined P4, concatenate with 1x1-projected S2, then apply
+two 3x3 Conv/GroupNorm(1)/GELU layers at width128. Dot readout now occurs on P2
+(224x224 for input448), followed by the original full-size bilinear resize.
+Fusion is shared across organs, evaluated per organ. No mask attention, no
+extra supervision, no new temporal mixing. Existing head defaults/weights stay
+unchanged; P2 is explicitly rejected for 3D. Added modules preserve constructor
+RNG for later slots. P2 increases memory/compute; GPU throughput is unverified.
+
+Controlled training: scratch seed0, WORD07072 ROI20, lambda_seg0.01, topk
+small-organ loss, LR7.5e-5, 118800 updates/warmup5940, four A800,
+microbatch8/accum6/effective192. Control is original Reverse-Dot2955011, NOT
+the lambda0.03 experiment. Different SIP/XEC software/hardware is a caveat.
+Target antengcai23/XEC, account sifansong, QoS8gpus (maximum five days).
+Use the existing unified2D calibration/head/recon evaluator with
+EXPECTED_SLOT_HEAD_TYPE=arm_f_reverse_dot_p2 and EXPECTED_LAMBDA_SEG=0.01.
+This tests the P2 fusion/readout package, not resolution alone.
+
 Existing E, `arm_f_attention`, and `arm_f_linear` implementations are retained.
 New heads are `arm_f_query_dot` and `arm_f_reverse_dot`.
 

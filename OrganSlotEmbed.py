@@ -396,10 +396,12 @@ class SpatialStem2D(nn.Module):
             nn.GELU(),
         )
 
-    def forward(self, images):
+    def forward(self, images, return_p2=False):
         p2 = self.to_p2(images)
         p4 = self.to_p4(p2)
         p8 = self.to_p8(p4)
+        if return_p2:
+            return p2, p4, p8
         return p4, p8
 
 
@@ -477,7 +479,7 @@ class MultiScalePixelQueryDecoder2D(SharedPixelQueryDecoder):
             with torch.random.fork_rng(devices=[]):
                 self.query_cross_attention = QueryCrossAttention(self.channels)
 
-    def forward_pixels(self, images, z, return_intermediates=False):
+    def forward_pixels(self, images, z, return_intermediates=False, return_p2=False):
         if images.ndim != 4:
             raise ValueError("Arm E spatial stem requires BCHW images")
         batch_size, patch_count, _ = z.shape
@@ -487,7 +489,10 @@ class MultiScalePixelQueryDecoder2D(SharedPixelQueryDecoder):
         if images.shape[0] != batch_size:
             raise ValueError("images and encoder features must share a batch size")
 
-        p4_raw, p8_raw = self.spatial_stem(images)
+        if return_p2:
+            p2_raw, p4_raw, p8_raw = self.spatial_stem(images, return_p2=True)
+        else:
+            p4_raw, p8_raw = self.spatial_stem(images)
         p16 = self.pixel_proj(self.pixel_norm(z))
         p16 = p16.transpose(1, 2).reshape(
             batch_size, self.channels, *self.grid_size
@@ -505,6 +510,7 @@ class MultiScalePixelQueryDecoder2D(SharedPixelQueryDecoder):
         p4_fused = self.blocks[1](p4_fused + self.p4_proj(p4_raw))
         if return_intermediates:
             return p4_fused, {
+                **({"p2_raw": p2_raw} if return_p2 else {}),
                 "p4_raw": p4_raw,
                 "p8_raw": p8_raw,
                 "p16": p16,
@@ -620,7 +626,7 @@ class OrganSlot(nn.Module):
             )
             self.head = head_class(decoder_dim, grid_size, channels=head_channels)
         elif self.head_type in (
-            "query_dot", "multi_query_dot", "arm_e_multiscale_query", "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_e_multiscale_query_3d"
+            "query_dot", "multi_query_dot", "arm_e_multiscale_query", "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_f_reverse_dot_p2", "arm_e_multiscale_query_3d"
         ):
             self.head = SlotQueryEmbedding(head_channels)
         else:
@@ -644,7 +650,7 @@ class OrganSlot(nn.Module):
 
     def forward_head(self, canvas, output_size):
         if self.head_type in (
-            "query_dot", "multi_query_dot", "arm_e_multiscale_query", "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_e_multiscale_query_3d"
+            "query_dot", "multi_query_dot", "arm_e_multiscale_query", "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_f_reverse_dot_p2", "arm_e_multiscale_query_3d"
         ):
             raise RuntimeError(
                 "query heads require tokens and shared pixel features"
@@ -657,7 +663,7 @@ class OrganSlot(nn.Module):
 
     def forward_query_head(self, tokens, pixel_features, decoder, output_size):
         if self.head_type not in (
-            "query_dot", "multi_query_dot", "arm_e_multiscale_query", "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_e_multiscale_query_3d"
+            "query_dot", "multi_query_dot", "arm_e_multiscale_query", "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_f_reverse_dot_p2", "arm_e_multiscale_query_3d"
         ):
             raise RuntimeError("forward_query_head requires a query slot")
         raw_logits = decoder.forward_mask(

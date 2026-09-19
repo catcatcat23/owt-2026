@@ -43,6 +43,41 @@ class ArmFTests(unittest.TestCase):
             torch.testing.assert_close(old.forward_mask(maps, tokens, identity, (32, 32)),
                                        new.forward_mask(maps, tokens, identity, (32, 32)), rtol=0, atol=0)
 
+    def test_p2_resolution_skip_and_legacy_dot(self):
+        torch.set_num_threads(2)
+        source = subprocess.check_output(['git', 'show', '4f6488d:ArmFDecoder.py'], text=True)
+        legacy = types.ModuleType('legacy_dot')
+        exec(compile(source, 'legacy_dot', 'exec'), legacy.__dict__)
+        for readout in ('query_dot', 'reverse_dot'):
+            torch.manual_seed(5)
+            old = legacy.ArmFDecoder(3, 32, (2, 2), channels=16, readout=readout)
+            torch.manual_seed(5)
+            new = ArmFDecoder(3, 32, (2, 2), channels=16, readout=readout)
+            new.load_state_dict(old.state_dict(), strict=True)
+            images, z = torch.randn(1, 3, 32, 32), torch.randn(1, 4, 32)
+            tokens, identity = torch.randn(1, 20, 32), torch.randn(16)
+            torch.testing.assert_close(
+                old.forward_mask(old.forward_pixels(images, z), tokens, identity, (32, 32)),
+                new.forward_mask(new.forward_pixels(images, z), tokens, identity, (32, 32)),
+                rtol=0, atol=0)
+        decoder = ArmFDecoder(3, 32, (2, 2), channels=16, readout='reverse_dot_p2')
+        maps = decoder.forward_pixels(images, z)
+        self.assertEqual([p.shape[-1] for p in maps], [2, 4, 8, 16])
+        observed = []
+        hook = decoder.p2_fusion.register_forward_hook(lambda m, a, out: observed.append(out.shape))
+        maps = [p.detach().to(torch.bfloat16).requires_grad_() for p in maps]
+        with torch.autocast('cpu', dtype=torch.bfloat16):
+            output = decoder.forward_mask(maps, tokens, identity, (32, 32))
+        hook.remove()
+        self.assertEqual(observed[0], (1, 16, 16, 16))
+        output.square().mean().backward()
+        self.assertTrue(torch.isfinite(maps[3].grad).all())
+        self.assertGreater(maps[3].grad.abs().sum().item(), 0)
+        changed = decoder.forward_mask(maps[:3] + [torch.zeros_like(maps[3])], tokens, identity, (32, 32))
+        self.assertGreater((output - changed).abs().max().item(), 1e-5)
+        with self.assertRaises(ValueError):
+            ArmFDecoder(3, 32, (4, 2, 2), channels=16, readout='reverse_dot_p2')
+
     def test_dot_contract(self):
         query = ArmFDecoder(3, 32, (2, 2), channels=16, readout='query_dot')
         reverse = ArmFDecoder(3, 32, (2, 2), channels=16, readout='reverse_dot')
@@ -58,6 +93,8 @@ class ArmFTests(unittest.TestCase):
         torch.set_num_threads(2)
         for dimension in ('2D', '3D'):
             heads = ['arm_f_attention', 'arm_f_linear', 'arm_f_query_dot', 'arm_f_reverse_dot']
+            if dimension == '2D':
+                heads.append('arm_f_reverse_dot_p2')
             if dimension == '3D':
                 heads.append('arm_e_multiscale_query_3d')
             for head in heads:

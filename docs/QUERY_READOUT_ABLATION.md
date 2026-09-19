@@ -16,6 +16,21 @@ Use latest origin/feature/orgslot in a new pinned worktree, not either old runti
 Microbatch16 GPU memory/throughput remain unverified. Do not call it a GPU-tested
 configuration based on CPU compatibility tests from earlier work.
 
+Submitted 2026-09-20 01:43 CST; both trainings Pending(Priority):
+
+| lambda_seg | Train | Unified eval | Slurm account / QoS |
+| --- | --- | --- | --- |
+| 0.01 | 2965316 | 2965317, afterok:2965316 | sifansong / 8a800 |
+| 0.03 | 2965318 | 2965319, afterok:2965318 | angelosstefanidis / 8a800 |
+
+Runtime /gpfs/work/aac/bolinren19/OD_OWT/.worktrees/p4_b16_db9c788,
+source db9c788152b87d755ef67dc46eb59c7d70526c5f. Revision gate and shell
+configuration assertions (micro16/accum3/effective192/lambda per arm) passed.
+Training/evaluation paths and afterok dependencies verified after submission.
+Logs: artifacts/p4_b16_db9c788/logs. Old four jobs confirmed cancelled;
+2955011 used8min43sec before cancellation, no saved progress used in replacement.
+No GPU preflight run and no claim of batch16 GPU validation.
+
 ## SIP E / Query-Dot batch16 resume (2026-09-20)
 
 User requested changing running 2D E2955007 and Query-Dot2955009 from

@@ -3,7 +3,9 @@
 ## P2 + soft spatial attention prior (2026-09-20)
 
 Independent 2D head: `arm_f_reverse_dot_p2_softmask`. Control:
-`arm_f_reverse_dot_p2` (train141125); do not replace its runtime snapshot.
+`arm_f_reverse_dot_p2`. Both P2 arms use microbatch16/accum3 on four GPUs.
+The original batch8 job chains 141125/141126 and 141128/141129 are superseded
+before starting; preserve their historical runtime snapshots.
 Only token-to-pixel cross-attention changes. Before each P16/P8/P4 block,
 compute `M = sigmoid(sqrt(C) * normalize(memory) dot normalize(mean(tokens)))`
 from the current projected/refined organ tokens and that scale's original
@@ -24,11 +26,12 @@ The existing FP32 attention region also computes this bias. 3D is rejected.
 
 Use existing training entry point with
 `ARM_F_HEAD_TYPE=arm_f_reverse_dot_p2_softmask`, `ARM_F_DIMENSION=2D`,
-`ARM_F_MICRO_BATCH=8`, `ARM_F_ACCUM_ITER=6`, `ARM_F_LAMBDA_SEG=0.01`,
+`ARM_F_MICRO_BATCH=16`, `ARM_F_ACCUM_ITER=3`, `ARM_F_LAMBDA_SEG=0.01`,
 `BACKGROUND_REDUCTION=topk`, scratch seed0, no MAE init, and the same WORD07072
 ROI20 dataset / 118800 updates / effective batch192 as P2. Evaluation must use
 `EXPECTED_SLOT_HEAD_TYPE=arm_f_reverse_dot_p2_softmask` and the same unified
-train-calibrated head + reconstruction protocol. No job submitted in this change.
+train-calibrated head + reconstruction protocol. Batch16 GPU memory is unverified;
+do not silently reduce microbatch if it fails. Seven CPU tests passed on XEC.
 
 Tests cover alpha=0 exact baseline equivalence, strict P2 weight loading,
 identical initialization, finite non-hard biases, preferential synthetic routing,
@@ -52,14 +55,14 @@ RNG for later slots. P2 increases memory/compute; GPU throughput is unverified.
 
 Controlled training: scratch seed0, WORD07072 ROI20, lambda_seg0.01, topk
 small-organ loss, LR7.5e-5, 118800 updates/warmup5940, four A800,
-microbatch8/accum6/effective192. Control is original Reverse-Dot2955011, NOT
+microbatch16/accum3/effective192. Control is original Reverse-Dot2955011, NOT
 the lambda0.03 experiment. Different SIP/XEC software/hardware is a caveat.
 Target antengcai23/XEC, account sifansong, QoS8gpus (maximum five days).
 Use the existing unified2D calibration/head/recon evaluator with
 EXPECTED_SLOT_HEAD_TYPE=arm_f_reverse_dot_p2 and EXPECTED_LAMBDA_SEG=0.01.
 This tests the P2 fusion/readout package, not resolution alone.
 
-Submitted 2026-09-20 00:49 CST: antengcai23/XEC train141125
+Historical batch8 submission, superseded before starting: antengcai23/XEC train141125
 (Priority), eval141126 (afterok:141125 verified), both QoS8gpus/5days.
 Runtime /gpfs/work/aac/antengcai23/worktrees/reverse_dot_p2_3150ff3,
 commit3150ff306ae47e57aa081b538c40de602a0c630a. Six CPU tests passed

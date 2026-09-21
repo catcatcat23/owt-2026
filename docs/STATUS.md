@@ -1,5 +1,26 @@
 # 当前实验交接
 
+## 2026-09-21 16:53 Collector attention alignment 已提交
+
+目的：以2D Arm E scratch为基准，仅新增Collector器官外注意力软惩罚，验证器官采集定位是否改善；不增加网络模块，不使用MAE、不续训，默认lambda=0保持旧实验。
+
+| 实验 | 账号/集群 | Job | 资源与时限 | 提交后核验 |
+|---|---|---|---|---|
+| Arm E scratch + collector loss 0.01 | sifansong / XEC，account=sifansong，QoS=4gpus | 143780 | 4×A800、20CPU、192GB、7天 | PENDING (Priority)；无GPU验证 |
+| 同协议阈值校准 + head测试 + reconstruction | 同上 | 143781 | 1×A800、10CPU、128GB、7天 | PENDING (Dependency)，afterok:143780 |
+
+- 固定代码：`aff9f696d50fb2dcd0edfb47bc6312e8f9caae3e`，已在提交前推送origin/feature/orgslot并通过revision guard。
+- 本地固定worktree：`/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/collector_align_aff9f69`。
+- XEC固定源码快照：`/gpfs/work/aac/sifansong/worktrees/collector_align_aff9f69`。此目录不pull、不覆盖；tar无.git时训练provenance允许unavailable，真实来源以本条full commit、源码checksum、Slurm SOURCE_COMMIT和压缩包校验为准。
+- 压缩包：`/gpfs/work/aac/sifansong/collector_align_aff9f69.tar`，SHA256=`d197f72fb8f53367e4824580c46978d3e1ba3ac3685e8fbff93db45f3237475d`，本地/远端一致。
+- train/eval入口：`slurm/orgslot/train/arm_e_collector_align.sbatch`、`slurm/orgslot/eval/arm_e_collector_align.sbatch`。
+- 训练输出：运行目录下`Results/OrganSlotBank/Common8/WORD_2D/ArmE_CollectorAlign001_scratch_143780`；Slurm日志：`/gpfs/work/aac/sifansong/logs/collector_align_aff9f69/`。
+- 2D每卡16×4卡×累积3=192；118800 updates，预计最终checkpoint-802；WORD07072、ROI20、seed0、small-organ lambda_seg0.01不变。
+- 对照：E scratch训练系列2965273 / 评估2965274。对照历史中途换过microbatch，新实验从头16；不是逐更新完全相同随机轨迹。其余已有任务未修改。
+- 本地与XEC各6项新增CPU测试通过，包括两进程Gloo；数据身份28586训练切片/6990测试切片、ROI core SHA256均匹配基线。GPU正式运行尚未开始，不能宣称GPU验证通过。
+- 下一次先查143780是否启动、resolved_config是否scratch/batch16/lambda_collect0.01、首epoch各器官collector count/foreground_mass及有限梯度、weighted_collect=0.01×raw；再检查checkpoint与143781依赖。最终比较八类head fixed/calibrated和recon，不只看attention集中度。
+
+
 ## 2026-09-18 13:53 已核验快照（当前入口）
 
 新六组：1组运行、5组排队；未发现失败。此次文档整理未再次刷新队列。

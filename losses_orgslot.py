@@ -6,6 +6,73 @@ import torch
 import torch.nn.functional as F
 
 
+def collector_attention_loss(attentions, visible_masks, slot_names,
+                             supervision_mask, grid_size):
+    """2D outside-mass loss; no new parameters or inference inputs.
+
+    Average over globally valid positive sample/organ pairs per microstep.
+    DDP averages gradients: local numerator uses world_size / global count.
+    Missing labels, background and inactive slots never contribute.
+    Statistics use one fixed-shape collective, even on all-empty ranks.
+    """
+    if len(grid_size) != 2:
+        raise ValueError("collector attention alignment currently supports only 2D")
+    gh, gw = (int(v) for v in grid_size)
+    if gh <= 0 or gw <= 0:
+        raise ValueError("collector grid must be positive")
+    reference = attentions[slot_names[0]]
+    batch_size = reference.shape[0]
+    if supervision_mask.shape != (batch_size, len(slot_names)):
+        raise ValueError("collector supervision mask must be [B, slots]")
+    numerator = reference.float().sum() * 0.0
+    # count, foreground mass, support fraction, occupancy-weighted mass
+    stats = reference.new_zeros((len(slot_names), 4), dtype=torch.float32)
+    for index, name in enumerate(slot_names):
+        attention = attentions[name].float()
+        numerator = numerator + attention.sum() * 0.0
+        if name == "background" or name not in visible_masks:
+            continue
+        mask = visible_masks[name]
+        if mask.ndim != 4 or mask.shape[:2] != (batch_size, 1):
+            raise ValueError("collector masks must be transformed 2D [B,1,H,W]")
+        if attention.ndim != 3 or attention.shape[-1] != gh * gw:
+            raise ValueError("attention does not match the 2D patch grid")
+        height, width = mask.shape[-2:]
+        if height % gh or width % gw:
+            raise ValueError("mask dimensions must align exactly with patch cells")
+        kernel = (height // gh, width // gw)
+        mask = mask.to(device=attention.device, dtype=torch.float32)
+        support = F.max_pool2d(mask, kernel, stride=kernel).flatten(1)
+        occupancy = F.avg_pool2d(mask, kernel, stride=kernel).flatten(1)
+        valid = supervision_mask[:, index].bool() & support.any(dim=1)
+        valid_float = valid.float()
+        mass = (attention * support[:, None, :]).sum(-1).mean(-1)
+        outside = (attention * (1.0 - support[:, None, :])).sum(-1).mean(-1)
+        numerator = numerator + (outside * valid_float).sum()
+        stats[index] = torch.stack((
+            valid_float.sum(),
+            (mass.detach() * valid_float).sum(),
+            (support.mean(-1) * valid_float).sum(),
+            ((attention.detach() * occupancy[:, None, :]).sum(-1).mean(-1)
+             * valid_float).sum(),
+        ))
+    distributed = torch.distributed.is_available() and torch.distributed.is_initialized()
+    world_size = torch.distributed.get_world_size() if distributed else 1
+    if distributed:
+        torch.distributed.all_reduce(stats)
+    count = stats[:, 0].sum()
+    loss = numerator * world_size / count.clamp_min(1.0)
+    metrics = {"collector_valid_pairs": count}
+    for index, name in enumerate(slot_names):
+        if name == "background":
+            continue
+        denominator = stats[index, 0].clamp_min(1.0)
+        metrics["collector_{}_count".format(name)] = stats[index, 0]
+        for offset, suffix in enumerate(("foreground_mass", "support_fraction", "occupancy_mass"), 1):
+            metrics["collector_{}_{}".format(name, suffix)] = stats[index, offset] / denominator
+    return loss, metrics
+
+
 def masked_mean(values, mask, eps=1e-8):
     mask = mask.to(device=values.device, dtype=values.dtype)
     while mask.ndim < values.ndim:

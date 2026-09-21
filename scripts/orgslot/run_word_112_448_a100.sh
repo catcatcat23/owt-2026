@@ -23,6 +23,7 @@ EXPECTED_SPACING=${EXPECTED_SPACING:-"1 1 2"}
 FUSION_MODE=${FUSION_MODE:?Set FUSION_MODE after the current AutoPET evaluations}
 FUSION_REFERENCE_COUNT=${FUSION_REFERENCE_COUNT:-9}
 LAMBDA_SEG=${LAMBDA_SEG:?Set LAMBDA_SEG after the current AutoPET evaluations}
+LAMBDA_COLLECTOR_ATTENTION=${LAMBDA_COLLECTOR_ATTENTION:-0}
 LAMBDA_BG_SEG=${LAMBDA_BG_SEG:-0.25}
 SEG_SUPERVISION=${SEG_SUPERVISION:-retained}
 SEG_LOSS_TYPE=${SEG_LOSS_TYPE:-dice_bce}
@@ -168,6 +169,7 @@ COMMAND=(
   --lambda_lpips 1.0
   --lpips_state "${LPIPS_STATE}"
   --lambda_seg "${LAMBDA_SEG}"
+  --lambda_collector_attention "${LAMBDA_COLLECTOR_ATTENTION}"
   --lambda_bg_seg "${LAMBDA_BG_SEG}"
   --seg_supervision "${SEG_SUPERVISION}"
   --seg_loss_type "${SEG_LOSS_TYPE}"
@@ -255,6 +257,7 @@ fi
   echo "cuda_visible_devices=${CUDA_VISIBLE_DEVICES:-<unset>}"
   echo "spacing=${EXPECTED_SPACING}"
   echo "fusion_mode=${FUSION_MODE} fusion_reference_count=${FUSION_REFERENCE_COUNT} lambda_seg=${LAMBDA_SEG}"
+  echo "lambda_collector_attention=${LAMBDA_COLLECTOR_ATTENTION}"
   echo "seg_supervision=${SEG_SUPERVISION} lambda_bg_seg=${LAMBDA_BG_SEG}"
   echo "organ_roi_probability=${ORGAN_ROI_PROBABILITY} tgr_mode=${TGR_MODE}"
   echo "seg_loss_type=${SEG_LOSS_TYPE} focal_alpha=${FOCAL_ALPHA} focal_gamma=${FOCAL_GAMMA}"

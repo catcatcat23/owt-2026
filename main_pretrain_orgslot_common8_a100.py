@@ -141,6 +141,8 @@ def get_args_parser():
     parser.add_argument("--loss_version", default="L2-LPIPS")
     parser.add_argument("--lambda_lpips", default=1.0, type=float)
     parser.add_argument("--lambda_seg", default=0.0, type=float)
+    parser.add_argument("--lambda_collector_attention", default=0.0, type=float,
+                        help="2D positive retained-slot outside-attention mass weight")
     parser.add_argument("--lambda_bg_seg", default=0.25, type=float)
     parser.add_argument("--positive_roi_loss_weight", default=0.0, type=float)
     parser.add_argument("--roi_positive_sample_counts", nargs="+", type=int)
@@ -442,6 +444,10 @@ def main(args):
         raise ValueError("lambda_lpips > 0 requires LPIPS in --loss_version")
     if args.lambda_seg < 0:
         raise ValueError("lambda_seg must be non-negative")
+    if not math.isfinite(args.lambda_collector_attention) or args.lambda_collector_attention < 0:
+        raise ValueError("lambda_collector_attention must be finite and non-negative")
+    if args.lambda_collector_attention and (args.dimension != "2D" or args.training_scope == "head_only"):
+        raise ValueError("collector attention loss requires 2D joint training")
     if not 0.0 <= args.focal_alpha <= 1.0:
         raise ValueError("focal_alpha must be in [0, 1]")
     if args.focal_gamma < 0.0:

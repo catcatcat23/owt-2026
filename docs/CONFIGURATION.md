@@ -79,3 +79,16 @@ encoder或encoder_decoder；复用AutoPET checkpoint-final，初始化不加载o
 其他实验专用脚本新提交前也须按此约定核对，不能沿用旧脚本的batch覆盖值。
 已运行或已归档任务保持原快照；资源不足时先报告，不静默改变有效batch。
 改变micro-batch可能改变阳性/阴性分组loss归约权重，不能称为严格梯度等价。
+## Collector attention alignment
+
+2026-09-21：以 **2D Arm E scratch** 为对照，新增轻量训练辅助损失，不新增参数、不改变推理与旧checkpoint结构。`--lambda_collector_attention` 默认0；本次探索值0.01（不是已优化超参）。只实现outside loss，不加coverage、diversity、gate或其他attention模块。
+
+- `A:[B,K,N]` 为现有Collector空间softmax；`M` 是增强/ROI后当前GT按真实patch格子max-pool得到的器官相交支持区。loss=`mean_valid_pairs(mean_tokens(sum_positions(A*(1-M))))`。
+- 只使用visible_masks中有标注、当前裁剪有前景、segmentation_keep和slot_compute_mask均为真的器官。排除background、空切片、缺标注和未计算slot。当前只支持2D joint训练，3D/head-only显式拒绝。
+- DDP每microstep对有效样本—器官数做全局归一化，局部可导分子乘world_size抵消DDP梯度平均。固定形状统计collective和固定日志键；无阳性rank保持零梯度路径。梯度累积平均的是microstep的全局均值，未改原采样/累积策略。
+- FP32计算辅助loss；记录raw/weighted loss、每器官count/foreground_mass/support_fraction/occupancy_mass。max-pool支持区不等于纯器官patch；注意力集中不等于解耦证明，也不保证token分工。
+- 模型保持arm_e_multiscale_query、20 tokens、TGEnc depth1、channels128；WORD07072、448/384、ROI概率0.2、seed0；scratch，无resume/MAE；small-organ参数全部不变、lambda_seg0.01；BF16、clip1、实际LR7.5e-5、warmup5940、118800 updates；4卡×batch16×accum3=192。
+- 对照为当前E scratch系列（SIP续训2965273；统一评估2965274）。历史对照中途由较小microbatch切到16，且发生过恢复；新实验从头batch16，不能宣称随机轨迹逐步一致。不要与E MAE初始化结果混为严格对照。后续若需严格归因，需匹配从头batch16的基线。
+- 评估复用`slurm/orgslot/eval/arm_e_mae_unified.sbatch`：训练集子集阈值校准、24病例6990切片head fixed/calibrated、原有recon阈值0.02及后处理；不在测试集选阈值。此脚本名称含MAE，但不要求MAE权重。
+- 启动脚本：`slurm/orgslot/train/arm_e_collector_align.sbatch`。继承按账号显式映射的数据/环境路径，不复用另一账号的目录；冻结最新origin/feature/orgslot源快照。
+- CPU核验：6项新增测试全部通过，包括实际Arm E前向不变/strict checkpoint加载、Collector梯度、小型定位拟合、两进程Gloo不均衡与空rank。另有23项回归通过；旧`test_small_organ_empty_slice_uses_topk_bce_and_weight`在未修改origin源码上同样失败（测试未显式传topk，而当前API默认mean）。本实验显式topk，不修改历史loss语义。GPU正式运行尚待调度验证。

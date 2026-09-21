@@ -8,7 +8,7 @@ import torch
 import torch.distributed as dist
 
 from engine_pretrain_orgslot import perceptual_reconstruction_loss
-from losses_orgslot import base_reconstruction_loss, base_segmentation_loss
+from losses_orgslot import base_reconstruction_loss, base_segmentation_loss, collector_attention_loss
 import util.misc as misc
 from util.distributed_metrics import reduce_metrics
 from util.orgslot_lossbalance_v3 import state_separated_mask_roi_l2
@@ -137,6 +137,7 @@ def train_one_epoch(
     model.train(True)
     model_without_ddp = _unwrap_model(model)
     slot_names = model_without_ddp.slot_names
+    collector_weight = float(getattr(args, "lambda_collector_attention", 0.0))
     roi_class_weights = torch.as_tensor(
         args.roi_class_weights, device=device, dtype=torch.float32
     )
@@ -205,6 +206,7 @@ def train_one_epoch(
             slot_names, segmentation_keep, args.lambda_bg_seg
         )
         segmentation_diagnostics = {}
+        collector_metrics = {}
 
         with _autocast_context(device, args.amp_dtype):
             if args.training_scope == "head_only":
@@ -243,6 +245,7 @@ def train_one_epoch(
                     slot_keep_mask=keep,
                     head_compute_mask=head_compute_mask,
                     decode_heads=decode_heads,
+                    **({"return_diagnostics": True} if collector_weight else {}),
                 )
                 reconstruction_loss = base_reconstruction_loss(
                     output["reconstruction"], target
@@ -277,6 +280,13 @@ def train_one_epoch(
                     + args.lambda_lpips * perceptual_loss
                     + args.lambda_seg * segmentation_loss
                 )
+            if collector_weight:
+                collector_loss, collector_metrics = collector_attention_loss(
+                    output["collector_attention"], visible_masks, slot_names,
+                    segmentation_keep & output["slot_compute_mask"],
+                    model_without_ddp._slot_factory["grid_size"],
+                )
+                total_loss = total_loss + collector_weight * collector_loss
             zero = reconstruction_loss.detach() * 0.0
             empty = torch.zeros(len(slot_names), device=device)
             positive = {
@@ -313,6 +323,8 @@ def train_one_epoch(
             for name, value in per_slot_segmentation.items()
         })
         sample_indices = batch["sample_index"].detach().cpu().tolist()
+        if collector_weight:
+            loss_components["collector_attention_loss"] = collector_loss
         _check_finite(
             loss_components,
             device,
@@ -392,6 +404,10 @@ def train_one_epoch(
             finite_norm = bool(torch.isfinite(grad_norm))
             values["grad_norm"] = float(grad_norm.detach()) if finite_norm else 0.0
             values["amp_overflow"] = float(not finite_norm)
+        if collector_weight:
+            values["collector_attention_loss"] = float(collector_loss.detach())
+            values["weighted_collector_attention_loss"] = float(collector_weight * collector_loss.detach())
+            values.update({key: float(value) for key, value in collector_metrics.items()})
         for slot_index, slot_name in enumerate(slot_names):
             if float(roi_class_weights[slot_index]) <= 0:
                 continue

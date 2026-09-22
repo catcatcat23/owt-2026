@@ -224,6 +224,16 @@ evaluator, not the older post3d-only evaluator. No training jobs were submitted
 as part of implementing this extension.
 # Multiscale F + SAM-style tail (2026-09-22)
 
+Requested first training is **2D MAE encoder-only**, not scratch. Launcher:
+`slurm/orgslot/train/arm_f_sam_tail_encoder.sbatch`; AutoPET 2D MAE final
+checkpoint SHA256 `0b3571a3e79095686a0b12649735a298aaeb8a0b3bb93a47f3484439ac4a1ec6`.
+Only the existing encoder transfer mapping is loaded; organ modules, spatial
+decoder, reconstruction decoder and SAM tail retain random initialization.
+No optimizer resume. 4 GPUs x 16 x accumulation3 = 192, 118800 updates,
+lambda_seg0.01, historical top-k small-organ loss. Compared with scratch
+Query/Reverse-Dot this changes BOTH initialization and decoder; use the MAE
+encoder-only counterparts for architectural comparisons.
+
 New opt-in head: `arm_f_sam_tail`. Implementation only; no GPU job submitted.
 Existing E/F heads, losses, reconstruction and frozen job worktrees are unchanged.
 

@@ -11,6 +11,67 @@ from ArmFDecoder import ArmFDecoder, ArmEStyleDecoder3D, position_encoding
 
 
 class ArmFTests(unittest.TestCase):
+    def test_pre_sam_heads_exact_compatibility(self):
+        source = subprocess.check_output(
+            ['git', 'show', '1016af0:ArmFDecoder.py'], text=True)
+        legacy = types.ModuleType('pre_sam_tail')
+        exec(compile(source, 'pre_sam_tail', 'exec'), legacy.__dict__)
+        torch.set_num_threads(2)
+        for readout in ('attention', 'linear', 'query_dot', 'reverse_dot',
+                        'reverse_dot_p2', 'reverse_dot_p2_softmask'):
+            torch.manual_seed(23)
+            old = legacy.ArmFDecoder(3, 32, (2, 2), channels=16, readout=readout)
+            torch.manual_seed(23)
+            new = ArmFDecoder(3, 32, (2, 2), channels=16, readout=readout)
+            self.assertEqual(set(old.state_dict()), set(new.state_dict()))
+            for key in old.state_dict():
+                torch.testing.assert_close(old.state_dict()[key], new.state_dict()[key],
+                                           rtol=0, atol=0)
+            new.load_state_dict(old.state_dict(), strict=True)
+            images, z = torch.randn(1, 3, 32, 32), torch.randn(1, 4, 32)
+            tokens, identity = torch.randn(1, 20, 32), torch.randn(16)
+            torch.testing.assert_close(
+                old.forward_mask(old.forward_pixels(images, z), tokens, identity, (32, 32)),
+                new.forward_mask(new.forward_pixels(images, z), tokens, identity, (32, 32)),
+                rtol=0, atol=0)
+
+    def test_sam_tail_order_condition_and_bf16(self):
+        torch.set_num_threads(2)
+        for grid in ((2, 2), (4, 2, 2)):
+            decoder = ArmFDecoder(3, 32, grid, channels=16, readout='sam_tail')
+            events, handles = [], []
+            for i, block in enumerate(decoder.blocks):
+                handles.append(block.register_forward_hook(
+                    lambda m, a, o, name='scale' + str(i): events.append(name)))
+            for name in ('self_attn', 'token_to_pixel', 'token_ffn',
+                         'pixel_to_token', 'final_token_to_pixel', 'mask_mlp'):
+                handles.append(getattr(decoder.sam_tail, name).register_forward_hook(
+                    lambda m, a, o, name=name: events.append(name)))
+            prefix = () if len(grid) == 2 else (4,)
+            maps = [torch.randn(2, 16, *prefix, n, n).to(torch.bfloat16).requires_grad_()
+                    for n in (2, 4, 8)]
+            tokens = torch.randn(2, 20, 32, requires_grad=True)
+            identity = torch.randn(16, requires_grad=True)
+            with torch.autocast('cpu', dtype=torch.bfloat16):
+                result = decoder.forward_mask(maps, tokens, identity, (*prefix, 32, 32))
+            for handle in handles:
+                handle.remove()
+            self.assertEqual(events, ['scale0', 'scale1', 'scale2', 'self_attn',
+                'token_to_pixel', 'token_ffn', 'pixel_to_token',
+                'final_token_to_pixel', 'mask_mlp'])
+            self.assertEqual(result.shape, (2, 1, *prefix, 32, 32))
+            result.square().mean().backward()
+            for value in [tokens, identity] + maps:
+                self.assertTrue(torch.isfinite(value.grad).all())
+                self.assertGreater(value.grad.abs().sum().item(), 0)
+            for name, param in decoder.sam_tail.named_parameters():
+                self.assertIsNotNone(param.grad, name)
+                self.assertTrue(torch.isfinite(param.grad).all(), name)
+                self.assertGreater(param.grad.abs().sum().item(), 0, name)
+            changed = decoder.forward_mask(maps, torch.zeros_like(tokens), identity,
+                                           (*prefix, 32, 32))
+            self.assertGreater((result - changed).abs().max().item(), 1e-5)
+
     def test_p2_softmask_control_and_routing(self):
         torch.set_num_threads(2)
         torch.manual_seed(9)
@@ -133,7 +194,7 @@ class ArmFTests(unittest.TestCase):
     def test_model_backward_and_checkpoint(self):
         torch.set_num_threads(2)
         for dimension in ('2D', '3D'):
-            heads = ['arm_f_attention', 'arm_f_linear', 'arm_f_query_dot', 'arm_f_reverse_dot']
+            heads = ['arm_f_attention', 'arm_f_linear', 'arm_f_query_dot', 'arm_f_reverse_dot', 'arm_f_sam_tail']
             if dimension == '2D':
                 heads.append('arm_f_reverse_dot_p2')
                 heads.append('arm_f_reverse_dot_p2_softmask')

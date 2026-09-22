@@ -65,7 +65,7 @@ def get_args_parser():
             "query_dot",
             "multi_query_dot",
             "arm_e_multiscale_query",
-            "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_f_reverse_dot_p2", "arm_f_reverse_dot_p2_softmask", "arm_e_multiscale_query_3d",
+            "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_f_reverse_dot_p2", "arm_f_reverse_dot_p2_softmask", "arm_f_sam_tail", "arm_e_multiscale_query_3d",
         ),
         default="linear",
     )

@@ -1,5 +1,10 @@
 # OrganSlot
 
+新增可选 head：`arm_f_sam_tail`（2026-09-22，仅实现，未提交GPU任务）。
+保留P16→P8→P4 token refinement，追加共享mask token、一次双向交互、
+最终token回读和MLP动态点积。旧E/F不变；14项CPU测试通过，GPU/DDP待验证。
+配置和SAM差异见 [Query readout ablation](docs/QUERY_READOUT_ABLATION.md)。
+
 新增受控实验：**2D Arm E scratch + Collector attention alignment**。不增加网络模块，只在阳性保留器官上加入 `lambda_collector_attention=0.01` 的器官外注意力惩罚；默认0保持历史行为。每卡16、4卡累积3次、有效batch192，118800次更新。设计和可比性限制见 [CONFIGURATION](docs/CONFIGURATION.md#collector-attention-alignment)，任务状态见 [STATUS](docs/STATUS.md)。
 
 最新实验汇总（2026-09-18）：F 2D MAE encoder-only固定84.21%、校准84.93%；encoder+重建decoder固定83.88%、校准84.59%。F 3D top-k统一协议固定83.29%、校准84.46%。既有E MAE encoder-only校准84.99%仍略高，单seed不能判定稳定优势。PCDD Offline参考85.47%尚非同协议复现。八类与协议边界见[RESULTS](docs/RESULTS.md)。

@@ -1,4 +1,4 @@
-"""Organ-conditioned two-stage attention, with one mask per organ."""
+"""Organ-conditioned attention, with one mask per organ."""
 import math
 
 import torch
@@ -43,6 +43,46 @@ class TokenBlock(nn.Module):
         return x + self.ffn(self.norms[3](x))
 
 
+class SAMStyleMaskTail(nn.Module):
+    """One two-way block plus final token read after F multiscale refinement.
+
+    OrganSlot adaptation, not original/pretrained SAM: shared mask token,
+    no external prompts, IoU token, multimask output or extra upsampling.
+    """
+
+    def __init__(self, channels):
+        super().__init__()
+        self.mask_token = nn.Parameter(torch.empty(1, 1, channels))
+        nn.init.normal_(self.mask_token, std=0.02)
+        self.self_attn = nn.MultiheadAttention(channels, 4, batch_first=True)
+        self.token_to_pixel = nn.MultiheadAttention(channels, 4, batch_first=True)
+        self.pixel_to_token = nn.MultiheadAttention(channels, 4, batch_first=True)
+        self.final_token_to_pixel = nn.MultiheadAttention(channels, 4, batch_first=True)
+        self.norms = nn.ModuleList([nn.LayerNorm(channels) for _ in range(5)])
+        self.token_ffn = ffn(channels)
+        self.mask_mlp = nn.Sequential(
+            nn.Linear(channels, channels), nn.GELU(),
+            nn.Linear(channels, channels), nn.GELU(),
+            nn.Linear(channels, channels))
+
+    def forward(self, tokens, pixels, pixel_pe):
+        tokens = torch.cat((self.mask_token.expand(tokens.shape[0], -1, -1), tokens), dim=1)
+        # Fixed sparse input reference, NOT geometric coordinates for organ tokens.
+        token_reference = tokens
+        q = tokens + token_reference
+        tokens = self.norms[0](tokens + self.self_attn(q, q, tokens, need_weights=False)[0])
+        tokens = self.norms[1](tokens + self.token_to_pixel(
+            tokens + token_reference, pixels + pixel_pe, pixels, need_weights=False)[0])
+        tokens = self.norms[2](tokens + self.token_ffn(tokens))
+        pixels = self.norms[3](pixels + self.pixel_to_token(
+            pixels + pixel_pe, tokens + token_reference, tokens, need_weights=False)[0])
+        tokens = self.norms[4](tokens + self.final_token_to_pixel(
+            tokens + token_reference, pixels + pixel_pe, pixels, need_weights=False)[0])
+        weights = self.mask_mlp(tokens[:, 0])
+        # Ordinary dynamic dot product, not the historical cosine readout.
+        return torch.bmm(pixels, weights.unsqueeze(-1))
+
+
 class ArmFDecoder(nn.Module):
     def __init__(self, in_channels, embed_dim, grid_size, channels=128, token_count=20, readout="attention"):
         super().__init__()
@@ -75,6 +115,9 @@ class ArmFDecoder(nn.Module):
         elif readout == "linear":
             self.mask_mlp = nn.Sequential(nn.LayerNorm(channels), nn.Linear(channels, channels), nn.GELU(), nn.Linear(channels, channels))
             self.token_fusion = nn.Linear(token_count, 1)
+        elif readout == "sam_tail":
+            with torch.random.fork_rng(devices=[]):
+                self.sam_tail = SAMStyleMaskTail(channels)
         elif readout != "query_dot":
             raise ValueError("unknown Arm F readout")
         if readout == "reverse_dot_p2":
@@ -136,6 +179,8 @@ class ArmFDecoder(nn.Module):
                     logits = self.classifier(z)
                 else:
                     logits = self.dot_readout(z, x)
+            elif self.readout == "sam_tail":
+                logits = self.sam_tail(x, p, pe)
             elif self.readout == "query_dot":
                 logits = self.dot_readout(p, x)
             else:

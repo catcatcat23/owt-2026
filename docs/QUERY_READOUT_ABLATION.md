@@ -222,3 +222,45 @@ scratch/seed0, microbatch6, four GPUs, accumulation2 (48 slabs), 118800 updates,
 WORD07072 and ROI20. All three use the unified 3D calibration/head/reconstruction
 evaluator, not the older post3d-only evaluator. No training jobs were submitted
 as part of implementing this extension.
+# Multiscale F + SAM-style tail (2026-09-22)
+
+New opt-in head: `arm_f_sam_tail`. Implementation only; no GPU job submitted.
+Existing E/F heads, losses, reconstruction and frozen job worktrees are unchanged.
+
+Path: existing 20 organ tokens -> existing P16/P8/P4 TokenBlocks ->
+prepend ONE shared learned mask token -> token self-attention ->
+token-to-P4 attention -> token FFN -> P4-to-token attention ->
+final token-to-updated-P4 attention -> mask token MLP ->
+ordinary dynamic dot product with updated P4 -> existing output interpolation.
+
+One terminal two-way block, four attention heads, usual width128. It retains
+the F axial spatial PE (temporal + spatial for 3D); the input 21-token sequence
+is a fixed sparse content reference within the tail, not a geometric prompt.
+Post-residual LayerNorm follows each tail sublayer. The MLP is three Linear
+layers with GELU between them. The readout has no cosine normalization or
+sqrt(C) multiplier. There is no pixel FFN in the terminal reverse step.
+Mask token and tail weights are shared across organs; organ conditioning comes
+from existing slot-specific tokens/identity. No GT prompt, P2, soft mask,
+IoU head, multimask output, new loss, or SAM/MAE weights are introduced.
+
+This is a SAM-inspired tail, NOT original SAM: retained multiscale front end,
+one rather than two blocks, existing axial PE and PyTorch MHA projections,
+GELU, no SAM upscaler. Reference:
+https://github.com/facebookresearch/segment-anything/blob/main/segment_anything/modeling/transformer.py
+and the adjacent mask_decoder.py.
+
+CLI: `--slot_head_type arm_f_sam_tail --pixel_pe none --query_refinement none`.
+Existing launcher accepts `ARM_F_HEAD_TYPE=arm_f_sam_tail`; for historical
+small-organ comparisons explicitly set `BACKGROUND_REDUCTION=topk` (launcher
+default is mean), `ARM_F_MICRO_BATCH=16 ARM_F_ACCUM_ITER=3` in 2D.
+Set evaluation `EXPECTED_SLOT_HEAD_TYPE=arm_f_sam_tail`. New head requires its
+own trained checkpoint; old-head checkpoints are not exact new-head resumes.
+No submission until commit/push and immutable-runtime revision verification.
+
+CPU tests cover 2D/3D shapes, operation order, BF16-input finite backward,
+nonzero gradients through all tail parameters and organ inputs, token
+conditioning, model/reconstruction integration, strict checkpoint roundtrip,
+and exact pre-change outputs/state dictionaries of all six older F heads.
+GPU/DDP, production-memory and accuracy remain unvalidated. 3D support here
+uses the existing slice-wise spatial branch and flattened slab attention;
+it is not evidence that this resolves previous 3D segmentation issues.

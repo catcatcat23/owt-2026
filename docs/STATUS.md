@@ -115,3 +115,21 @@ F MAE尚排队，batch16没有实测，不承诺结束日期。
 4. E encoder-only recon Direct-post81.17已收齐；Indirect-post7.53异常，需独立诊断。
 5. 3D D slice-wise与spatial既有均值21.13/30.25，仍过分割；temporal/ST旧链已取消，不再列作待跑。
 6. PCDD Offline85.47固定列入对比；未匹配协议，不能宣称增量或外部SOTA。
+# SAM-tail + MAE encoder-only (2026-09-22)
+
+- Purpose: retain P16/P8/P4 refinement and test mask-token two-way tail.
+- bolinren19 / SIP, account sifansong, QoS4a800.
+- Training 2984833: 4 A800,20CPU,192GB,7days; PENDING Priority at submission.
+- Unified evaluation 2984834: afterok:2984833,1 A800,10CPU,128GB,7days;
+  train6000 threshold calibration + test6990 fixed/calibrated head + recon.
+- Runtime: /gpfs/work/aac/bolinren19/OD_OWT/.worktrees/sam_tail_encoder_b3794a6
+- Pinned code: b3794a6d9fca789fc47044f1929cadb27a0abe2b (revision guard passed).
+- Train script: slurm/orgslot/train/arm_f_sam_tail_encoder.sbatch.
+- Eval script: slurm/orgslot/eval/arm_e_mae_unified.sbatch, expected arm_f_sam_tail.
+- AutoPET MAE encoder-only, NOT scratch or encoder+decoder; checkpoint SHA
+  0b3571a3e79095686a0b12649735a298aaeb8a0b3bb93a47f3484439ac4a1ec6.
+- 2D batch16 x4 xaccum3=192; updates118800, ROI20, lambda_seg0.01, topk loss.
+- CPU: previous14 tests + SAM-tail MAE transfer test passed; data identity passed.
+  GPU/DDP/pretrained production model load report pending job start.
+- Next: verify mae_initial_checkpoint_load.json, resolved configuration, first
+  finite epoch and checkpoint. Initialization differs from scratch ablations.

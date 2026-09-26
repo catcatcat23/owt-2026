@@ -11,10 +11,11 @@ export EXPERIMENT_WORKDIR=$PINNED_WORKDIR ARM_F_TARGET=anteng-xec ARM_F_DIMENSIO
 export ARM_F_COMMIT=$expected ARM_F_MICRO_BATCH=16 ARM_F_ACCUM_ITER=3 BACKGROUND_REDUCTION=topk
 cd "$EXPERIMENT_WORKDIR"
 source scripts/orgslot/arm_f_environment.sh
-export RUN_NAME=ArmF_2D_${PREVIOUS_JOB}
+SOURCE_DIR=$EXPERIMENT_WORKDIR/Results/OrganSlotBank/Common8/WORD_2D/ArmF_2D_${PREVIOUS_JOB}
+export RUN_NAME=ArmF_2D_resume_${SLURM_JOB_ID:?}
 export OUTPUT_DIR=$EXPERIMENT_WORKDIR/Results/OrganSlotBank/Common8/WORD_2D/$RUN_NAME
 export RESUME_CHECKPOINT
-RESUME_CHECKPOINT=$("$PYTHON" - "$OUTPUT_DIR" "$ARM_F_HEAD_TYPE" <<'PY'
+RESUME_CHECKPOINT=$("$PYTHON" - "$SOURCE_DIR" "$ARM_F_HEAD_TYPE" <<'PY'
 import sys
 from pathlib import Path
 import torch
@@ -40,7 +41,9 @@ PY
 )
 echo "Resume $RESUME_CHECKPOINT with pinned commit $expected"
 if [[ "$RESUME_CHECKPOINT" == */checkpoint-802.pth ]]; then
-    echo "Final checkpoint already complete; proceed to existing evaluation"
+    mkdir -p "$OUTPUT_DIR"
+    ln -s "$RESUME_CHECKPOINT" "$OUTPUT_DIR/checkpoint-802.pth"
+    echo "Final checkpoint already complete; linked into evaluation directory"
     exit 0
 fi
 "$PYTHON" tools/validate_word070_dataset_identity.py --processed_root "$PROCESSED_ROOT" --roi_index "$ROI_INDEX"

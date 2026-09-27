@@ -3,7 +3,16 @@
 set -euo pipefail
 : "${PREVIOUS_JOB:?}" "${PINNED_WORKDIR:?}" "${ARM_F_HEAD_TYPE:?}"
 state=$(sacct -n -X -j "$PREVIOUS_JOB" -o State | awk 'NF {print $1; exit}')
-case "$state" in COMPLETED|TIMEOUT) ;; *) echo "Refusing continuation after $state" >&2; exit 2;; esac
+case "$state" in
+  COMPLETED|TIMEOUT) ;;
+  FAILED|NODE_FAIL)
+    # Explicit, audited opt-in only: never silently resume arbitrary failed jobs.
+    test "${APPROVED_FAILED_JOB:-}" = "$PREVIOUS_JOB" || {
+      echo "Refusing continuation after $state without job-specific approval" >&2; exit 2;
+    }
+    ;;
+  *) echo "Refusing continuation after $state" >&2; exit 2;;
+esac
 expected=efcef0739b581ec49c969c312d07c97574308cbb
 test "$(git -C "$PINNED_WORKDIR" rev-parse HEAD)" = "$expected"
 test -z "$(git -C "$PINNED_WORKDIR" status --porcelain --untracked-files=no)"

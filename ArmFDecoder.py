@@ -43,6 +43,25 @@ class TokenBlock(nn.Module):
         return x + self.ffn(self.norms[3](x))
 
 
+def probability_guided_attention(module, query, key, value, prior=None):
+    if prior is None:
+        return module(query, key, value, need_weights=False)[0]
+    weights = module.in_proj_weight.chunk(3)
+    biases = module.in_proj_bias.chunk(3)
+    q, k, v = [F.linear(x, w, b) for x, w, b in
+               zip((query, key, value), weights, biases)]
+    batch, _, channels = q.shape
+    heads = module.num_heads
+    def split(x):
+        return x.reshape(batch, -1, heads, channels // heads).transpose(1, 2)
+    q, k, v = map(split, (q, k, v))
+    # Gate projected values, including their bias; no detach or renormalization.
+    v = v * prior[:, None, :, :]
+    out = ((q @ k.transpose(-2, -1)) / math.sqrt(channels // heads)).softmax(-1) @ v
+    out = out.transpose(1, 2).reshape(batch, query.shape[1], channels)
+    return module.out_proj(out)
+
+
 class SAMStyleMaskTail(nn.Module):
     """One two-way block plus final token read after F multiscale refinement.
 
@@ -65,19 +84,23 @@ class SAMStyleMaskTail(nn.Module):
             nn.Linear(channels, channels), nn.GELU(),
             nn.Linear(channels, channels))
 
-    def forward(self, tokens, pixels, pixel_pe):
+    def forward(self, tokens, pixels, pixel_pe, prior=None):
         tokens = torch.cat((self.mask_token.expand(tokens.shape[0], -1, -1), tokens), dim=1)
         # Fixed sparse input reference, NOT geometric coordinates for organ tokens.
         token_reference = tokens
         q = tokens + token_reference
         tokens = self.norms[0](tokens + self.self_attn(q, q, tokens, need_weights=False)[0])
-        tokens = self.norms[1](tokens + self.token_to_pixel(
-            tokens + token_reference, pixels + pixel_pe, pixels, need_weights=False)[0])
+        # Multiplying projected V by the probability is (A * prior) @ V.
+        # Unlike log-bias, this does not renormalize attention. Keep gradients.
+        tokens = self.norms[1](tokens + probability_guided_attention(
+            self.token_to_pixel, tokens + token_reference,
+            pixels + pixel_pe, pixels, prior))
         tokens = self.norms[2](tokens + self.token_ffn(tokens))
         pixels = self.norms[3](pixels + self.pixel_to_token(
             pixels + pixel_pe, tokens + token_reference, tokens, need_weights=False)[0])
-        tokens = self.norms[4](tokens + self.final_token_to_pixel(
-            tokens + token_reference, pixels + pixel_pe, pixels, need_weights=False)[0])
+        tokens = self.norms[4](tokens + probability_guided_attention(
+            self.final_token_to_pixel, tokens + token_reference,
+            pixels + pixel_pe, pixels, prior))
         weights = self.mask_mlp(tokens[:, 0])
         # Ordinary dynamic dot product, not the historical cosine readout.
         return torch.bmm(pixels, weights.unsqueeze(-1))
@@ -131,6 +154,33 @@ class ArmFDecoder(nn.Module):
                     nn.GroupNorm(1, channels), nn.GELU(),
                 )
 
+    def configure_mask_supervision(self, mode):
+        self.hsam_supervision = mode
+        if mode == "m2f_hard":
+            if self.readout != "sam_tail" or len(self.grid_size) != 2:
+                raise ValueError("M2F adaptation requires 2D SAM-tail")
+            with torch.random.fork_rng(devices=[]):
+                self.stage_mask_mlp = nn.Sequential(
+                    nn.Linear(self.channels, self.channels), nn.ReLU(),
+                    nn.Linear(self.channels, self.channels), nn.ReLU(),
+                    nn.Linear(self.channels, self.channels))
+                self.stage_mask_norm = nn.LayerNorm(self.channels)
+
+    def stage_mask(self, tokens, pixels, shape):
+        query = self.stage_mask_mlp(self.stage_mask_norm(tokens.mean(1)))
+        return (pixels @ query.unsqueeze(-1)).transpose(1, 2).reshape(
+            tokens.shape[0], 1, *shape)
+
+    @staticmethod
+    def hard_routing(logits, shape, token_count, heads):
+        resized = F.interpolate(logits.float(), size=shape,
+                                mode="bilinear", align_corners=False)
+        blocked = (resized.sigmoid().flatten(2) < .5).detach()
+        blocked = blocked.expand(-1, token_count, -1).clone()
+        blocked[blocked.all(-1)] = False
+        return blocked[:, None].expand(-1, heads, -1, -1).reshape(
+            -1, token_count, blocked.shape[-1])
+
     def forward_pixels(self, images, z):
         if images.ndim == 5:
             batch, cin, time, height, width = images.shape
@@ -154,13 +204,23 @@ class ArmFDecoder(nn.Module):
         # Local FP32 attention/FFN for the older cluster PyTorch builds.
         with torch.autocast(device_type=tokens.device.type, enabled=False):
             x = self.input_proj(tokens.float()) + slot_identity.float()[None, None, :]
+            m2f = getattr(self, "hsam_supervision", "none") == "m2f_hard"
+            stage_masks = []
+            if m2f:
+                shared_p4 = maps[2].float().flatten(2).transpose(1, 2)
+                stage_masks.append(self.stage_mask(x, shared_p4, maps[2].shape[2:]))
             for block, feature in zip(self.blocks, maps):
                 memory = feature.float().flatten(2).transpose(1, 2)
                 pe = position_encoding(feature.shape[2:], self.channels, feature.device)
                 bias = None
                 if self.soft_mask and self.soft_mask_alpha != 0:
                     bias = self.soft_attention_bias(memory, x, block.cross.num_heads)
+                if m2f:
+                    bias = self.hard_routing(stage_masks[-1], feature.shape[2:],
+                                             x.shape[1], block.cross.num_heads)
                 x = block(x, memory, pe, attention_bias=bias)
+                if m2f:
+                    stage_masks.append(self.stage_mask(x, shared_p4, maps[2].shape[2:]))
             mask_shape = maps[2].shape[2:]
             p = maps[2].float().flatten(2).transpose(1, 2)
             if self.readout in ("attention", "reverse_dot", "reverse_dot_p2"):
@@ -180,13 +240,22 @@ class ArmFDecoder(nn.Module):
                 else:
                     logits = self.dot_readout(z, x)
             elif self.readout == "sam_tail":
-                logits = self.sam_tail(x, p, pe)
+                coarse = None
+                if getattr(self, "hsam_supervision", "none") not in ("none", "m2f_hard"):
+                    coarse = self.dot_readout(p, x)
+                logits = self.sam_tail(x, p, pe,
+                    prior=None if coarse is None else coarse.sigmoid())
             elif self.readout == "query_dot":
                 logits = self.dot_readout(p, x)
             else:
                 logits = self.token_fusion(p @ self.mask_mlp(x).transpose(1, 2) / math.sqrt(self.channels))
             logits = logits.transpose(1, 2).reshape(tokens.shape[0], 1, *mask_shape)
-            return _interpolate_bf16_safe(logits, size=tuple(output_size), mode="bilinear" if logits.ndim == 4 else "trilinear", align_corners=False)
+            final = _interpolate_bf16_safe(logits, size=tuple(output_size), mode="bilinear" if logits.ndim == 4 else "trilinear", align_corners=False)
+            if m2f:
+                return final, torch.cat(stage_masks, dim=1)
+            if getattr(self, "hsam_supervision", "none") != "none":
+                return final, coarse.transpose(1, 2).reshape(tokens.shape[0], 1, *mask_shape)
+            return final
 
     def dot_readout(self, pixels, tokens):
         query = F.normalize(tokens.float().mean(dim=1), dim=-1)

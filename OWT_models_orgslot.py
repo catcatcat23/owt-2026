@@ -123,6 +123,11 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                 int(model_args.token_factor),
                 readout=slot_head_type[len("arm_f_"):],
             )
+        hsam_mode = getattr(model_args, "hsam_supervision", "none")
+        if hsam_mode != "none":
+            if slot_head_type != "arm_f_sam_tail" or len(grid_size) != 2:
+                raise ValueError("H-SAM supervision requires 2D SAM-tail")
+            self.pixel_query_decoder.configure_mask_supervision(hsam_mode)
         if slot_head_type in ("query_dot", "multi_query_dot"):
             self.pixel_query_decoder = SharedPixelQueryDecoder(
                 embed_dim,
@@ -285,6 +290,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
 
         slot_logits = {}
         calibrated_logits = {}
+        coarse_logits = {}
         canvases_for_fusion = {}
         diagnostics = {
             "slot_tokens": {},
@@ -351,7 +357,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                             raise RuntimeError(
                                 "query_dot requires shared pixel features"
                             )
-                        active_raw, active_calibrated = slot.forward_query_head(
+                        head_result = slot.forward_query_head(
                             tokens.index_select(0, active_head_rows),
                             ([p.index_select(0, active_head_rows) for p in pixel_features]
                              if isinstance(pixel_features, list) else
@@ -359,6 +365,12 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                             self.pixel_query_decoder,
                             output_size,
                         )
+                        active_raw, active_calibrated = head_result[:2]
+                        if len(head_result) == 3:
+                            coarse = head_result[2]
+                            coarse_logits[name] = coarse.new_zeros(
+                                (batch_size,) + tuple(coarse.shape[1:])
+                            ).index_copy(0, active_head_rows, coarse)
                     else:
                         active_raw, active_calibrated = slot.forward_head(
                             canvas.index_select(0, active_head_rows), output_size
@@ -391,6 +403,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             "canvas": fused,
             "slot_logits": slot_logits,
             "calibrated_logits": calibrated_logits,
+            "coarse_logits": coarse_logits,
             "slot_keep_mask": slot_keep_mask,
             "slot_compute_mask": slot_compute_mask,
             "head_compute_mask": head_compute_mask,

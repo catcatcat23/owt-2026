@@ -163,6 +163,7 @@ COMMAND=(
   --pixel_pe "${PIXEL_PE:-none}"
   --query_refinement "${QUERY_REFINEMENT:-none}"
   --segmentation_unit "${SEGMENTATION_UNIT:-slab}"
+  --hsam_supervision "${HSAM_SUPERVISION:-none}"
   --fusion_mode "${FUSION_MODE}"
   --fusion_reference_count "${FUSION_REFERENCE_COUNT}"
   --loss_version L2-LPIPS

@@ -672,6 +672,9 @@ class OrganSlot(nn.Module):
             self.head.embedding,
             output_size,
         )
+        if isinstance(raw_logits, tuple):
+            raw_logits, coarse = raw_logits
+            return raw_logits, self.calibration_scale * raw_logits + self.calibration_bias, coarse
         calibrated_logits = (
             self.calibration_scale * raw_logits + self.calibration_bias
         )

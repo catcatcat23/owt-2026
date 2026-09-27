@@ -176,6 +176,7 @@ def build_model(
         checkpoint_value(checkpoint, "fusion_reference_count", len(slot_specs))
     )
     args = model_args(token_factor, len(slot_specs))
+    args.hsam_supervision = checkpoint_value(checkpoint, "hsam_supervision", "none")
     if method == "orgslot":
         model = build_orgslot(
             img_size=input_size,

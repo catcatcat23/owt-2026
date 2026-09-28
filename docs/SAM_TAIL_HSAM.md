@@ -44,6 +44,18 @@ so evaluation must explicitly verify it instead of silently using the default.
 
 ## Submitted 2026-09-27 (Asia/Shanghai)
 
+### Background-only coarse-loss fix (2026-09-28)
+
+Job 2992278 failed when coarse predictions were empty. Legacy batch TGR can
+retain background alone; with no ROI focus and lambda_bg_seg=0, no head runs.
+This is legal: coarse loss is now zero and reconstruction backward continues.
+Missing predictions for any supervised slot still raise an error (including
+partially missing dictionaries). All three supervision modes share the fix.
+Five CPU tests pass, including real-model background-only finite backward;
+multi-rank GPU validation has not been run. Existing immutable runtime jobs
+do not inherit this fix: replace their snapshots and evaluation dependencies
+before claiming deployment. Keep retained supervision and original loss weights.
+
 Pinned code: `569582d41b9baf481ca7712e9e7cbf0f27aab16b`.
 Archive SHA256: `8e15cd5c166f9a79055fccca8a7e5e06621bfe03c016ecf539777047329a3499`.
 MAE SHA256: `0b3571a3e79095686a0b12649735a298aaeb8a0b3bb93a47f3484439ac4a1ec6`.

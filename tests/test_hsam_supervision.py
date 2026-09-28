@@ -7,6 +7,39 @@ from test_orgslot_model import tiny_model
 
 
 class HSAMTests(unittest.TestCase):
+    def test_background_only_no_roi(self):
+        torch.set_num_threads(2)
+        model = tiny_model(slot_head_type="arm_f_sam_tail", slot_head_channels=16)
+        names = model.slot_names
+        keep = torch.zeros(1, len(names), dtype=torch.bool)
+        keep[:, names.index("background")] = True
+        targets = {name: torch.zeros(1, 1, 32, 32) for name in names}
+        for mode in ("downsample_gt", "upsample_logits", "m2f_hard"):
+            with self.subTest(mode=mode):
+                model.zero_grad()
+                model.pixel_query_decoder.configure_mask_supervision(mode)
+                output = model(torch.randn(1, 3, 32, 32), slot_keep_mask=keep,
+                               head_compute_mask=torch.zeros_like(keep))
+                self.assertEqual(output["coarse_logits"], {})
+                args = SimpleNamespace(lambda_bg_seg=0., hsam_supervision=mode)
+                loss, lost = coarse_segmentation_loss({}, targets, names, keep, args)
+                self.assertEqual(loss.item(), 0.)
+                self.assertEqual(lost, 0)
+                (output["reconstruction"].square().mean() + loss).backward()
+                grads = [p.grad for p in model.parameters() if p.grad is not None]
+                self.assertTrue(grads)
+                self.assertTrue(all(torch.isfinite(g).all() for g in grads))
+                # Missing active foreground predictions must still fail, even
+                # when a different slot supplied a coarse prediction.
+                active = keep.clone()
+                active[:, 1] = True
+                for logits in ({}, {names[0]: torch.zeros(1, 1, 8, 8)}):
+                    with self.assertRaisesRegex(ValueError, "Missing coarse"):
+                        coarse_segmentation_loss(logits, targets, names, active, args)
+                args.lambda_bg_seg = .25
+                with self.assertRaisesRegex(ValueError, "Missing coarse"):
+                    coarse_segmentation_loss({}, targets, names, keep, args)
+
     def test_gate_and_gradient(self):
         torch.set_num_threads(2)
         module = torch.nn.MultiheadAttention(16, 4, batch_first=True)

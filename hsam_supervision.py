@@ -9,8 +9,18 @@ def stage_weight(epoch):
 
 
 def coarse_segmentation_loss(logits, targets, names, keep, args):
+    # TGR may retain only background on a rank with no ROI focus. Background
+    # has no head when its loss weight is zero; an empty dictionary is legal.
+    supervised = [name for index, name in enumerate(names)
+                  if (name != "background" or args.lambda_bg_seg != 0)
+                  and bool(keep[:, index].any())]
+    missing = [name for name in supervised if name not in logits]
+    if missing:
+        raise ValueError("Missing coarse predictions for supervised slots: {}".format(missing))
     if not logits:
-        raise ValueError("H-SAM requires active coarse predictions")
+        # Reconstruction retains its normal autograd graph. Do not skip the
+        # training iteration/backward on this rank (other ranks may have heads).
+        return targets[names[0]].new_zeros((), dtype=torch.float32), 0
     if args.hsam_supervision == "m2f_hard":
         from copy import copy
         stage_args = copy(args)

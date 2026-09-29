@@ -53,6 +53,16 @@ def case_ids(path):
         return {Path(r["mask_pth"]).parent.name for r in csv.DictReader(f)}
 
 
+def presence_intervention(bank, name, positive, original, mode):
+    if mode == "positive_only":
+        return bank.mean(name, True) if positive else original.detach().cpu()
+    if mode == "negative_only":
+        return original.detach().cpu() if positive else bank.mean(name, False)
+    if mode == "fixed_positive":
+        return bank.mean(name, True)
+    raise ValueError(mode)
+
+
 def main():
     p = argparse.ArgumentParser(__doc__)
     for name in ("checkpoint", "train-csv", "test-csv", "output"):
@@ -63,6 +73,8 @@ def main():
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--donor-repeats", type=int, default=3)
     p.add_argument("--bank-capacity", type=int, default=128)
+    p.add_argument("--reuse-bank", help="Previous output directory; hashes must match")
+    p.add_argument("--presence-ablation", action="store_true")
     args = p.parse_args()
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=False)
@@ -98,7 +110,14 @@ def main():
                      decode_heads=heads, decode_reconstruction=False, return_diagnostics=True)
     with torch.inference_mode():
         processed = 0
-        for batch in DataLoader(datasets["train"], batch_size=args.batch_size,
+        if args.reuse_bank:
+            prior = Path(args.reuse_bank)
+            previous = json.loads((prior / "provenance.json").read_text())
+            for key in ("checkpoint_sha256", "train_sha256", "test_sha256"):
+                assert previous[key] == provenance[key], key
+            cached = torch.load(prior / "token_bank.pt", map_location="cpu")
+            bank.sums, bank.counts, bank.samples = cached["sums"], cached["counts"], cached["samples"]
+        for batch in DataLoader([] if args.reuse_bank else datasets["train"], batch_size=args.batch_size,
                                 shuffle=False, num_workers=args.workers):
             result = forward(batch["image"].cuda(), False)
             for cid, name in foreground:
@@ -114,6 +133,9 @@ def main():
                 assert len({r[1] for r in bank.samples[(name, state)]}) >= 3
         torch.save(dict(sums=bank.sums, counts=bank.counts, samples=bank.samples), out / "token_bank.pt")
         modes = ["original", "mean_all", "mean_matched"] + ["donor_" + str(i) for i in range(args.donor_repeats)]
+        if args.presence_ablation:
+            modes = ["original", "positive_only", "negative_only", "fixed_positive", "mean_matched"]
+        visual_best = {}
         counters, changes, slice_rows = {}, {}, []
         with open(out / "donor_assignments.jsonl", "w") as donors, patch.object(decoder, "forward_pixels", capture_pixels):
             processed = 0
@@ -141,6 +163,8 @@ def main():
                                     donors.write(json.dumps(dict(mode=mode, organ=name, recipient_case=str(case),
                                         recipient_index=processed+i, positive=bool(positive[i]),
                                         donor_case=donor_case, donor_index=donor_index)) + "\n")
+                                elif mode in ("positive_only", "negative_only", "fixed_positive"):
+                                    token = presence_intervention(bank, name, positive[i], tokens[i], mode)
                                 else:
                                     token = bank.mean(name, positive[i] if mode == "mean_matched" else None)
                                 replacements.append(token)
@@ -151,6 +175,15 @@ def main():
                         predictions = (logits[:, 0] > 0).cpu().numpy()
                         for i, case in enumerate(batch["case_id"]):
                             target = labels[i] == cid
+                            selected = (name == "gallbladder" and str(case) in
+                                        ("word_0127", "word_0145", "word_0041", "word_0125")) or (name == "pancreas" and str(case) == "word_0114")
+                            vk = (str(case), name, mode)
+                            if selected and int(target.sum()) > visual_best.get(vk, 0):
+                                visual_best[vk] = int(target.sum())
+                                (out / "probability_maps").mkdir(exist_ok=True)
+                                np.savez_compressed(out / "probability_maps" / ("_".join(vk) + ".npz"),
+                                    image=batch["image"][i].numpy(), target=target,
+                                    probability=logits[i, 0].sigmoid().cpu().numpy(), sample_index=processed+i)
                             ck = (mode, name, str(case))
                             entry = changes.setdefault(ck, [0., 0])
                             entry[0] += delta[i]; entry[1] += 1
@@ -193,4 +226,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

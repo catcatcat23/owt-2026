@@ -2,10 +2,21 @@ import unittest
 from unittest.mock import patch
 import torch
 from test_orgslot_model import tiny_model
-from tools.token_intervention import TokenBank
+from tools.token_intervention import TokenBank, presence_intervention
 
 
 class TokenInterventionTests(unittest.TestCase):
+    def test_presence_controls(self):
+        bank = TokenBank()
+        bank.add('organ', True, torch.ones(2, 4), 'a', 0)
+        bank.add('organ', False, torch.zeros(2, 4), 'b', 1)
+        original = torch.full((2, 4), 3.)
+        for positive in (True, False):
+            for mode in ('positive_only', 'negative_only', 'fixed_positive'):
+                expected = (bank.mean('organ', True) if mode == 'fixed_positive' or (mode == 'positive_only' and positive)
+                            else bank.mean('organ', False) if mode == 'negative_only' and not positive else original)
+                torch.testing.assert_close(presence_intervention(bank, 'organ', positive, original, mode), expected)
+
     def test_bank(self):
         bank = TokenBank(10, 0)
         bank.add('kidney', True, torch.ones(2, 4), 'train_a', 0)

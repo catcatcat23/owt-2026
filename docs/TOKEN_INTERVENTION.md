@@ -29,6 +29,22 @@ per-case Dice/P/R/volume/empty/zero-overlap/logitMAE, per-slice counts, progress
 eight-organ summary for each condition. Donor repeats are diagnostic variation,
 not independent training seeds. No model architecture changes.
 
+## Presence ablation (2026-09-30)
+
+Use --reuse-bank PREVIOUS_OUTPUT --presence-ablation. Verify checkpoint and
+train/test manifest hashes before reusing the bank. Compare original,
+positive_only, negative_only, fixed_positive (no GT selection), mean_matched.
+Only the selected presence stratum is replaced; the other retains original
+tokens. Save maximum-GT-slice CT input, GT and probability maps as NPZ for
+gallbladder 0041/0125/0127/0145 and pancreas 0114. No retraining or threshold fit.
+Original and mean_matched must reproduce the first run before interpretation.
+
+Initial postprocessed audit: matched means reduce positive-voxel recall for
+gallbladder 74.15 to 62.53%, esophagus 82.06 to 78.34%, pancreas 83.71 to
+79.98%, while reducing negative-slice FP counts. These are pooled voxel recall,
+not case-mean recall. Gallbladder 0127 remains zero overlap. This does not
+support claiming the higher overall Dice rescued missed organs.
+
 Interpretation: true tokens outperforming donors suggests useful case-conditioned
 readout. Little change suggests limited use by this readout, not necessarily no
 information in tokens. Fixed identity conditioning may still support modularity.

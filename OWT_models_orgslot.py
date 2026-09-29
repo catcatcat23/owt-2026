@@ -368,9 +368,10 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                         active_raw, active_calibrated = head_result[:2]
                         if len(head_result) == 3:
                             coarse = head_result[2]
-                            coarse_logits[name] = coarse.new_zeros(
-                                (batch_size,) + tuple(coarse.shape[1:])
-                            ).index_copy(0, active_head_rows, coarse)
+                            def expand_coarse(value):
+                                return value.new_zeros((batch_size,) + tuple(value.shape[1:])).index_copy(0, active_head_rows, value)
+                            coarse_logits[name] = ([expand_coarse(value) for value in coarse]
+                                                   if isinstance(coarse, list) else expand_coarse(coarse))
                     else:
                         active_raw, active_calibrated = slot.forward_head(
                             canvas.index_select(0, active_head_rows), output_size

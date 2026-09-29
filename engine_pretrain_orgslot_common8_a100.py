@@ -281,24 +281,28 @@ def train_one_epoch(
                     + args.lambda_seg * segmentation_loss
                 )
             hsam_metrics = {}
-            if getattr(args, "hsam_supervision", "none") != "none":
+            if getattr(args, "hsam_supervision", "none") not in ("none", "soft_prior"):
                 from hsam_supervision import coarse_segmentation_loss, stage_weight
                 coarse_loss, lost = coarse_segmentation_loss(
                     output["coarse_logits"], visible_masks, slot_names,
-                    segmentation_keep, args)
-                if args.hsam_supervision == "m2f_hard":
+                    segmentation_keep, args, diagnostics=hsam_metrics)
+                if args.hsam_supervision == "soft_prior_aux":
+                    final_weight = 1.0
+                    total_loss = total_loss + args.lambda_seg * 0.25 * coarse_loss
+                    hsam_metrics["soft_prior_weighted_aux"] = float(coarse_loss.detach()) * args.lambda_seg * 0.25
+                elif args.hsam_supervision == "m2f_hard":
                     final_weight = 1.0
                     total_loss = total_loss + args.lambda_seg * coarse_loss
                 else:
                     final_weight = stage_weight(epoch)
                     total_loss = total_loss + args.lambda_seg * (1 - final_weight) * (
                         coarse_loss - segmentation_loss)
-                hsam_metrics = {
+                hsam_metrics.update({
                     "hsam_coarse_loss": float(coarse_loss.detach()),
                     "hsam_final_loss": float(segmentation_loss.detach()),
                     "hsam_final_weight": final_weight,
                     "hsam_lost_positive_slices": lost,
-                }
+                })
             if collector_weight:
                 collector_loss, collector_metrics = collector_attention_loss(
                     output["collector_attention"], visible_masks, slot_names,

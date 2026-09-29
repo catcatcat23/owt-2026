@@ -147,7 +147,7 @@ def get_args_parser():
     parser.add_argument("--positive_roi_loss_weight", default=0.0, type=float)
     parser.add_argument("--roi_positive_sample_counts", nargs="+", type=int)
     parser.add_argument("--roi_frequency_dataset_size", default=None, type=int)
-    parser.add_argument("--hsam_supervision", choices=("none", "downsample_gt", "upsample_logits", "m2f_hard"), default="none")
+    parser.add_argument("--hsam_supervision", choices=("none", "downsample_gt", "upsample_logits", "m2f_hard", "soft_prior", "soft_prior_aux"), default="none")
     parser.add_argument("--roi_frequency_alpha", default=0.5, type=float)
     parser.add_argument("--roi_max_weight_ratio", default=4.0, type=float)
     parser.add_argument(

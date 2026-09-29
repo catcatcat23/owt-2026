@@ -8,7 +8,7 @@ def stage_weight(epoch):
     return 0.6 ** (0.990 ** epoch)
 
 
-def coarse_segmentation_loss(logits, targets, names, keep, args):
+def coarse_segmentation_loss(logits, targets, names, keep, args, diagnostics=None):
     # TGR may retain only background on a rank with no ROI focus. Background
     # has no head when its loss weight is zero; an empty dictionary is legal.
     supervised = [name for index, name in enumerate(names)
@@ -21,6 +21,19 @@ def coarse_segmentation_loss(logits, targets, names, keep, args):
         # Reconstruction retains its normal autograd graph. Do not skip the
         # training iteration/backward on this rank (other ranks may have heads).
         return targets[names[0]].new_zeros((), dtype=torch.float32), 0
+    if args.hsam_supervision == "soft_prior_aux":
+        from copy import copy
+        stage_args = copy(args)
+        stage_args.hsam_supervision = "upsample_logits"
+        losses = []
+        for i, scale in enumerate((16, 8, 4)):
+            loss, _ = coarse_segmentation_loss(
+                {name: value[i] for name, value in logits.items()},
+                targets, names, keep, stage_args)
+            losses.append(loss)
+            if diagnostics is not None:
+                diagnostics["soft_prior_p{}_loss".format(scale)] = float(loss.detach())
+        return torch.stack(losses).mean(), 0
     if args.hsam_supervision == "m2f_hard":
         from copy import copy
         stage_args = copy(args)

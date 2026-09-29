@@ -156,6 +156,9 @@ class ArmFDecoder(nn.Module):
 
     def configure_mask_supervision(self, mode):
         self.hsam_supervision = mode
+        if mode in ("soft_prior", "soft_prior_aux"):
+            if self.readout != "sam_tail" or len(self.grid_size) != 2:
+                raise ValueError("Soft prior ablation requires 2D SAM-tail")
         if mode == "m2f_hard":
             if self.readout != "sam_tail" or len(self.grid_size) != 2:
                 raise ValueError("M2F adaptation requires 2D SAM-tail")
@@ -206,6 +209,7 @@ class ArmFDecoder(nn.Module):
             x = self.input_proj(tokens.float()) + slot_identity.float()[None, None, :]
             m2f = getattr(self, "hsam_supervision", "none") == "m2f_hard"
             stage_masks = []
+            soft_prior = getattr(self, "hsam_supervision", "none") in ("soft_prior", "soft_prior_aux")
             if m2f:
                 shared_p4 = maps[2].float().flatten(2).transpose(1, 2)
                 stage_masks.append(self.stage_mask(x, shared_p4, maps[2].shape[2:]))
@@ -213,6 +217,14 @@ class ArmFDecoder(nn.Module):
                 memory = feature.float().flatten(2).transpose(1, 2)
                 pe = position_encoding(feature.shape[2:], self.channels, feature.device)
                 bias = None
+                if soft_prior:
+                    prior_logits = self.dot_readout(memory, x).transpose(1, 2).reshape(
+                        tokens.shape[0], 1, *feature.shape[2:])
+                    stage_masks.append(prior_logits)
+                    gate = 0.2 + 0.8 * prior_logits.detach().flatten(2).sigmoid()
+                    bias = gate.log()[:, None].expand(
+                        -1, block.cross.num_heads, x.shape[1], -1).reshape(
+                            tokens.shape[0] * block.cross.num_heads, x.shape[1], -1)
                 if self.soft_mask and self.soft_mask_alpha != 0:
                     bias = self.soft_attention_bias(memory, x, block.cross.num_heads)
                 if m2f:
@@ -241,7 +253,7 @@ class ArmFDecoder(nn.Module):
                     logits = self.dot_readout(z, x)
             elif self.readout == "sam_tail":
                 coarse = None
-                if getattr(self, "hsam_supervision", "none") not in ("none", "m2f_hard"):
+                if getattr(self, "hsam_supervision", "none") in ("downsample_gt", "upsample_logits"):
                     coarse = self.dot_readout(p, x)
                 logits = self.sam_tail(x, p, pe,
                     prior=None if coarse is None else coarse.sigmoid())
@@ -253,6 +265,8 @@ class ArmFDecoder(nn.Module):
             final = _interpolate_bf16_safe(logits, size=tuple(output_size), mode="bilinear" if logits.ndim == 4 else "trilinear", align_corners=False)
             if m2f:
                 return final, torch.cat(stage_masks, dim=1)
+            if soft_prior:
+                return (final, stage_masks) if self.hsam_supervision == "soft_prior_aux" else final
             if getattr(self, "hsam_supervision", "none") != "none":
                 return final, coarse.transpose(1, 2).reshape(tokens.shape[0], 1, *mask_shape)
             return final

@@ -133,3 +133,16 @@ F MAE尚排队，batch16没有实测，不承诺结束日期。
   GPU/DDP/pretrained production model load report pending job start.
 - Next: verify mae_initial_checkpoint_load.json, resolved configuration, first
   finite epoch and checkpoint. Initialization differs from scratch ablations.
+## 2026-09-30：WORD official-pool 96/26/24 重跑
+
+配置：Arm E cross-attention＋AutoPET MAE encoder-only（旧划分校准85.358%的配置），不是续训旧WORD模型。固定split seed42：官方Tr100取96，官方Val20＋Ts30取24测试（8Val＋16Ts），剩26验证/完整阈值校准，4Tr不用。此前5个badcase全部归入新训练集，不能继续视为独立测试。协议清单见 `configs/orgslot/word_official96_seed42.json`。
+
+| 阶段 | 账号/集群/Slurm account | Job | 资源/QoS | 提交后核验状态 |
+|---|---|---|---|---|
+| 准备数据 | bolinren19/SIP/sifansong | 2997385 | 4CPU/64GB/cpudebug/1h | RUNNING，CPU cv2/nibabel导入通过，开始30例官方Ts几何核验与预处理 |
+| E cross-attn＋MAE encoder | bolinren19/SIP/sifansong | 2997386 | 4A800/20CPU/192GB/8a800/7d | PENDING afterok:2997385 |
+| 固定与校准head＋recon | bolinren19/SIP/sifansong | 2997387 | 1A800/10CPU/128GB/8a800/7d | PENDING afterok:2997386 |
+
+固定运行提交 `95296e1ca9e1061896fd8f777d3be73fb68a1a11`；运行worktree `/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/e_official96_95296e1`；数据根 `/gpfs/work/aac/bolinren19/OD_OWT/artifacts/word_official96_seed42_20260930_v2`；提交回执 `artifacts/official96_submission_20260930/jobs_v2.json`。每卡16×4卡×累积3=192，118800updates；不硬编码最终802epoch。划分CPU测试3项、语法/编译、版本guard通过；GPU尚未运行。
+
+首次准备2997374因CPU节点缺libGL而在重采样前失败。已增加隔离动态库路径并在CPU节点验证导入，失效训练/评估2997375/2997376已取消重建；旧记录保留，无其他历史任务变动。下一次检查2997385是否完成、READY.json计数及2997386启动配置；新旧测试集不同，分数不得直接归因架构提升。

@@ -1,0 +1,1054 @@
+{
+  "dataset": "WORD",
+  "official_pools": {
+    "Tr": [
+      "word_0002",
+      "word_0003",
+      "word_0004",
+      "word_0005",
+      "word_0006",
+      "word_0008",
+      "word_0009",
+      "word_0010",
+      "word_0011",
+      "word_0012",
+      "word_0013",
+      "word_0018",
+      "word_0020",
+      "word_0022",
+      "word_0026",
+      "word_0027",
+      "word_0028",
+      "word_0029",
+      "word_0030",
+      "word_0032",
+      "word_0036",
+      "word_0038",
+      "word_0040",
+      "word_0041",
+      "word_0042",
+      "word_0044",
+      "word_0046",
+      "word_0047",
+      "word_0049",
+      "word_0051",
+      "word_0053",
+      "word_0055",
+      "word_0056",
+      "word_0058",
+      "word_0059",
+      "word_0061",
+      "word_0062",
+      "word_0063",
+      "word_0064",
+      "word_0065",
+      "word_0067",
+      "word_0068",
+      "word_0070",
+      "word_0071",
+      "word_0072",
+      "word_0073",
+      "word_0078",
+      "word_0079",
+      "word_0081",
+      "word_0082",
+      "word_0084",
+      "word_0086",
+      "word_0087",
+      "word_0089",
+      "word_0090",
+      "word_0091",
+      "word_0093",
+      "word_0094",
+      "word_0095",
+      "word_0096",
+      "word_0100",
+      "word_0101",
+      "word_0102",
+      "word_0104",
+      "word_0105",
+      "word_0106",
+      "word_0107",
+      "word_0108",
+      "word_0109",
+      "word_0111",
+      "word_0113",
+      "word_0114",
+      "word_0115",
+      "word_0116",
+      "word_0117",
+      "word_0118",
+      "word_0119",
+      "word_0121",
+      "word_0122",
+      "word_0123",
+      "word_0125",
+      "word_0126",
+      "word_0127",
+      "word_0128",
+      "word_0130",
+      "word_0132",
+      "word_0133",
+      "word_0134",
+      "word_0135",
+      "word_0136",
+      "word_0138",
+      "word_0140",
+      "word_0142",
+      "word_0143",
+      "word_0144",
+      "word_0145",
+      "word_0146",
+      "word_0147",
+      "word_0148",
+      "word_0150"
+    ],
+    "Ts": [
+      "word_0014",
+      "word_0016",
+      "word_0017",
+      "word_0019",
+      "word_0021",
+      "word_0023",
+      "word_0024",
+      "word_0033",
+      "word_0034",
+      "word_0037",
+      "word_0043",
+      "word_0050",
+      "word_0052",
+      "word_0054",
+      "word_0057",
+      "word_0060",
+      "word_0069",
+      "word_0074",
+      "word_0076",
+      "word_0077",
+      "word_0088",
+      "word_0092",
+      "word_0097",
+      "word_0099",
+      "word_0103",
+      "word_0110",
+      "word_0120",
+      "word_0124",
+      "word_0129",
+      "word_0131"
+    ],
+    "Val": [
+      "word_0001",
+      "word_0007",
+      "word_0015",
+      "word_0025",
+      "word_0031",
+      "word_0035",
+      "word_0039",
+      "word_0045",
+      "word_0048",
+      "word_0066",
+      "word_0075",
+      "word_0080",
+      "word_0083",
+      "word_0085",
+      "word_0098",
+      "word_0112",
+      "word_0137",
+      "word_0139",
+      "word_0141",
+      "word_0149"
+    ]
+  },
+  "protocol": "official_pool_96_26_24_seed42",
+  "sampling": "independent random.Random(42).sample on sorted pools",
+  "seed": 42,
+  "splits": {
+    "Test": [
+      {
+        "case_id": "word_0007",
+        "image": "imagesVal/word_0007.nii.gz",
+        "mask": "labelsVal/word_0007.nii.gz",
+        "official_split": "Val"
+      },
+      {
+        "case_id": "word_0014",
+        "image": "imagesTs/word_0014.nii.gz",
+        "mask": "labelsTs/word_0014.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0017",
+        "image": "imagesTs/word_0017.nii.gz",
+        "mask": "labelsTs/word_0017.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0019",
+        "image": "imagesTs/word_0019.nii.gz",
+        "mask": "labelsTs/word_0019.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0021",
+        "image": "imagesTs/word_0021.nii.gz",
+        "mask": "labelsTs/word_0021.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0023",
+        "image": "imagesTs/word_0023.nii.gz",
+        "mask": "labelsTs/word_0023.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0034",
+        "image": "imagesTs/word_0034.nii.gz",
+        "mask": "labelsTs/word_0034.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0035",
+        "image": "imagesVal/word_0035.nii.gz",
+        "mask": "labelsVal/word_0035.nii.gz",
+        "official_split": "Val"
+      },
+      {
+        "case_id": "word_0037",
+        "image": "imagesTs/word_0037.nii.gz",
+        "mask": "labelsTs/word_0037.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0043",
+        "image": "imagesTs/word_0043.nii.gz",
+        "mask": "labelsTs/word_0043.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0050",
+        "image": "imagesTs/word_0050.nii.gz",
+        "mask": "labelsTs/word_0050.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0054",
+        "image": "imagesTs/word_0054.nii.gz",
+        "mask": "labelsTs/word_0054.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0074",
+        "image": "imagesTs/word_0074.nii.gz",
+        "mask": "labelsTs/word_0074.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0075",
+        "image": "imagesVal/word_0075.nii.gz",
+        "mask": "labelsVal/word_0075.nii.gz",
+        "official_split": "Val"
+      },
+      {
+        "case_id": "word_0083",
+        "image": "imagesVal/word_0083.nii.gz",
+        "mask": "labelsVal/word_0083.nii.gz",
+        "official_split": "Val"
+      },
+      {
+        "case_id": "word_0088",
+        "image": "imagesTs/word_0088.nii.gz",
+        "mask": "labelsTs/word_0088.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0097",
+        "image": "imagesTs/word_0097.nii.gz",
+        "mask": "labelsTs/word_0097.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0098",
+        "image": "imagesVal/word_0098.nii.gz",
+        "mask": "labelsVal/word_0098.nii.gz",
+        "official_split": "Val"
+      },
+      {
+        "case_id": "word_0110",
+        "image": "imagesTs/word_0110.nii.gz",
+        "mask": "labelsTs/word_0110.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0120",
+        "image": "imagesTs/word_0120.nii.gz",
+        "mask": "labelsTs/word_0120.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0129",
+        "image": "imagesTs/word_0129.nii.gz",
+        "mask": "labelsTs/word_0129.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0137",
+        "image": "imagesVal/word_0137.nii.gz",
+        "mask": "labelsVal/word_0137.nii.gz",
+        "official_split": "Val"
+      },
+      {
+        "case_id": "word_0139",
+        "image": "imagesVal/word_0139.nii.gz",
+        "mask": "labelsVal/word_0139.nii.gz",
+        "official_split": "Val"
+      },
+      {
+        "case_id": "word_0149",
+        "image": "imagesVal/word_0149.nii.gz",
+        "mask": "labelsVal/word_0149.nii.gz",
+        "official_split": "Val"
+      }
+    ],
+    "Training": [
+      {
+        "case_id": "word_0002",
+        "image": "imagesTr/word_0002.nii.gz",
+        "mask": "labelsTr/word_0002.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0003",
+        "image": "imagesTr/word_0003.nii.gz",
+        "mask": "labelsTr/word_0003.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0004",
+        "image": "imagesTr/word_0004.nii.gz",
+        "mask": "labelsTr/word_0004.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0005",
+        "image": "imagesTr/word_0005.nii.gz",
+        "mask": "labelsTr/word_0005.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0006",
+        "image": "imagesTr/word_0006.nii.gz",
+        "mask": "labelsTr/word_0006.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0008",
+        "image": "imagesTr/word_0008.nii.gz",
+        "mask": "labelsTr/word_0008.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0009",
+        "image": "imagesTr/word_0009.nii.gz",
+        "mask": "labelsTr/word_0009.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0010",
+        "image": "imagesTr/word_0010.nii.gz",
+        "mask": "labelsTr/word_0010.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0011",
+        "image": "imagesTr/word_0011.nii.gz",
+        "mask": "labelsTr/word_0011.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0013",
+        "image": "imagesTr/word_0013.nii.gz",
+        "mask": "labelsTr/word_0013.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0018",
+        "image": "imagesTr/word_0018.nii.gz",
+        "mask": "labelsTr/word_0018.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0020",
+        "image": "imagesTr/word_0020.nii.gz",
+        "mask": "labelsTr/word_0020.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0022",
+        "image": "imagesTr/word_0022.nii.gz",
+        "mask": "labelsTr/word_0022.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0026",
+        "image": "imagesTr/word_0026.nii.gz",
+        "mask": "labelsTr/word_0026.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0027",
+        "image": "imagesTr/word_0027.nii.gz",
+        "mask": "labelsTr/word_0027.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0028",
+        "image": "imagesTr/word_0028.nii.gz",
+        "mask": "labelsTr/word_0028.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0029",
+        "image": "imagesTr/word_0029.nii.gz",
+        "mask": "labelsTr/word_0029.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0030",
+        "image": "imagesTr/word_0030.nii.gz",
+        "mask": "labelsTr/word_0030.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0032",
+        "image": "imagesTr/word_0032.nii.gz",
+        "mask": "labelsTr/word_0032.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0036",
+        "image": "imagesTr/word_0036.nii.gz",
+        "mask": "labelsTr/word_0036.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0038",
+        "image": "imagesTr/word_0038.nii.gz",
+        "mask": "labelsTr/word_0038.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0040",
+        "image": "imagesTr/word_0040.nii.gz",
+        "mask": "labelsTr/word_0040.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0041",
+        "image": "imagesTr/word_0041.nii.gz",
+        "mask": "labelsTr/word_0041.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0042",
+        "image": "imagesTr/word_0042.nii.gz",
+        "mask": "labelsTr/word_0042.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0044",
+        "image": "imagesTr/word_0044.nii.gz",
+        "mask": "labelsTr/word_0044.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0046",
+        "image": "imagesTr/word_0046.nii.gz",
+        "mask": "labelsTr/word_0046.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0047",
+        "image": "imagesTr/word_0047.nii.gz",
+        "mask": "labelsTr/word_0047.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0049",
+        "image": "imagesTr/word_0049.nii.gz",
+        "mask": "labelsTr/word_0049.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0051",
+        "image": "imagesTr/word_0051.nii.gz",
+        "mask": "labelsTr/word_0051.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0053",
+        "image": "imagesTr/word_0053.nii.gz",
+        "mask": "labelsTr/word_0053.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0055",
+        "image": "imagesTr/word_0055.nii.gz",
+        "mask": "labelsTr/word_0055.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0056",
+        "image": "imagesTr/word_0056.nii.gz",
+        "mask": "labelsTr/word_0056.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0058",
+        "image": "imagesTr/word_0058.nii.gz",
+        "mask": "labelsTr/word_0058.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0059",
+        "image": "imagesTr/word_0059.nii.gz",
+        "mask": "labelsTr/word_0059.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0061",
+        "image": "imagesTr/word_0061.nii.gz",
+        "mask": "labelsTr/word_0061.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0062",
+        "image": "imagesTr/word_0062.nii.gz",
+        "mask": "labelsTr/word_0062.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0063",
+        "image": "imagesTr/word_0063.nii.gz",
+        "mask": "labelsTr/word_0063.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0064",
+        "image": "imagesTr/word_0064.nii.gz",
+        "mask": "labelsTr/word_0064.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0065",
+        "image": "imagesTr/word_0065.nii.gz",
+        "mask": "labelsTr/word_0065.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0067",
+        "image": "imagesTr/word_0067.nii.gz",
+        "mask": "labelsTr/word_0067.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0071",
+        "image": "imagesTr/word_0071.nii.gz",
+        "mask": "labelsTr/word_0071.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0072",
+        "image": "imagesTr/word_0072.nii.gz",
+        "mask": "labelsTr/word_0072.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0073",
+        "image": "imagesTr/word_0073.nii.gz",
+        "mask": "labelsTr/word_0073.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0078",
+        "image": "imagesTr/word_0078.nii.gz",
+        "mask": "labelsTr/word_0078.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0079",
+        "image": "imagesTr/word_0079.nii.gz",
+        "mask": "labelsTr/word_0079.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0081",
+        "image": "imagesTr/word_0081.nii.gz",
+        "mask": "labelsTr/word_0081.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0082",
+        "image": "imagesTr/word_0082.nii.gz",
+        "mask": "labelsTr/word_0082.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0084",
+        "image": "imagesTr/word_0084.nii.gz",
+        "mask": "labelsTr/word_0084.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0086",
+        "image": "imagesTr/word_0086.nii.gz",
+        "mask": "labelsTr/word_0086.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0087",
+        "image": "imagesTr/word_0087.nii.gz",
+        "mask": "labelsTr/word_0087.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0089",
+        "image": "imagesTr/word_0089.nii.gz",
+        "mask": "labelsTr/word_0089.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0090",
+        "image": "imagesTr/word_0090.nii.gz",
+        "mask": "labelsTr/word_0090.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0091",
+        "image": "imagesTr/word_0091.nii.gz",
+        "mask": "labelsTr/word_0091.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0093",
+        "image": "imagesTr/word_0093.nii.gz",
+        "mask": "labelsTr/word_0093.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0094",
+        "image": "imagesTr/word_0094.nii.gz",
+        "mask": "labelsTr/word_0094.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0095",
+        "image": "imagesTr/word_0095.nii.gz",
+        "mask": "labelsTr/word_0095.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0096",
+        "image": "imagesTr/word_0096.nii.gz",
+        "mask": "labelsTr/word_0096.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0100",
+        "image": "imagesTr/word_0100.nii.gz",
+        "mask": "labelsTr/word_0100.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0101",
+        "image": "imagesTr/word_0101.nii.gz",
+        "mask": "labelsTr/word_0101.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0102",
+        "image": "imagesTr/word_0102.nii.gz",
+        "mask": "labelsTr/word_0102.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0104",
+        "image": "imagesTr/word_0104.nii.gz",
+        "mask": "labelsTr/word_0104.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0105",
+        "image": "imagesTr/word_0105.nii.gz",
+        "mask": "labelsTr/word_0105.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0106",
+        "image": "imagesTr/word_0106.nii.gz",
+        "mask": "labelsTr/word_0106.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0107",
+        "image": "imagesTr/word_0107.nii.gz",
+        "mask": "labelsTr/word_0107.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0108",
+        "image": "imagesTr/word_0108.nii.gz",
+        "mask": "labelsTr/word_0108.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0109",
+        "image": "imagesTr/word_0109.nii.gz",
+        "mask": "labelsTr/word_0109.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0111",
+        "image": "imagesTr/word_0111.nii.gz",
+        "mask": "labelsTr/word_0111.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0113",
+        "image": "imagesTr/word_0113.nii.gz",
+        "mask": "labelsTr/word_0113.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0114",
+        "image": "imagesTr/word_0114.nii.gz",
+        "mask": "labelsTr/word_0114.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0115",
+        "image": "imagesTr/word_0115.nii.gz",
+        "mask": "labelsTr/word_0115.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0116",
+        "image": "imagesTr/word_0116.nii.gz",
+        "mask": "labelsTr/word_0116.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0117",
+        "image": "imagesTr/word_0117.nii.gz",
+        "mask": "labelsTr/word_0117.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0118",
+        "image": "imagesTr/word_0118.nii.gz",
+        "mask": "labelsTr/word_0118.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0119",
+        "image": "imagesTr/word_0119.nii.gz",
+        "mask": "labelsTr/word_0119.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0121",
+        "image": "imagesTr/word_0121.nii.gz",
+        "mask": "labelsTr/word_0121.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0122",
+        "image": "imagesTr/word_0122.nii.gz",
+        "mask": "labelsTr/word_0122.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0123",
+        "image": "imagesTr/word_0123.nii.gz",
+        "mask": "labelsTr/word_0123.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0125",
+        "image": "imagesTr/word_0125.nii.gz",
+        "mask": "labelsTr/word_0125.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0126",
+        "image": "imagesTr/word_0126.nii.gz",
+        "mask": "labelsTr/word_0126.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0127",
+        "image": "imagesTr/word_0127.nii.gz",
+        "mask": "labelsTr/word_0127.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0128",
+        "image": "imagesTr/word_0128.nii.gz",
+        "mask": "labelsTr/word_0128.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0130",
+        "image": "imagesTr/word_0130.nii.gz",
+        "mask": "labelsTr/word_0130.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0132",
+        "image": "imagesTr/word_0132.nii.gz",
+        "mask": "labelsTr/word_0132.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0133",
+        "image": "imagesTr/word_0133.nii.gz",
+        "mask": "labelsTr/word_0133.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0134",
+        "image": "imagesTr/word_0134.nii.gz",
+        "mask": "labelsTr/word_0134.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0135",
+        "image": "imagesTr/word_0135.nii.gz",
+        "mask": "labelsTr/word_0135.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0136",
+        "image": "imagesTr/word_0136.nii.gz",
+        "mask": "labelsTr/word_0136.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0138",
+        "image": "imagesTr/word_0138.nii.gz",
+        "mask": "labelsTr/word_0138.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0142",
+        "image": "imagesTr/word_0142.nii.gz",
+        "mask": "labelsTr/word_0142.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0143",
+        "image": "imagesTr/word_0143.nii.gz",
+        "mask": "labelsTr/word_0143.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0144",
+        "image": "imagesTr/word_0144.nii.gz",
+        "mask": "labelsTr/word_0144.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0145",
+        "image": "imagesTr/word_0145.nii.gz",
+        "mask": "labelsTr/word_0145.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0146",
+        "image": "imagesTr/word_0146.nii.gz",
+        "mask": "labelsTr/word_0146.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0147",
+        "image": "imagesTr/word_0147.nii.gz",
+        "mask": "labelsTr/word_0147.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0148",
+        "image": "imagesTr/word_0148.nii.gz",
+        "mask": "labelsTr/word_0148.nii.gz",
+        "official_split": "Tr"
+      },
+      {
+        "case_id": "word_0150",
+        "image": "imagesTr/word_0150.nii.gz",
+        "mask": "labelsTr/word_0150.nii.gz",
+        "official_split": "Tr"
+      }
+    ],
+    "Validation": [
+      {
+        "case_id": "word_0001",
+        "image": "imagesVal/word_0001.nii.gz",
+        "mask": "labelsVal/word_0001.nii.gz",
+        "official_split": "Val"
+      },
+      {
+        "case_id": "word_0015",
+        "image": "imagesVal/word_0015.nii.gz",
+        "mask": "labelsVal/word_0015.nii.gz",
+        "official_split": "Val"
+      },
+      {
+        "case_id": "word_0016",
+        "image": "imagesTs/word_0016.nii.gz",
+        "mask": "labelsTs/word_0016.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0024",
+        "image": "imagesTs/word_0024.nii.gz",
+        "mask": "labelsTs/word_0024.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0025",
+        "image": "imagesVal/word_0025.nii.gz",
+        "mask": "labelsVal/word_0025.nii.gz",
+        "official_split": "Val"
+      },
+      {
+        "case_id": "word_0031",
+        "image": "imagesVal/word_0031.nii.gz",
+        "mask": "labelsVal/word_0031.nii.gz",
+        "official_split": "Val"
+      },
+      {
+        "case_id": "word_0033",
+        "image": "imagesTs/word_0033.nii.gz",
+        "mask": "labelsTs/word_0033.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0039",
+        "image": "imagesVal/word_0039.nii.gz",
+        "mask": "labelsVal/word_0039.nii.gz",
+        "official_split": "Val"
+      },
+      {
+        "case_id": "word_0045",
+        "image": "imagesVal/word_0045.nii.gz",
+        "mask": "labelsVal/word_0045.nii.gz",
+        "official_split": "Val"
+      },
+      {
+        "case_id": "word_0048",
+        "image": "imagesVal/word_0048.nii.gz",
+        "mask": "labelsVal/word_0048.nii.gz",
+        "official_split": "Val"
+      },
+      {
+        "case_id": "word_0052",
+        "image": "imagesTs/word_0052.nii.gz",
+        "mask": "labelsTs/word_0052.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0057",
+        "image": "imagesTs/word_0057.nii.gz",
+        "mask": "labelsTs/word_0057.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0060",
+        "image": "imagesTs/word_0060.nii.gz",
+        "mask": "labelsTs/word_0060.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0066",
+        "image": "imagesVal/word_0066.nii.gz",
+        "mask": "labelsVal/word_0066.nii.gz",
+        "official_split": "Val"
+      },
+      {
+        "case_id": "word_0069",
+        "image": "imagesTs/word_0069.nii.gz",
+        "mask": "labelsTs/word_0069.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0076",
+        "image": "imagesTs/word_0076.nii.gz",
+        "mask": "labelsTs/word_0076.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0077",
+        "image": "imagesTs/word_0077.nii.gz",
+        "mask": "labelsTs/word_0077.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0080",
+        "image": "imagesVal/word_0080.nii.gz",
+        "mask": "labelsVal/word_0080.nii.gz",
+        "official_split": "Val"
+      },
+      {
+        "case_id": "word_0085",
+        "image": "imagesVal/word_0085.nii.gz",
+        "mask": "labelsVal/word_0085.nii.gz",
+        "official_split": "Val"
+      },
+      {
+        "case_id": "word_0092",
+        "image": "imagesTs/word_0092.nii.gz",
+        "mask": "labelsTs/word_0092.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0099",
+        "image": "imagesTs/word_0099.nii.gz",
+        "mask": "labelsTs/word_0099.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0103",
+        "image": "imagesTs/word_0103.nii.gz",
+        "mask": "labelsTs/word_0103.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0112",
+        "image": "imagesVal/word_0112.nii.gz",
+        "mask": "labelsVal/word_0112.nii.gz",
+        "official_split": "Val"
+      },
+      {
+        "case_id": "word_0124",
+        "image": "imagesTs/word_0124.nii.gz",
+        "mask": "labelsTs/word_0124.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0131",
+        "image": "imagesTs/word_0131.nii.gz",
+        "mask": "labelsTs/word_0131.nii.gz",
+        "official_split": "Ts"
+      },
+      {
+        "case_id": "word_0141",
+        "image": "imagesVal/word_0141.nii.gz",
+        "mask": "labelsVal/word_0141.nii.gz",
+        "official_split": "Val"
+      }
+    ]
+  },
+  "unused_train": [
+    "word_0012",
+    "word_0068",
+    "word_0070",
+    "word_0140"
+  ]
+}

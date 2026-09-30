@@ -1,5 +1,7 @@
 # OrganSlot
 
+2026-09-30 新协议：官方100训练病例中固定抽96训练，官方20验证＋30测试池中固定抽24测试，余26验证/阈值校准（seed42）。使用 E cross-attention＋MAE encoder 重新训练，不能复用旧 WORD checkpoint，也不能与旧划分85.36%作严格横向比较。清单见 [word_official96_seed42.json](configs/orgslot/word_official96_seed42.json)，执行细节见 [CONFIGURATION](docs/CONFIGURATION.md#word-official96-protocol)。旧数据与任务不变。
+
 新增可选 head：`arm_f_sam_tail`（2026-09-22，仅实现，未提交GPU任务）。
 保留P16→P8→P4 token refinement，追加共享mask token、一次双向交互、
 最终token回读和MLP动态点积。旧E/F不变；14项CPU测试通过，GPU/DDP待验证。

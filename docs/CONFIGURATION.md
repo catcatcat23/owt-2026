@@ -92,3 +92,13 @@ encoder或encoder_decoder；复用AutoPET checkpoint-final，初始化不加载o
 - 评估复用`slurm/orgslot/eval/arm_e_mae_unified.sbatch`：训练集子集阈值校准、24病例6990切片head fixed/calibrated、原有recon阈值0.02及后处理；不在测试集选阈值。此脚本名称含MAE，但不要求MAE权重。
 - 启动脚本：`slurm/orgslot/train/arm_e_collector_align.sbatch`。继承按账号显式映射的数据/环境路径，不复用另一账号的目录；冻结最新origin/feature/orgslot源快照。
 - CPU核验：6项新增测试全部通过，包括实际Arm E前向不变/strict checkpoint加载、Collector梯度、小型定位拟合、两进程Gloo不均衡与空rank。另有23项回归通过；旧`test_small_organ_empty_slice_uses_topk_bce_and_weight`在未修改origin源码上同样失败（测试未显式传topk，而当前API默认mean）。本实验显式topk，不修改历史loss语义。GPU正式运行尚待调度验证。
+# WORD official96 protocol
+
+2026-09-30，独立于历史随机96/24协议，命名 `official_pool_96_26_24_seed42`。
+清单固定在 `configs/orgslot/word_official96_seed42.json`，按排序后的官方病例ID，分别以独立的 `random.Random(42).sample` 抽取96训练与24测试。训练池官方100例，剩4例不用；验证/测试候选池为官方20验证＋30测试，剩26例用于验证和完整阈值校准。只抽一次，不根据badcase或最终分数重抽。这不是官方100/20/30评估，也未复现PCDD划分。
+
+以旧划分85.358%的 E cross-attention＋AutoPET MAE encoder-only为配置来源。只加载原AutoPET MAE encoder，不加载任何旧WORD权重。2D、spacing0.7/0.7/2、448输入/384ROI、ROI概率0.2、20tokens、128channels、small-organ loss、lambda_seg0.01、retained监督、top-k background、legacy_batch TGR、seed0、AdamW lr7.5e-5/wd0.05、BF16、clip1均保持。4卡×每卡16×累积3＝192，118800 optimizer updates、5940 warmup updates；最终epoch由新切片数推导，不再硬编码802。
+
+准备脚本 `slurm/orgslot/train/arm_e_official96_prepare.sbatch` 仅对原未处理的官方30测试病例按相同流程预处理。训练/验证原病例重用无学习的既有逐病例JPEG/PNG（新目录软链接），生成新的完整CSV、summary和ROI索引，绝不覆盖旧数据。严格检查146病例互斥、来源、完整切片、ROI manifest hash。`NEW_DATA_ROOT`必须是不存在的新目录。准备CPU任务成功后才释放训练。
+
+训练 `slurm/orgslot/train/arm_e_crossattn_official96.sbatch`；评估 `slurm/orgslot/eval/arm_e_official96.sbatch`。使用 `EXPERIMENT_WORKDIR`固定源码、`NEW_DATA_ROOT`固定数据，评估还需 `TRAIN_JOB_ID`。训练完成后按日志中118800 updates取最终checkpoint，非测试集选优。26例验证完整阈值扫描0.1至0.9，测试24例同时报告固定0.5与验证校准结果；min_size20/opening1不变。reconstruction仍用0.02固定阈值与现有OWT路径。保存新的训练—评估afterok链；新旧结果分别汇报，不把新划分成绩变动归因为架构改进。

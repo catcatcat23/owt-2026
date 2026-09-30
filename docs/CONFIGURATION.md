@@ -1,5 +1,65 @@
 # 统一配置与部署契约
 
+## incremental44
+
+独立入口 `main_pretrain_orgslot_incremental44.py`，启动器 `scripts/orgslot/run_incremental44.sh`。
+基于 **2D E cross-attention + AutoPET MAE encoder-only**，不修改原离线训练入口。
+这是**同图像、分阶段标签开放**的4+4机制实验：两阶段都用固定96训练病例；不是禁止重访旧图像的 data-incremental/no-replay 协议。
+使用上节官方池新划分的96训练/26验证/24测试；不可使用“替换五个badcase”的探索性测试清单。
+
+| 内容 | Stage1 | Stage2 |
+|---|---|---|
+| 可见器官GT | 脾、右肾、左肾、胆囊 | 食管、胰腺、肝、胃 |
+| slot数 | 背景+4旧类=5 | 背景+4旧类+4新类=9 |
+| 初始化 | 仅AutoPET MAE encoder；其余随机 | 精确加载Stage1；四个新slot分别复制同一Stage1背景slot |
+| 可训练 | 原E共享模块和5个slot | 仅4新slot；背景按下述策略；共享模块/旧slot全部冻结 |
+| ROI定向池 | 仅胆囊4 | 仅食管5、胰腺6 |
+| 重建 | 既有随机保留组合、MSE+LPIPS | 新GT+旧类teacher伪区域的masked MSE；不计算LPIPS |
+| 分割 | 旧4类small-organ loss | 新4类相同loss；默认仅保留slot监督，ROI目标强制保留 |
+
+Stage1背景=非旧4类，因此包括未来新类；**Stage2不能再把所有非新类GT位置当背景**。
+冻结Stage1 teacher的旧4类calibrated head sigmoid（与Stage1分割损失输入一致）：新GT优先；恰好一个旧类≥0.9的位置为旧伪区域；全部旧类<0.1且不在新GT的位置为候选背景；其他位置ignore。teacher背景head从未监督，不参与伪标签。
+这些阈值和背景权重是待验证的实验超参，不是论文默认值。teacher有误差，候选背景并非真实背景。
+
+Stage2三种独立运行参数 `--background_policy`：
+
+- `frozen`：背景完全冻结；只更新新slot。
+- `composition`：背景Collector、TGEnc、token_norm、AHER以新slot的0.1倍LR更新；只接受组合重建梯度。
+- `separation`（默认）：同上，额外单独解码背景canvas。在新GT和高置信旧区域目标为0，在候选背景目标为输入图像，分别求区域均值，后者乘0.1。空区域贡献0，ignore不监督。
+
+Stage2总损失=`L_composition + 0.01 L_seg_new + 0.1 L_background`；非separation模式最后一项为0。
+冻结重建decoder的参数，但不阻断其对新/背景canvas的反传。背景head及所有校准参数冻结，旧类和共享模块保持eval模式。
+现有`linear_sqrt`按保留slot数归一化，5→9会改变重建组合尺度；保留原语义并记录，不宣称重建输出也严格不变。
+
+固定：spacing0.7/0.7/2、448/384、ROI0.2、20 tokens、128 channels、seed0、small-organ原超参、AdamW7.5e-5/wd0.05、BF16+clip1。
+启动器4卡×每卡16×累积3=192。预算每阶段59400更新、2970 warmup，共118800；Stage2重置优化器。
+这是**总更新预算匹配**，不等价于每类监督次数或算力完全匹配；不得静默将每阶段都训练118800。
+
+运行前先在对应账号设置其本地绝对路径（脚本不猜跨账号路径）：
+
+```bash
+export WORD_ROOT=/该账号/数据/WORD
+export PYTHON_BIN=/该账号/环境/bin/python
+export MAE_CHECKPOINT=/该账号/AutoPET_MAE/checkpoint-final.pth
+export LPIPS_STATE=/该账号/owt_lpips_vgg16.pth
+export OUTPUT_DIR=/该账号/结果/Inc44_stage1
+bash scripts/orgslot/run_incremental44.sh stage1
+# Stage1完成后，手动确认最终59400-update checkpoint，不按测试成绩选取。
+export STAGE1_CHECKPOINT=/该账号/结果/Inc44_stage1/checkpoint-最终epoch.pth
+export OUTPUT_DIR=/该账号/结果/Inc44_stage2_separation
+export BACKGROUND_POLICY=separation
+bash scripts/orgslot/run_incremental44.sh stage2
+```
+
+提交前仍须commit/push、revision guard、固定运行快照、核验账号路径；脚本本身不提交Slurm，不更新运行中的源目录。
+保存resolved_config、manifest哈希、初始化报告、slot元数据、可训练参数清单、Stage1 checkpoint哈希；Stage2保存checkpoint时校验冻结参数哈希。
+续训必须保留同一Stage1 teacher及协议，使用`--resume`，不得从全8类WORD checkpoint启动Stage1。
+
+评估要求：同24测试病例，Stage1旧4类、Stage2旧4/新4/全部8类；原始独立binary head与互斥类别合并指标必须分开。旧类阈值在Stage1验证集确定并锁定；新类只在Stage2验证集校准。病例级Dice/P/R/体积比，另外报告旧类raw logits漂移和背景在新器官GT内的残留。**现有Common8 evaluator不能直接用来加载5-slot Stage1模型；增量评估适配与GPU预检尚未完成，不自动挂接旧评估脚本。**
+当前仅完成CPU机制测试：标签隐藏/ROI隔离、伪区域冲突与ignore、空区域finite backward、新/背景梯度、旧logits不变、背景策略、随机冻结decoder下的优化下降；这不等于真实数据过拟合或GPU/DDP通过。
+
+SIP提交脚本：`slurm/orgslot/train/incremental44_stage1_sip.sbatch`，4×A800、20CPU、192GB、7天。启动后先以同样每卡16/累积3跑独立的2-update预检，只有正常退出、更新数正确且日志数值有限才启动全新Stage1（每10epoch保存）。预检不是小样本过拟合验证，权重不用于正式训练；排队时不得宣称GPU通过。Stage2与评估不自动提交。
+
 ## 模型与数据
 
 以运行目录 `resolved_config.json`、`command.txt`、checkpoint args 为准，不以脚本名推断配置。

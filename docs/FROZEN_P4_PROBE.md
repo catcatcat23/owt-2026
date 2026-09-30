@@ -1,5 +1,20 @@
 # Frozen P4 probe diagnostic
 
+## E badcase extension (2026-09-30)
+
+Supports E fused P4 via a separate capture path; original F path unchanged.
+E uses one linear probe (no reverse attention exists), compared with the SAME
+checkpoint's original query head. Train organ4 and organ6 separately, fixed10
+epochs, seed42, batch16, AdamW1e-3, existing BCE+positive Dice probe objective.
+Original model fully frozen. Keep76/20 training-case split; evaluate selected
+test cases0127/0114 ONLY after epoch9, no test selection/tuning. Test and training
+IDs must be disjoint. Save all test slice probability maps and case/slice counts.
+Fixed0.5 RAW results; do not compare against historical postprocessed/calibrated
+numbers. These probes have extra supervised fitting and a different objective;
+superiority supports readability, not proof that query is the sole bottleneck.
+Script: slurm/orgslot/eval/e_badcase_probe.sbatch. Same E checkpoint as token
+interventions; do NOT reuse existing F probe weights on E features.
+
 Independent script; no changes to original model. Supports original 2D
 arm_f_attention only. Each run selects one organ (6 pancreas, 5 esophagus,
 4 gallbladder). Compare raw P4 immediately before reverse attention against

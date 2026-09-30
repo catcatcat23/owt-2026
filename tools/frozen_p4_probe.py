@@ -9,6 +9,28 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, Subset
+from unittest.mock import patch
+
+
+class EFeatureCapture:
+    """Unchanged E fused P4, before organ-query dot product."""
+    def __init__(self, decoder):
+        self.values = {}
+        original = decoder.forward_pixels
+        def capture(*args, **kwargs):
+            value = original(*args, **kwargs)
+            if self.values:
+                raise RuntimeError('Duplicate P4 capture')
+            self.values['pre'] = value.detach().flatten(2).transpose(1, 2)
+            return value
+        self.context = patch.object(decoder, 'forward_pixels', capture)
+        self.context.start()
+
+    def clear(self):
+        self.values.clear()
+
+    def close(self):
+        self.context.stop()
 
 
 class FeatureCapture:
@@ -65,6 +87,8 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--test-csv")
+    parser.add_argument("--test-cases", nargs='+', default=['word_0127', 'word_0114'])
     args = parser.parse_args()
     from tools.eval_common8_orgslot_reconstruction_threshold import (
         build_dataset, build_model, parse_class_configuration, sha256)
@@ -74,7 +98,9 @@ def main():
     specs, _ = parse_class_configuration(Path(args.class_map))
     model, report = build_model("orgslot", Path(args.checkpoint), specs, 448, "linear_sqrt")
     model.requires_grad_(False).eval().to(args.device)
-    capture = FeatureCapture(model.pixel_query_decoder)
+    assert report['exact']
+    is_e = report['slot_head_type'] == 'arm_e_multiscale_query'
+    capture = EFeatureCapture(model.pixel_query_decoder) if is_e else FeatureCapture(model.pixel_query_decoder)
     slot_index = next(i for i, s in enumerate(specs) if s['raw_class_id'] == args.class_id)
     slot_name = specs[slot_index]['name']
     dataset = build_dataset(Path(args.train_csv), 448, 448)
@@ -100,12 +126,28 @@ def main():
         shuffle=k=='probe_train', num_workers=args.workers, generator=generator)
         for k,v in groups.items()}
     heads = nn.ModuleDict({'pre': nn.Linear(model.pixel_query_decoder.channels, 1)}).to(args.device)
-    heads['post'] = copy.deepcopy(heads['pre'])
+    if not is_e:
+        heads['post'] = copy.deepcopy(heads['pre'])
+    if args.test_csv:
+        with open(args.test_csv) as stream:
+            test_records = list(csv.DictReader(stream))
+        test_ids = [Path(r['mask_pth']).parent.name for r in test_records]
+        assert not set(test_ids) & set(cases)
+        assert set(args.test_cases) <= set(test_ids)
+        indices = [i for i,c in enumerate(test_ids) if c in args.test_cases]
+        loaders['test'] = DataLoader(Subset(build_dataset(Path(args.test_csv),448,448),indices),
+            batch_size=args.batch_size,shuffle=False,num_workers=args.workers)
+        provenance['test_manifest_sha256'] = sha256(Path(args.test_csv))
+        provenance['test_indices'] = indices
+        (out/'provenance.json').write_text(json.dumps(provenance,indent=2))
     optimizer = torch.optim.AdamW(heads.parameters(), lr=args.lr, weight_decay=0)
     updates = 0
     for epoch in range(args.epochs):
         for split, loader in loaders.items():
+            if split == 'test' and epoch != args.epochs-1:
+                continue
             counts = {}; loss_sum = 0.; batches = 0
+            slice_rows = []; processed = 0
             for batch in loader:
                 images = batch['image'].to(args.device)
                 target = (batch['full_label'] == args.class_id).float().to(args.device)
@@ -115,7 +157,7 @@ def main():
                 with torch.no_grad():
                     original = model(images, slot_keep_mask=keep, head_compute_mask=keep,
                                      decode_reconstruction=False)
-                if set(capture.values) != {'pre', 'post'}:
+                if set(capture.values) != set(heads.keys()):
                     raise RuntimeError('Missing pre/post capture')
                 logits = {}
                 with torch.set_grad_enabled(split == 'probe_train'):
@@ -136,6 +178,15 @@ def main():
                         optimizer.step(); updates += 1
                 loss_sum += loss.item(); batches += 1
                 logits['original'] = original['calibrated_logits'][slot_name]
+                if split == 'test':
+                    import numpy as np
+                    (out/'test_probabilities').mkdir(exist_ok=True)
+                    for i,case in enumerate(batch['case_id']):
+                        idx=indices[processed+i]
+                        z=int(Path(test_records[idx]['mask_pth']).stem.rsplit('_',1)[1])
+                        np.savez_compressed(out/'test_probabilities'/f'{case}_{z}.npz',
+                            image=images[i].cpu().numpy(),target=target[i,0].cpu().numpy(),
+                            **{name:value[i,0].detach().sigmoid().cpu().numpy() for name,value in logits.items()})
                 for name, value in logits.items():
                     pred = value.detach() > 0
                     for i, case in enumerate(batch['case_id']):
@@ -143,6 +194,10 @@ def main():
                         entry = counts.setdefault((name,case), [0,0,0])
                         for j, n in enumerate([(p&t).sum(),p.sum(),t.sum()]):
                             entry[j] += int(n)
+                        if split == 'test':
+                            slice_rows.append(dict(model=name,case=str(case),sample_index=indices[processed+i],
+                                tp=int((p&t).sum()),pred=int(p.sum()),gt=int(t.sum())))
+                processed += len(batch['case_id'])
             rows = []
             for (name,case),(tp,p,t) in sorted(counts.items()):
                 rows.append(dict(model=name,case=case,tp=tp,pred=p,gt=t,
@@ -152,6 +207,8 @@ def main():
                 peak_memory_bytes=torch.cuda.max_memory_allocated() if args.device.startswith('cuda') else 0,
                 metrics=rows, train_metrics_online=split=='probe_train')
             (out/f'{split}_epoch{epoch:03d}.json').write_text(json.dumps(result,indent=2))
+            if split == 'test':
+                (out/'test_per_slice.json').write_text(json.dumps(slice_rows))
             print(json.dumps({k:v for k,v in result.items() if k!='metrics'}),flush=True)
         torch.save(dict(heads=heads.state_dict(),optimizer=optimizer.state_dict(),epoch=epoch,updates=updates), out/'probe_last.pth')
     capture.close()

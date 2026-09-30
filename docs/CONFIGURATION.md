@@ -1,5 +1,11 @@
 # 统一配置与部署契约
 
+## Soft-prior aux 的DDP指标契约
+
+2026-10-01：`150613`失败并非已确认的NaN。TGR在某rank只保留背景时，coarse预测为空是合法情况；旧实现提前返回0辅助loss，却没有生成`soft_prior_p16_loss/p8_loss/p4_loss`，其他rank有这三个字段，`reduce_metrics`的schema检查因此终止。修复在提前返回前初始化三个0值字段，非空分支仍写实际loss；不改loss权重、mask机制或空监督语义，也不删除schema保护。回归覆盖双rank不同保留情况、有限梯度、真实字段不一致仍报错。
+
+恢复脚本`slurm/orgslot/train/sam_tail_soft_prior_aux_resume.sbatch`只恢复已核验的checkpoint-0，从epoch1续训并恢复optimizer/scaler。启动后先运行两GPU NCCL指标回归；失败则不进入正式训练。新训练需新`afterok`评估；旧`150614`依赖失败不会自行恢复。
+
 ## incremental44
 
 独立入口 `main_pretrain_orgslot_incremental44.py`，启动器 `scripts/orgslot/run_incremental44.sh`。

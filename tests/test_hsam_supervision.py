@@ -14,7 +14,7 @@ class HSAMTests(unittest.TestCase):
         keep = torch.zeros(1, len(names), dtype=torch.bool)
         keep[:, names.index("background")] = True
         targets = {name: torch.zeros(1, 1, 32, 32) for name in names}
-        for mode in ("downsample_gt", "upsample_logits", "m2f_hard"):
+        for mode in ("downsample_gt", "upsample_logits", "m2f_hard", "soft_prior_aux"):
             with self.subTest(mode=mode):
                 model.zero_grad()
                 model.pixel_query_decoder.configure_mask_supervision(mode)

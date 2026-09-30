@@ -9,6 +9,10 @@ def stage_weight(epoch):
 
 
 def coarse_segmentation_loss(logits, targets, names, keep, args, diagnostics=None):
+    # TGR can produce a background-only rank while peers retain foreground.
+    # Establish the metric schema before the legal empty-prediction return.
+    if args.hsam_supervision == "soft_prior_aux" and diagnostics is not None:
+        diagnostics.update({"soft_prior_p{}_loss".format(scale): 0.0 for scale in (16, 8, 4)})
     # TGR may retain only background on a rank with no ROI focus. Background
     # has no head when its loss weight is zero; an empty dictionary is legal.
     supervised = [name for index, name in enumerate(names)

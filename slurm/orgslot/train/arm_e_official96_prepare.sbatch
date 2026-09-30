@@ -10,6 +10,9 @@ set -euo pipefail
 cd "$EXPERIMENT_WORKDIR"
 export ARM_F_TARGET=bolin-sip ARM_F_DIMENSION=2D
 source scripts/orgslot/arm_f_environment.sh
+: "${OPENCV_SYSTEM_LIB:?CPU nodes need isolated libGL dependencies}"
+export LD_LIBRARY_PATH="$OPENCV_SYSTEM_LIB:$LD_LIBRARY_PATH"
+"$PYTHON" -c 'import cv2, nibabel; print("CPU preprocessing imports OK", flush=True)'
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 "$PYTHON" tools/prepare_word_official96.py build \
  --plan configs/orgslot/word_official96_seed42.json \

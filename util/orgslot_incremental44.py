@@ -90,7 +90,7 @@ class Incremental44Objective(nn.Module):
         target = composition_target(image, regions, keep, net.slot_names)
         recon = region_mse(reconstruction, target, valid)
         seg_keep = keep[:, 5:] if args.seg_supervision == "retained" else all_keep[:, 5:]
-        seg, _ = base_segmentation_loss(
+        seg, per_slot = base_segmentation_loss(
             {n: out["slot_logits"][n] for n in NEW}, masks, NEW, seg_keep,
             background_weight=0, loss_type="small_organ",
             focal_alpha=args.focal_alpha, focal_gamma=args.focal_gamma,
@@ -110,5 +110,12 @@ class Incremental44Objective(nn.Module):
         stats = {"loss": loss.detach(), "reconstruction": recon.detach(),
                  "segmentation": seg.detach(), "background_separation": separation.detach(),
                  "valid_fraction": valid.float().mean(),
-                 "background_fraction": regions["background"].float().mean()}
+                 "background_fraction": regions["background"].float().mean(),
+                 "ignored_fraction": (~valid).float().mean()}
+        for i, name in enumerate(NEW):
+            stats["seg_" + name] = per_slot[name].detach()
+            stats["supervised_" + name] = seg_keep[:, i].float().sum()
+            stats["gt_fraction_" + name] = masks[name].float().mean()
+        for name in OLD:
+            stats["teacher_fraction_" + name] = regions[name].float().mean()
         return loss, stats

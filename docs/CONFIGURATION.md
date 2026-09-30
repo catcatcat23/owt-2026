@@ -58,7 +58,11 @@ bash scripts/orgslot/run_incremental44.sh stage2
 评估要求：同24测试病例，Stage1旧4类、Stage2旧4/新4/全部8类；原始独立binary head与互斥类别合并指标必须分开。旧类阈值在Stage1验证集确定并锁定；新类只在Stage2验证集校准。病例级Dice/P/R/体积比，另外报告旧类raw logits漂移和背景在新器官GT内的残留。**现有Common8 evaluator不能直接用来加载5-slot Stage1模型；增量评估适配与GPU预检尚未完成，不自动挂接旧评估脚本。**
 当前仅完成CPU机制测试：标签隐藏/ROI隔离、伪区域冲突与ignore、空区域finite backward、新/背景梯度、旧logits不变、背景策略、随机冻结decoder下的优化下降；这不等于真实数据过拟合或GPU/DDP通过。
 
-SIP提交脚本：`slurm/orgslot/train/incremental44_stage1_sip.sbatch`，4×A800、20CPU、192GB、7天。启动后先以同样每卡16/累积3跑独立的2-update预检，只有正常退出、更新数正确且日志数值有限才启动全新Stage1（每10epoch保存）。预检不是小样本过拟合验证，权重不用于正式训练；排队时不得宣称GPU通过。Stage2与评估不自动提交。
+SIP提交脚本：`slurm/orgslot/train/incremental44_stage1_sip.sbatch`，4×A800、20CPU、192GB、7天。启动后先以同样每卡16/累积3跑独立的2-update预检，只有正常退出、更新数正确且日志数值有限才启动全新Stage1（每10epoch保存）。预检不是小样本过拟合验证，权重不用于正式训练；排队时不得宣称GPU通过。
+
+Stage2脚本 `slurm/orgslot/train/incremental44_stage2_sip.sbatch` 使用 `afterok:Stage1_JOB`，显式设置`STAGE1_RUN`。启动时解析最后一行训练日志和对应checkpoint，要求59400更新、Stage1身份、optimizer最大step同为59400、参数全有限，再严格加载。不能只看文件存在、猜checkpoint-802或把中间checkpoint当最终模型。Stage2也先独立2-update预检，随后重新加载Stage1正式训练。当前只提交默认背景separation组；frozen/composition保持可选，不自动扩大三倍预算。五slot评估适配仍待完成，没有虚挂评估依赖。
+
+审计边界：背景slot没有独立分割监督，其背景分离约束作用在重建支路；它不等价于9类softmax背景分类。旧raw/calibrated输出不变不代表互斥分类图零遗忘；必须另外评估新增类别冲突。Stage2新slot校准保持初始化scale1/bias0，旧slot校准冻结在Stage1值；新slot使用raw logits与其calibrated logits等价，但两阶段校准参数的可训练性不同，这属于明确的模块冻结方案。Stage2只有masked MSE而无LPIPS，不是完全相同的训练目标；不在未知区域上使用LPIPS以免其感受野引入错误监督。候选背景含teacher漏检风险，日志记录各旧伪区域、四新类监督数量和ignore比例。辅助权重0.1及置信度0.1/0.9尚非验证最优。
 
 ## 模型与数据
 

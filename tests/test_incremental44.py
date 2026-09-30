@@ -10,6 +10,7 @@ from util.orgslot_incremental44 import (
     configure_stage2, Incremental44Objective,
 )
 from datasets.orgslot_highres import OrganSlotHighResTransform
+from tools.incremental44_final_checkpoint import validate_stage1_completion
 
 
 def options(policy="separation"):
@@ -21,6 +22,17 @@ def options(policy="separation"):
 
 
 class Incremental44Tests(unittest.TestCase):
+    def test_stage1_completion_guard(self):
+        checkpoint = {"args": {"incremental_stage": "stage1", "max_optimizer_updates": 59400},
+                      "optimizer": {"state": {0: {"step": torch.tensor(59400.)}, 1: {"step": 2000}}}}
+        validate_stage1_completion(checkpoint)
+        checkpoint["optimizer"]["state"][0]["step"] = 59399
+        with self.assertRaises(ValueError):
+            validate_stage1_completion(checkpoint)
+        checkpoint["args"]["incremental_stage"] = "offline"
+        with self.assertRaises(ValueError):
+            validate_stage1_completion(checkpoint)
+
     @classmethod
     def setUpClass(cls):
         torch.set_num_threads(1)

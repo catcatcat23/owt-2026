@@ -18,6 +18,7 @@ from util.misc import NativeScalerWithGradNormCount as NativeScaler
 from util.label_visibility import load_visibility_config, assert_case_splits_disjoint
 from util.mae_transfer import load_mae_transfer_checkpoint
 from util.checkpoint_orgslot import hash_frozen_parameters, compare_parameter_hashes
+from tools.incremental44_final_checkpoint import validate_stage1_completion
 from util.orgslot_incremental44 import BASE, OLD, NEW, configure_stage2, Incremental44Objective
 from main_pretrain_orgslot_common8_a100 import (
     get_args_parser, _build_dataset, _model_args, _seed_worker, _sha256, _write_provenance,
@@ -54,6 +55,7 @@ def parser():
 
 def load_stage1(path, args):
     checkpoint = torch.load(path, map_location="cpu")
+    validate_stage1_completion(checkpoint)
     saved = checkpoint.get("args", {})
     saved = saved if isinstance(saved, dict) else vars(saved)
     if saved.get("incremental_stage") != "stage1":

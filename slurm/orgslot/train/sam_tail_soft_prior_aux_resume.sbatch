@@ -22,6 +22,7 @@ assert all(torch.isfinite(t).all() for t in c['model'].values() if t.is_floating
 print('Resume checkpoint verified; start_epoch=1; optimizer/scaler restored by trainer', flush=True)
 PY_CHECK
 output="$EXPERIMENT_WORKDIR/Results/OrganSlotBank/Common8/WORD_2D/ArmF_2D_${SLURM_JOB_ID}"
-mkdir -p "$output"
+bash slurm/orgslot/train/arm_f.sbatch
+# The launcher requires a nonexistent output directory. Copy provenance only
+# after it has created and completed the fresh resumed run.
 cp "$(dirname "$RESUME_CHECKPOINT")/mae_initial_checkpoint_load.json" "$output/mae_initial_checkpoint_load.json"
-exec bash slurm/orgslot/train/arm_f.sbatch

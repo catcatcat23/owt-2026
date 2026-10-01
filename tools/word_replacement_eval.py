@@ -52,6 +52,11 @@ def prepare(args):
         writer.writerows(result)
     report = dict(plan, samples=len(result), test_manifest_sha256=sha(args.output / "test.csv"),
                   old_thresholds_sha256=sha(args.thresholds), old_results_sha256=sha(args.old_results))
+    # The shared cohort plan was first used for E; identify the actual model
+    # being evaluated rather than inheriting that historical model label.
+    report["cohort_plan_original_result"] = plan.get("original_result")
+    report["original_result"] = str(args.old_results.resolve())
+    report["evaluated_checkpoint"] = str((args.old_run / "checkpoint-802.pth").resolve())
     (args.output / "protocol.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
 

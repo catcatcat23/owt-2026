@@ -1,5 +1,17 @@
 # 已记录结果与证据
 
+## 2026-10-03 增量4–4 Stage1评估记录
+
+Stage1训练2998659已完成59400更新，最终checkpoint-401；Stage2训练2998660已自动加载该模型。
+Stage1独立评估此前缺失，现补slurm/orgslot/eval/incremental44_stage1.sbatch。
+模型含5个slot：背景、脾、右肾、左肾、胆囊；主指标报告旧4类病例Dice均值。
+背景head未被直接监督，背景诊断使用旧4类预测并集的补集；GT背景为原始标签0、5、6、7、8。
+固定官方池96/26/24划分，完整验证集选阈值；测试同时报告固定0.5与验证集校准、raw/post。
+背景Dice单列，禁止纳入旧4类前景均值。逐病例CSV另含precision、recall、体积比。
+遗忘量须比较同一测试集Stage1/Stage2旧4类固定0.5结果；stage-specific校准另列。
+输出：artifacts/incremental44_20261001/stage1_evaluation/{validation,test}。
+提交前8项CPU测试通过，最终五slot模型CPU精确加载检查完成后提交；GPU结果以正式任务为准。
+
 ## 2026-09-18：F预训练与3D评估更新
 
 测试集均24病例/6990切片；下表主指标为病例级前景Dice均值（%）。

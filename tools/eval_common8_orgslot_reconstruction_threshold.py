@@ -93,9 +93,9 @@ def atomic_json(path, value):
     temporary.replace(path)
 
 
-def parse_class_configuration(path):
+def parse_class_configuration(path, stage_name="base"):
     classes, stages = load_visibility_config(path)
-    stage = stages["base"]
+    stage = stages[stage_name]
     by_name = {item.name: item for item in classes}
     slot_specs = [
         {"name": name, "raw_class_id": int(by_name[name].raw_id)}
@@ -106,8 +106,9 @@ def parse_class_configuration(path):
         for item in classes
         if item.name in stage.visible_slots
     }
-    if sorted(class_names) != list(range(9)):
-        raise ValueError("Common8 requires contiguous raw IDs 0 through 8")
+    expected_ids = list(range(5)) if stage_name == "stage1" else list(range(9))
+    if sorted(class_names) != expected_ids:
+        raise ValueError("Unexpected evaluation class IDs for " + stage_name)
     return slot_specs, class_names
 
 

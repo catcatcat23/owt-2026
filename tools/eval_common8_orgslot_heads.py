@@ -55,6 +55,8 @@ def parse_args():
     parser.add_argument("--min-size", type=int, default=20)
     parser.add_argument("--opening-radius", type=int, default=1)
     parser.add_argument("--class-ids", default="1,2,3,4,5,6,7,8")
+    parser.add_argument("--stage1", action="store_true",
+                        help="incremental44 five-slot checkpoint; report old four organs and their background complement")
     parser.add_argument("--max-samples", type=int)
     parser.add_argument("--print-freq", type=int, default=20)
     parser.add_argument("--device", default="cuda")
@@ -122,6 +124,13 @@ def add_volume_ratios(metrics, rows):
         )
 
 
+def stage_background(labels, predictions, class_ids):
+    """New/unseen organs belong to background in the Stage1 label space."""
+    target = ~np.isin(labels, class_ids)
+    prediction = ~np.logical_or.reduce([predictions[c] for c in class_ids])
+    return prediction, target
+
+
 def main():
     args = parse_args()
     checkpoint = Path(args.checkpoint).resolve()
@@ -147,12 +156,14 @@ def main():
     if not args.device.startswith("cuda") or not torch.cuda.is_available():
         raise RuntimeError("formal evaluation requires CUDA")
 
-    slot_specs, class_names = parse_class_configuration(class_map)
+    slot_specs, class_names = parse_class_configuration(class_map, "stage1" if args.stage1 else "base")
     class_ids = tuple(int(value) for value in args.class_ids.split(",") if value)
     if not class_ids or any(value == 0 or value not in class_names for value in class_ids):
         raise ValueError("class_ids must be a non-empty subset of foreground IDs 1..8")
     if len(set(class_ids)) != len(class_ids):
         raise ValueError("class_ids must not contain duplicates")
+    if args.stage1 and class_ids != (1, 2, 3, 4):
+        raise ValueError("Stage1 requires old foreground class IDs 1,2,3,4")
 
     default_thresholds = {
         class_id: float(args.binary_threshold) for class_id in class_ids
@@ -222,6 +233,7 @@ def main():
         mode: {class_id: {} for class_id in class_ids}
         for mode in modes
     }
+    background_counters = {mode: {0: {}} for mode in modes} if args.stage1 else None
     id_to_name = {
         int(spec["raw_class_id"]): spec["name"] for spec in slot_specs
     }
@@ -234,10 +246,14 @@ def main():
             keep = torch.ones(
                 image.shape[0], len(slot_specs), dtype=torch.bool, device=device
             )
+            head_mask = keep.clone()
+            if args.stage1:
+                head_mask[:, 0] = False  # Stage1 background head was not supervised.
             with torch.cuda.amp.autocast(enabled=not args.no_amp):
                 output = model(
                     image,
                     slot_keep_mask=keep,
+                    head_compute_mask=head_mask,
                     decode_reconstruction=False,
                 )
                 probabilities = {
@@ -247,6 +263,7 @@ def main():
                     for class_id in class_ids
                 }
             for sample_index, case_id in enumerate(batch["case_id"]):
+                background_predictions = {mode: {} for mode in modes} if args.stage1 else None
                 for class_id in class_ids:
                     target = labels[sample_index] == class_id
                     for set_name, class_thresholds in threshold_sets.items():
@@ -261,10 +278,17 @@ def main():
                             ),
                         }
                         for mode, prediction in predictions.items():
+                            if args.stage1:
+                                background_predictions[mode][class_id] = prediction
                             counter = counters[mode][class_id].setdefault(
                                 str(case_id), new_counter()
                             )
                             update_counter(counter, prediction, target)
+                if args.stage1:
+                    for mode, predictions in background_predictions.items():
+                        prediction, target = stage_background(labels[sample_index], predictions, class_ids)
+                        counter = background_counters[mode][0].setdefault(str(case_id), new_counter())
+                        update_counter(counter, prediction, target)
             processed += image.shape[0]
             if batch_index % args.print_freq == 0 or processed == len(dataset):
                 elapsed = time.time() - started
@@ -283,6 +307,16 @@ def main():
     metrics, rows, records = summarize(
         counters, class_ids, class_names, "OrganSlotBank binary heads"
     )
+    if args.stage1:
+        bg_metrics, bg_rows, bg_records = summarize(background_counters, (0,), {0: "stage1_background_complement"}, "Stage1 foreground-complement background")
+        for mode in metrics:
+            metrics[mode]["0"] = bg_metrics[mode]["0"]
+        rows.extend(bg_rows)
+        records.extend(bg_records)
+        for row in rows:
+            tp = row["intersection_voxels"]
+            row["precision"] = tp / row["prediction_voxels"] if row["prediction_voxels"] else 0.0
+            row["recall"] = tp / row["target_voxels"] if row["target_voxels"] else 0.0
     add_volume_ratios(metrics, rows)
     for record, row in zip(records, rows):
         record["method_family"] = "slot_binary_segmentation_head"
@@ -317,6 +351,7 @@ def main():
         "checkpoint_load": load_report,
         "selected_thresholds": selected,
         "metrics": metrics,
+        "stage1_background_policy": "complement of old-four foreground; raw IDs 0,5,6,7,8 are Stage1 background" if args.stage1 else None,
     }
     atomic_json(output_dir / "results.json", result)
     atomic_json(output_dir / "progress.json", {

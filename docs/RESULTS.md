@@ -11,6 +11,8 @@ Stage1仅有旧四类输出，新四类和八类整体记为NA（尚未学习、
 |---|---:|---:|---:|
 | PCDD论文Offline参考 | 86.18 | 84.77 | 85.47 |
 | PCDD论文4–4最终阶段参考 | 84.09 | 82.75 | 83.42 |
+| 本项目历史Offline E cross+MAE，旧划分fixed-post | 85.22 | 83.37 | 84.30 |
+| 本项目历史Offline E cross+MAE，旧划分calibrated-post | 86.54 | 84.18 | 85.36 |
 | 本项目同划分Offline | 待完成 | 待完成 | 待完成 |
 | Stage1固定0.5 post | 84.89 | NA | NA |
 | Stage1验证集校准post | 85.48 | NA | NA |
@@ -20,6 +22,17 @@ Stage1证据：sifansong/XEC152957，完整24病例7315切片，checkpoint401精
 `/gpfs/work/aac/sifansong/artifacts/inc44_stage1_eval_20261003/evaluation_90min/test/results.json`。
 Offline为官方池96/26/24划分E cross-attention+MAE训练2998655及评估2998656；不能用历史旧划分模型代替。
 Stage2训练2998660，最终评估尚未提交（2026-10-03核验）。
+
+历史Offline是八类联合训练的Arm E cross-attention+MAE encoder，训练148833、checkpoint802。
+2026-10-03核验完整24病例/6990切片、exact加载；校准使用训练集6000切片，阈值固定后测试。
+结果位于sifansong/XEC：
+`/gpfs/work/aac/sifansong/worktrees/e_cross_mae_9791e87/Results/OrganSlotBank/evaluation/Common8/WORD_2D/ArmE_CrossAttn_MAEenc_148833_ckpt802_heads_test/results.json`。
+此行是旧划分参考，不能与当前Stage1/Stage2新24例计算遗忘量或严格的Offline差距。
+
+| 历史Offline输出 | 脾 | 右肾 | 左肾 | 胆囊 | 食管 | 胰腺 | 肝 | 胃 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| fixed0.5 post | 94.22 | 93.60 | 93.70 | 59.39 | 75.05 | 76.93 | 95.29 | 86.21 |
+| calibrated post | 94.74 | 94.62 | 94.46 | 62.34 | 78.00 | 77.29 | 95.29 | 86.13 |
 
 统一汇总入口：
 ```bash

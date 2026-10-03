@@ -2,8 +2,12 @@
 set -euo pipefail
 : "${EXPERIMENT_WORKDIR:?}" "${EXPECTED_COMMIT:?}" "${STAGE1_RUN:?}" "${NEW_DATA_ROOT:?}" "${OUTPUT_ROOT:?}"
 cd "$EXPERIMENT_WORKDIR"
-test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
-export ARM_F_TARGET=bolin-sip ARM_F_DIMENSION=2D
+if [[ -e .git ]]; then
+    test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+else
+    test "$(<SOURCE_COMMIT)" = "$EXPECTED_COMMIT"
+fi
+export ARM_F_TARGET=${ARM_F_TARGET:-bolin-sip} ARM_F_DIMENSION=2D
 source scripts/orgslot/arm_f_environment.sh
 export PYTHONNOUSERSITE=1 OMP_NUM_THREADS=1
 CHECKPOINT=$("$PYTHON" tools/incremental44_final_checkpoint.py "$STAGE1_RUN")

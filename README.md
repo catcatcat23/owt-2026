@@ -1,5 +1,9 @@
 # OrganSlot
 
+4–4评估统一报告Offline、Stage1、Stage2的Old/New/All及逐器官Dice；
+Stage1未见新类记NA，背景单列。汇总工具`python -m tools.report_incremental44`，
+结果、遗忘量与PCDD协议差异见[统一报告](docs/RESULTS.md#44统一报告offline--stage1--stage2)。
+
 新增独立 **4+4 类增量训练入口**：基于 E cross-attention＋MAE encoder，Stage1五个slot，Stage2九个slot；背景冻结/组合更新/显式分离三个对照。仅实现，未提交GPU训练；协议和运行方式见 [4+4 配置](docs/CONFIGURATION.md#incremental44)。旧全八类入口不变。
 
 2026-09-30 新协议：官方100训练病例中固定抽96训练，官方20验证＋30测试池中固定抽24测试，余26验证/阈值校准（seed42）。使用 E cross-attention＋MAE encoder 重新训练，不能复用旧 WORD checkpoint，也不能与旧划分85.36%作严格横向比较。清单见 [word_official96_seed42.json](configs/orgslot/word_official96_seed42.json)，执行细节见 [CONFIGURATION](docs/CONFIGURATION.md#word-official96-protocol)。旧数据与任务不变。

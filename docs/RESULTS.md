@@ -1,5 +1,44 @@
 # 已记录结果与证据
 
+## 4–4统一报告：Offline / Stage1 / Stage2
+
+旧四类为脾、右肾、左肾、胆囊；新四类为食管、胰腺、肝、胃。
+每个阶段单列旧四类、新四类、八类病例Dice均值及八个器官明细，背景不计入均值。
+Stage1仅有旧四类输出，新四类和八类整体记为NA（尚未学习、无输出头），不能把背景当新类，不能填造一个实测0分。
+如另做“未见类别强制空预测”的诊断，必须单列，不能冒充PCDD主表口径。
+
+| 方法/阶段 | 旧四类 | 新四类 | 八类整体 |
+|---|---:|---:|---:|
+| PCDD论文Offline参考 | 86.18 | 84.77 | 85.47 |
+| PCDD论文4–4最终阶段参考 | 84.09 | 82.75 | 83.42 |
+| 本项目同划分Offline | 待完成 | 待完成 | 待完成 |
+| Stage1固定0.5 post | 84.89 | NA | NA |
+| Stage1验证集校准post | 85.48 | NA | NA |
+| Stage2 | 待完成 | 待完成 | 待完成 |
+
+Stage1证据：sifansong/XEC152957，完整24病例7315切片，checkpoint401精确加载；
+`/gpfs/work/aac/sifansong/artifacts/inc44_stage1_eval_20261003/evaluation_90min/test/results.json`。
+Offline为官方池96/26/24划分E cross-attention+MAE训练2998655及评估2998656；不能用历史旧划分模型代替。
+Stage2训练2998660，最终评估尚未提交（2026-10-03核验）。
+
+统一汇总入口：
+```bash
+python -m tools.report_incremental44 --offline OFFLINE_TEST/results.json \
+  --stage1 STAGE1_TEST/results.json --stage2 STAGE2_TEST/results.json
+```
+各参数可在结果未齐时省略。工具核验相同24病例、每病例切片数、评估设置和精确加载；
+分别输出raw/post和fixed/calibrated。遗忘量=Stage1旧类fixed-post减Stage2旧类fixed-post（百分点）；
+逐阶段各自校准的差值不作为主遗忘量。结果均使用完整病例体积统计，而非切片Dice平均。
+
+与PCDD一致的目标是4–4类别顺序、分阶段标签可见性以及Old/New/All统计。
+当前使用同一96病例池分阶段暴露不同标签，不能据此宣称复现了PCDD的阶段间病例分配；
+其论文问题定义提到旧阶段数据不可访问，而公开实验细节未给出可核对的阶段病例清单。
+PCDD附录使用120例随机96/24、1×1×3mm、3D Swin UNETR；本项目使用官方池96/26/24、0.7×0.7×2mm、2D模型。
+这些差异必须保留，不能写“完全同协议复现”。来源：
+[论文Table2](https://ojs.aaai.org/index.php/AAAI/article/download/38406/42368)、
+[附录C](https://arxiv.org/html/2511.07749v1#A3)、
+[官方仓库](https://github.com/shengqianzhu/PCDD)（本次检查仍为Coming soon）。
+
 ## 2026-10-03 增量4–4 Stage1评估记录
 
 Stage1训练2998659已完成59400更新，最终checkpoint-401；Stage2训练2998660已自动加载该模型。

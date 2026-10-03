@@ -23,6 +23,12 @@ Stage1证据：sifansong/XEC152957，完整24病例7315切片，checkpoint401精
 Offline为官方池96/26/24划分E cross-attention+MAE训练2998655及评估2998656；不能用历史旧划分模型代替。
 Stage2训练2998660，最终评估尚未提交（2026-10-03核验）。
 
+2026-10-04：Stage2完成59400更新、checkpoint401，最终freeze_audit通过。
+新增`slurm/orgslot/eval/incremental44_stage2.sbatch`，验证集26例校准后测试24例7315切片，
+报告fixed/calibrated、raw/post及Old/New/All；与Stage1固定0.5比较遗忘量。
+提交目标为sifansong/XEC单RTX4090，沿用已校验Stage1数据副本，运行输出独立保存。
+checkpoint选择器检查最终日志、优化器步数、有限权重、配置与冻结审计；GPU状态以提交记录为准。
+
 历史Offline是八类联合训练的Arm E cross-attention+MAE encoder，训练148833、checkpoint802。
 2026-10-03核验完整24病例/6990切片、exact加载；校准使用训练集6000切片，阈值固定后测试。
 结果位于sifansong/XEC：

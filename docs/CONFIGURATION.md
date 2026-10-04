@@ -172,3 +172,23 @@ encoder或encoder_decoder；复用AutoPET checkpoint-final，初始化不加载o
 准备脚本 `slurm/orgslot/train/arm_e_official96_prepare.sbatch` 仅对原未处理的官方30测试病例按相同流程预处理。训练/验证原病例重用无学习的既有逐病例JPEG/PNG（新目录软链接），生成新的完整CSV、summary和ROI索引，绝不覆盖旧数据。严格检查146病例互斥、来源、完整切片、ROI manifest hash。`NEW_DATA_ROOT`必须是不存在的新目录。准备CPU任务成功后才释放训练。
 
 训练 `slurm/orgslot/train/arm_e_crossattn_official96.sbatch`；评估 `slurm/orgslot/eval/arm_e_official96.sbatch`。使用 `EXPERIMENT_WORKDIR`固定源码、`NEW_DATA_ROOT`固定数据，评估还需 `TRAIN_JOB_ID`。训练完成后按日志中118800 updates取最终checkpoint，非测试集选优。26例验证完整阈值扫描0.1至0.9，测试24例同时报告固定0.5与验证校准结果；min_size20/opening1不变。reconstruction仍用0.02固定阈值与现有OWT路径。保存新的训练—评估afterok链；新旧结果分别汇报，不把新划分成绩变动归因为架构改进。
+# Stage2 shared spatial/readout ablation (2026-10-04)
+
+`--stage2_shared_segmentation train` (launcher environment
+`STAGE2_SHARED_SEGMENTATION=train`) unfreezes the existing entire
+`pixel_query_decoder`: image spatial stem, pixel projection/fusion blocks,
+query normalization/projection and P4 query cross-attention/FFN. No parameters
+are added. Default `frozen` retains the previous experiment behavior.
+
+Start fresh from the same completed Stage1, NOT the completed Stage2. ViT,
+old slots and reconstruction decoder remain frozen. New slots and the existing
+background separation policy remain trainable. Use unchanged 59400 updates,
+4 GPUs x batch16 x accumulation3 = 192, LR7.5e-5, lambda_seg0.01 and seed0.
+The old slot weights remain invariant but old segmentation outputs need not:
+shared spatial/readout updates can cause forgetting. No new distillation loss
+is added in this controlled ablation. Resume rejects a changed shared policy.
+
+Set `EVALUATE_RECONSTRUCTION=1` for the Stage2 evaluation job: validation-only
+head threshold selection, fixed/calibrated test heads, plus original direct and
+indirect reconstruction Dice at threshold0.02, min_size20/opening_radius1.
+Use the same official-pool 24 test cases; never select thresholds on test.

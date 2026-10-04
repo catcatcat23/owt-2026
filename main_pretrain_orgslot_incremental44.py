@@ -38,6 +38,8 @@ def parser():
     p.add_argument("--stage1_checkpoint", default="")
     p.add_argument("--test_data_path", required=True, help="Only checked for case leakage; never read for training")
     p.add_argument("--background_policy", choices=("frozen", "composition", "separation"), default="separation")
+    p.add_argument("--stage2_shared_segmentation", choices=("frozen", "train"), default="frozen",
+                   help="Train existing pixel decoder and query readout; ViT/reconstruction decoder remain frozen")
     p.add_argument("--lambda_background", type=float, default=0.1)
     p.add_argument("--background_preserve_weight", type=float, default=0.1)
     p.add_argument("--background_lr_scale", type=float, default=0.1)
@@ -200,7 +202,7 @@ def main(args):
         teacher = copy.deepcopy(net).requires_grad_(False).eval().to(device)
         for i, name in enumerate(NEW, 5):
             net.append_slot(name, i, init_from="background")
-        configure_stage2(net, args.background_policy)
+        configure_stage2(net, args.background_policy, args.stage2_shared_segmentation)
         model = Incremental44Objective(net, args)
     model.to(device)
     groups = optim_factory.add_weight_decay(net, args.weight_decay)
@@ -218,6 +220,8 @@ def main(args):
     if args.resume:
         checkpoint = torch.load(args.resume, map_location="cpu")
         saved = checkpoint["args"] if isinstance(checkpoint["args"], dict) else vars(checkpoint["args"])
+        if saved.get("stage2_shared_segmentation", "frozen") != args.stage2_shared_segmentation:
+            raise ValueError("Resume protocol mismatch: stage2_shared_segmentation")
         for key in ("incremental_stage", "background_policy", "train_manifest_sha256", "validation_manifest_sha256", "test_manifest_sha256", "stage1_checkpoint_sha256", "batch_size", "accum_iter", "max_optimizer_updates", "warmup_updates", "lr", "weight_decay", "lambda_seg", "lambda_background", "background_preserve_weight", "background_lr_scale", "teacher_low", "teacher_high", "seg_supervision", "fusion_mode", "fusion_reference_count", "query_refinement", "pixel_pe", "seed", "organ_roi_probability"):
             if saved.get(key) != getattr(args, key, None):
                 raise ValueError("Resume protocol mismatch: " + key)

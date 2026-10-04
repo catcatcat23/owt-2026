@@ -24,3 +24,13 @@ COMMON=(--checkpoint "$CHECKPOINT" --class-map configs/orgslot/common8_offline.j
 "$PYTHON" -m tools.report_incremental44 --stage1 "$STAGE1_TEST/results.json" \
  --stage2 "$OUTPUT_ROOT/test/results.json" > "$OUTPUT_ROOT/stage_comparison.json"
 cat "$OUTPUT_ROOT/stage_comparison.json"
+if [[ "${EVALUATE_RECONSTRUCTION:-0}" == 1 ]]; then
+ "$PYTHON" -m tools.eval_common8_orgslot_reconstruction_threshold \
+  --method orgslot --checkpoint "$CHECKPOINT" --test-csv "$DATA/csv/WORD_Test_2D_native07072.csv" \
+  --preprocess-summary "$DATA/metadata/preprocess_summary.json" --expected-spacing 0.7 0.7 2 \
+  --output-dir "$OUTPUT_ROOT/reconstruction" --class-map configs/orgslot/common8_offline.json \
+  --fusion-mode linear_sqrt --input-size 448 --global-crop-size 448 --batch-size 4 --workers 4 \
+  --threshold 0.02 --min-size 20 --opening-radius 1 --class-ids 1,2,3,4,5,6,7,8 --device cuda
+ "$PYTHON" tools/validate_word_orgslot_resolution_eval.py --eval-dir "$OUTPUT_ROOT/reconstruction" \
+  --expected-input-size 448 --expected-global-crop 448 --expected-spacing 0.7 0.7 2 --expected-cases 24
+fi

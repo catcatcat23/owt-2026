@@ -9,12 +9,18 @@ NEW = ("esophagus", "pancreas", "liver", "stomach")
 BASE = ("background",) + OLD
 
 
-def configure_stage2(model, background_policy):
+def configure_stage2(model, background_policy, shared_segmentation="frozen"):
+    if shared_segmentation not in ("frozen", "train"):
+        raise ValueError("invalid shared segmentation policy")
     if background_policy not in ("frozen", "composition", "separation"):
         raise ValueError("invalid background policy")
     if tuple(model.slot_names) != BASE + NEW:
         raise ValueError("stage2 requires ordered background + old4 + new4")
     model.requires_grad_(False)
+    if shared_segmentation == "train":
+        if model.pixel_query_decoder is None:
+            raise ValueError("shared segmentation training requires pixel_query_decoder")
+        model.pixel_query_decoder.requires_grad_(True)
     for name in NEW:
         slot = model.slot_bank.get_slot(name)
         slot.requires_grad_(True)
@@ -70,6 +76,8 @@ class Incremental44Objective(nn.Module):
         super().train(False)
         # Keep old/shared paths in eval mode as well as freezing parameters.
         if mode:
+            if getattr(self.args, "stage2_shared_segmentation", "frozen") == "train":
+                self.student.pixel_query_decoder.train(True)
             for name in NEW:
                 self.student.slot_bank.get_slot(name).train(True)
             if self.args.background_policy != "frozen":

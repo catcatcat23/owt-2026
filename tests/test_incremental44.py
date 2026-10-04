@@ -126,6 +126,41 @@ class Incremental44Tests(unittest.TestCase):
             self.assertFalse(any(p.requires_grad for p in bg.head.parameters()))
             self.assertEqual(any(p.requires_grad for p in bg.tg_encoder.parameters()), policy != "frozen")
 
+    def test_shared_segmentation_training_gradients_and_frozen_paths(self):
+        torch.manual_seed(9)
+        net = tiny_model(specs=[{"name": n, "raw_class_id": i} for i, n in enumerate(BASE + NEW)],
+                         slot_head_type="arm_e_multiscale_query", slot_head_channels=16,
+                         query_refinement="cross_attn")
+        configure_stage2(net, "separation", "train")
+        args = options()
+        args.stage2_shared_segmentation = "train"
+        objective = Incremental44Objective(net, args).train()
+        self.assertTrue(net.pixel_query_decoder.training)
+        self.assertFalse(net.blocks1.training)
+        frozen = {n: p.detach().clone() for n, p in net.named_parameters() if not p.requires_grad}
+        image = torch.rand(2, 3, 32, 32)
+        masks = {n: torch.zeros(2, 1, 32, 32) for n in NEW}
+        for i, n in enumerate(NEW):
+            masks[n][:, :, 2+6*i:6+6*i, 8:16] = 1
+        probs = {n: torch.zeros_like(masks[NEW[0]]) for n in OLD}
+        loss, _ = objective(image, masks, probs, torch.ones(2, 9, dtype=torch.bool))
+        loss.backward()
+        for name in ("spatial_stem", "pixel_proj", "query_proj", "query_cross_attention"):
+            grads = [p.grad for p in getattr(net.pixel_query_decoder, name).parameters() if p.grad is not None]
+            self.assertTrue(grads, name)
+            self.assertTrue(all(torch.isfinite(g).all() for g in grads), name)
+            self.assertGreater(sum(float(g.abs().sum()) for g in grads), 0, name)
+        torch.optim.AdamW([p for p in net.parameters() if p.requires_grad], lr=1e-3).step()
+        for n, p in net.named_parameters():
+            if n in frozen:
+                self.assertIsNone(p.grad, n)
+                self.assertTrue(torch.equal(p, frozen[n]), n)
+        for n in OLD:
+            self.assertFalse(any(p.requires_grad for p in net.slot_bank.get_slot(n).parameters()))
+        self.assertFalse(any(p.requires_grad for p in net.decoder_blocks.parameters()))
+        configure_stage2(net, "separation")
+        self.assertFalse(any(p.requires_grad for p in net.pixel_query_decoder.parameters()))
+
     def test_tiny_batch_optimization_descends_not_an_overfit_claim(self):
         torch.manual_seed(3)
         net = tiny_model(specs=[{"name": n, "raw_class_id": i} for i, n in enumerate(BASE + NEW)],

@@ -18,7 +18,7 @@ DATA=$NEW_DATA_ROOT/WORD
 RUN_NAME=ArmE_CrossAttn_MAEenc_Official96_${TRAIN_JOB_ID}
 RUN=${TRAIN_RUN:-$EXPERIMENT_WORKDIR/Results/OrganSlotBank/Common8/WORD_2D/$RUN_NAME}
 CHECKPOINT=$("$PYTHON" tools/word_official96_final_checkpoint.py "$RUN")
-"$PYTHON" tools/prepare_word_official96.py validate --plan configs/orgslot/word_official96_seed42.json --output "$NEW_DATA_ROOT"
+"$PYTHON" tools/prepare_word_official96.py validate --plan "${SPLIT_PLAN:-configs/orgslot/word_official96_seed42.json}" --output "$NEW_DATA_ROOT"
 EVAL_ROOT=${EVAL_ROOT:-$EXPERIMENT_WORKDIR/Results/OrganSlotBank/evaluation/Common8/WORD_2D}
 CAL_OUTPUT=$EVAL_ROOT/${RUN_NAME}_heads_validation
 HEAD_OUTPUT=$EVAL_ROOT/${RUN_NAME}_heads_test

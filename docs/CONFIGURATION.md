@@ -192,3 +192,20 @@ Set `EVALUATE_RECONSTRUCTION=1` for the Stage2 evaluation job: validation-only
 head threshold selection, fixed/calibrated test heads, plus original direct and
 indirect reconstruction Dice at threshold0.02, min_size20/opening_radius1.
 Use the same official-pool 24 test cases; never select thresholds on test.
+# Offline split robustness: seeds0/1/42 (2026-10-06)
+
+Only dataset split seed changes. Each samples96 official training cases and24
+test cases from official Val+Ts; remaining26 holdout cases are validation.
+Plans are configs/orgslot/word_official96_seed{0,1,42}.json, generated before
+training without filtering bad cases. Model seed remains0. No WORD checkpoint
+transfer between splits: same AutoPET MAE encoder initialization,118800 updates,
+batch16 x4GPU xaccum3, ROI20, losses/LR unchanged.
+
+`tools.relink_word_official_split` reuses existing preprocessed pixels, rebuilds
+manifests and training ROI index, and validates disjoint cases and all files.
+Set SPLIT_PLAN and NEW_DATA_ROOT for both existing official96 train/eval scripts.
+SPLIT_GPU_PREFLIGHT=1 runs2 fresh DDP updates separately, then discards those
+weights and starts formal training from MAE. Evaluation:26-case validation-only
+threshold calibration,24-case test head fixed/calibrated and recon direct/indirect.
+Report all three splits, not just the best. Test sets overlap, so these are
+split-sensitivity runs, not three independent test cohorts or CV folds.

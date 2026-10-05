@@ -26,19 +26,19 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def make_plan(raw):
+def make_plan(raw, seed=42):
     pools = {s: sorted(p.name[:-7] for p in (raw / ("images" + s)).glob("*.nii.gz"))
              for s in ("Tr", "Val", "Ts")}
     assert {s: len(v) for s, v in pools.items()} == {"Tr": 100, "Val": 20, "Ts": 30}
     assert len(set(sum(pools.values(), []))) == 150
-    train = sorted(random.Random(42).sample(pools["Tr"], 96))
+    train = sorted(random.Random(seed).sample(pools["Tr"], 96))
     holdout = sorted(pools["Val"] + pools["Ts"])
-    test = sorted(random.Random(42).sample(holdout, 24))
+    test = sorted(random.Random(seed).sample(holdout, 24))
     groups = {"Training": train, "Test": test,
               "Validation": sorted(set(holdout) - set(test))}
     origin = {c: s for s, ids in pools.items() for c in ids}
-    return {"dataset": "WORD", "protocol": "official_pool_96_26_24_seed42",
-            "seed": 42, "sampling": "independent random.Random(42).sample on sorted pools",
+    return {"dataset": "WORD", "protocol": "official_pool_96_26_24_seed%d" % seed,
+            "seed": seed, "sampling": "independent random.Random(%d).sample on sorted pools" % seed,
             "official_pools": pools, "unused_train": sorted(set(pools["Tr"]) - set(train)),
             "splits": {s: [{"case_id": c, "official_split": origin[c],
                             "image": "images%s/%s.nii.gz" % (origin[c], c),
@@ -56,7 +56,7 @@ def check_plan(plan):
 
 def build(args):
     plan = json.loads(args.plan.read_text())
-    assert plan == make_plan(args.raw), "Official files or frozen sampling plan changed"
+    assert plan == make_plan(args.raw, plan["seed"]), "Official files or frozen sampling plan changed"
     check_plan(plan)
     if args.output.exists():
         raise FileExistsError("Use a fresh output directory; old protocols are never overwritten")
@@ -155,6 +155,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(__doc__)
     parser.add_argument("stage", choices=("plan", "build", "validate"))
     parser.add_argument("--plan", type=Path, required=True)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--raw", type=Path)
     parser.add_argument("--labels-zip", type=Path)
     parser.add_argument("--old", type=Path)
@@ -163,7 +164,7 @@ if __name__ == "__main__":
     if args.stage == "plan":
         if args.plan.exists():
             raise FileExistsError(args.plan)
-        dump(args.plan, make_plan(args.raw))
+        dump(args.plan, make_plan(args.raw, args.seed))
     elif args.stage == "build":
         build(args)
     else:

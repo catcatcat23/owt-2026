@@ -9,14 +9,17 @@
 set -euo pipefail
 : "${EXPERIMENT_WORKDIR:?}" "${NEW_DATA_ROOT:?}" "${TRAIN_JOB_ID:?}"
 cd "$EXPERIMENT_WORKDIR"
+if [[ -n "${EXPECTED_COMMIT:-}" ]]; then
+ test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+fi
 export ARM_F_TARGET=bolin-sip ARM_F_DIMENSION=2D
 source scripts/orgslot/arm_f_environment.sh
 DATA=$NEW_DATA_ROOT/WORD
 RUN_NAME=ArmE_CrossAttn_MAEenc_Official96_${TRAIN_JOB_ID}
-RUN=$EXPERIMENT_WORKDIR/Results/OrganSlotBank/Common8/WORD_2D/$RUN_NAME
+RUN=${TRAIN_RUN:-$EXPERIMENT_WORKDIR/Results/OrganSlotBank/Common8/WORD_2D/$RUN_NAME}
 CHECKPOINT=$("$PYTHON" tools/word_official96_final_checkpoint.py "$RUN")
 "$PYTHON" tools/prepare_word_official96.py validate --plan configs/orgslot/word_official96_seed42.json --output "$NEW_DATA_ROOT"
-EVAL_ROOT=$EXPERIMENT_WORKDIR/Results/OrganSlotBank/evaluation/Common8/WORD_2D
+EVAL_ROOT=${EVAL_ROOT:-$EXPERIMENT_WORKDIR/Results/OrganSlotBank/evaluation/Common8/WORD_2D}
 CAL_OUTPUT=$EVAL_ROOT/${RUN_NAME}_heads_validation
 HEAD_OUTPUT=$EVAL_ROOT/${RUN_NAME}_heads_test
 RECON_OUTPUT=$EVAL_ROOT/${RUN_NAME}_reconstruction_fixedthr002

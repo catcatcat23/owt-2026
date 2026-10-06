@@ -11,9 +11,12 @@ if __package__ in (None, ""):
 import torch
 
 
-def validate_stage1_completion(checkpoint, budget=59400):
+def validate_stage1_completion(checkpoint, budget=None):
     args = checkpoint.get("args", {})
     args = args if isinstance(args, dict) else vars(args)
+    budget = args.get("max_optimizer_updates") if budget is None else budget
+    if budget not in (59400, 118800):
+        raise ValueError("Unsupported formal incremental budget")
     if args.get("incremental_stage") != "stage1" or args.get("max_optimizer_updates") != budget:
         raise ValueError("Require completed incremental Stage1 at the declared budget")
     steps = [float(s["step"]) for s in checkpoint.get("optimizer", {}).get("state", {}).values() if "step" in s]
@@ -22,10 +25,13 @@ def validate_stage1_completion(checkpoint, budget=59400):
     return args
 
 
-def final_checkpoint(run, budget=59400):
+def final_checkpoint(run, budget=None):
     run = Path(run)
     records = [json.loads(line) for line in (run / "log.txt").read_text().splitlines() if line.strip()]
-    if not records or records[-1].get("optimizer_updates") != budget:
+    if not records:
+        raise ValueError("Empty Stage1 log")
+    budget = records[-1].get("optimizer_updates") if budget is None else budget
+    if budget not in (59400, 118800) or records[-1].get("optimizer_updates") != budget:
         raise ValueError("Stage1 log has not reached its update budget")
     last = records[-1]
     if any(isinstance(v, (int, float)) and not math.isfinite(v) for v in last.values()):

@@ -51,13 +51,13 @@ def parser():
                    batch_size=16, accum_iter=3, num_workers=4, amp_dtype="bf16",
                    seg_loss_type="small_organ", lambda_seg=0.01, lambda_bg_seg=0.0,
                    background_reduction="topk", lr=7.5e-5, organ_roi_aug=True,
-                   max_optimizer_updates=59400, warmup_updates=2970, save_freq=50)
+                   max_optimizer_updates=118800, warmup_updates=5940, save_freq=50)
     return p
 
 
 def load_stage1(path, args):
     checkpoint = torch.load(path, map_location="cpu")
-    validate_stage1_completion(checkpoint)
+    validate_stage1_completion(checkpoint, budget=118800)
     saved = checkpoint.get("args", {})
     saved = saved if isinstance(saved, dict) else vars(saved)
     if saved.get("incremental_stage") != "stage1":

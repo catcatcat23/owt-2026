@@ -1,5 +1,9 @@
 # OrganSlot
 
+2026-10-06 预算更新：新4–4实验 Stage1、Stage2各118800 updates，warmup各5940，
+有效batch192不变；总237600，不再与Offline等总预算。Stage2要求完整预算Stage1。
+历史59400/阶段结果和评估兼容保留，旧运行快照不修改；详见[预算说明](docs/INCREMENTAL_READOUT_ABLATION.md#full-per-stage-budget-revision-2026-10-06)。
+
 2026-10-06：新增 Stage2 **固定空间分支的共享 query 读出微调 / 新旧双读出**对照。
 两组均从同一 Stage1 初始化；配置、冻结边界和验证要求见
 [增量读出对照](docs/INCREMENTAL_READOUT_ABLATION.md)。旧实验默认行为不变。

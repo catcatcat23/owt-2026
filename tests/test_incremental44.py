@@ -99,6 +99,15 @@ class Incremental44Tests(unittest.TestCase):
         checkpoint = {"args": {"incremental_stage": "stage1", "max_optimizer_updates": 59400},
                       "optimizer": {"state": {0: {"step": torch.tensor(59400.)}, 1: {"step": 2000}}}}
         validate_stage1_completion(checkpoint)
+        with self.assertRaises(ValueError):
+            validate_stage1_completion(checkpoint, budget=118800)
+        full = copy.deepcopy(checkpoint)
+        full["args"]["max_optimizer_updates"] = 118800
+        full["optimizer"]["state"][0]["step"] = 118800
+        validate_stage1_completion(full, budget=118800)
+        full["optimizer"]["state"][0]["step"] = 59400
+        with self.assertRaises(ValueError):
+            validate_stage1_completion(full)
         checkpoint["optimizer"]["state"][0]["step"] = 59399
         with self.assertRaises(ValueError):
             validate_stage1_completion(checkpoint)

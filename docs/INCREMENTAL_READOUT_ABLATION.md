@@ -19,7 +19,7 @@ policy remains unchanged: background collector/TGEnc/token_norm/AHER train at
 0.1x LR, background head/calibration freeze. New slots train; calibration freezes.
 
 Both: seed0, AdamW LR7.5e-5, weight decay .05, batch16/GPU x4 xaccum3=192,
-59400 updates, 2970 warmup, spacing .7/.7/2, input448, ROI384/probability.2,
+118800 updates per stage, 5940 warmup (5%), spacing .7/.7/2, input448, ROI384/probability.2,
 retained-slot small-organ segmentation loss lambda .01, background loss .1.
 No new distillation, loss, sampling, PE or reconstruction changes.
 
@@ -108,7 +108,17 @@ revision guard. Export `INCREMENTAL_ARCHITECTURE=sam_soft_aux` for BOTH stages;
 for Stage2 export `STAGE2_SHARED_SEGMENTATION=slot_private` and point STAGE1_RUN
 to THIS recipe's completed Stage1, never to the E Stage1 or an Offline run.
 The launcher defaults remain E cross-attention unless explicitly selected.
-Keep 16/GPU x4 xaccum3=192,59400 updates/stage,ROI20 and existing split/seed.
+Keep 16/GPU x4 xaccum3=192,118800 updates/stage,ROI20 and existing split/seed.
+
+## Full per-stage budget revision (2026-10-06)
+
+Both stages now start fresh with 118800 updates and 5940 warmup updates;
+the existing update-based learning-rate schedule spans the new full budget.
+Peak LR, model, split, losses and sampling remain unchanged. Total training is
+237600 updates, twice the Offline budget; this is NOT an equal-total-compute comparison.
+Stage2 requires a completed 118800-update Stage1, including its two-update preflight.
+Historical 59400-update checkpoints remain evaluable, but cannot initialize new Stage2 runs.
+Replace queued/running chains with new immutable snapshots; retain all old artifacts.
 
 Evaluation loaders create private slot modules BEFORE strict checkpoint load.
 Use the existing Stage1 old-four and Stage2 all-eight head evaluation scripts;

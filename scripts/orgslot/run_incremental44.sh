@@ -9,6 +9,16 @@ case "$stage" in stage1|stage2) ;; *) echo 'Expected stage1 or stage2' >&2; exit
 : "${OUTPUT_DIR:?Use a fresh output directory per stage/background variant}"
 : "${PYTHON_BIN:?Set this account own Python executable}"
 extra=()
+case "${INCREMENTAL_ARCHITECTURE:-e_cross}" in
+ e_cross) ;;
+ sam_soft_aux)
+    extra+=(--slot_head_type arm_f_sam_tail --query_refinement none --hsam_supervision soft_prior_aux)
+    if [[ "$stage" == stage2 ]]; then
+        export STAGE2_SHARED_SEGMENTATION=${STAGE2_SHARED_SEGMENTATION:-slot_private}
+    fi
+    ;;
+ *) echo 'Invalid INCREMENTAL_ARCHITECTURE' >&2; exit 2 ;;
+esac
 if [[ "$stage" == stage1 ]]; then
     : "${MAE_CHECKPOINT:?Set the AutoPET MAE checkpoint, not a WORD checkpoint}"
     : "${LPIPS_STATE:?Set this account LPIPS state file}"

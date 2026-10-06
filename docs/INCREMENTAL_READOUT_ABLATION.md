@@ -40,3 +40,87 @@ old4/new4/all8 Dice, precision/recall and volumes; reconstruction direct/indirec
 raw/post at .02. Binary old-logit invariance does not guarantee invariance of an
 exclusive eight-class merged mask (new predictions can compete with old classes).
 No claim of superiority before final evaluation or matched-protocol comparison.
+
+## SAM-tail: private slot interaction, shared frozen tail
+
+New opt-in recipe `INCREMENTAL_ARCHITECTURE=sam_soft_aux`, Stage2 policy
+`slot_private`. This does NOT replace the submitted E query_shared/query_split
+runs, and is not initialized from the eight-class Offline 85.55 checkpoint.
+
+1. Train a fresh five-slot Stage1 with MAE encoder initialization, shared
+   SAM-tail, soft prior and aux; only old-four labels visible. Shared spatial
+   features, shared refinement and tail learn during Stage1.
+2. Load that completed Stage1 exactly and retain a frozen teacher. Append new
+   slots using the existing background initialization. Copy the trained Stage1
+   `input_proj` and three `TokenBlock`s into EACH slot (old and new). Each block
+   includes cross-attention, existing self-attention, LayerNorms and FFN; do not
+   change the internal block architecture while testing parameter isolation.
+3. Freeze ViT, pixel decoder, old slots and private interactions, the entire
+   shared SAM-tail (mask token, both attention directions, FFN, final MLP), and
+   reconstruction decoder. Train new slots and their own private interactions.
+   Background collector/TGEnc/token_norm/AHER still follow the existing 0.1x-LR
+   separation policy; background interaction/head/calibration remain frozen.
+
+The spatial decoder and tail are NOT copied. Each organ uses the same spatial
+maps and the same frozen tail with different private refined tokens. The old
+shared projection/blocks remain as frozen checkpoint-compatible templates but
+are not used for slot head inference after migration. Background also has an
+unused frozen copy for uniform checkpoint routing. Stage2 migration is tested
+to preserve all head and coarse logits before any update.
+
+At encoder width768 / interaction width128, each private interaction is
+892,928 parameters (three complete TokenBlocks, not E's single-query block).
+New4 adds3,571,712 trainable interaction parameters. Migration materializes nine
+copies including background:8,036,352 stored parameters, of which old/background
+copies freeze; the legacy shared template also remains frozen. Do not confuse
+these numbers with E's232,704-parameter query-only readout.
+
+Soft prior is independently calculated per organ and per scale, not a learned
+shared mask and not a new network. Preserve the Offline formula:
+
+```
+x = input_proj_c(tokens_c) + slot_identity_c
+for feature, block_c in [(P16, block16_c), (P8, block8_c), (P4, block4_c)]:
+    coarse = sqrt(C) * cosine(mean(x), feature)
+    attention_bias = log(0.2 + 0.8 * sigmoid(coarse.detach()))
+    x = block_c(x, feature, PE, attention_bias)
+mask = frozen_shared_SAM_tail(x, original_P4, PE)
+```
+
+The prior formula is identical across slots; its values come from each slot's
+own tokens and interaction weights. Do NOT pass this prior to the tail or add
+M0-M3 hard routing. Three coarse logits are upsampled to full-resolution GT;
+each uses the existing small-organ loss. Stage2 supervises ONLY new labels:
+
+`L = Lrecon + .01 * (Lfinal_new + .25 * mean(L16_new,L8_new,L4_new)) + .1 * Lbgsep`.
+
+Frozen tail must remain differentiable with respect to tokens (no no_grad or
+detach around its forward). Only the prior routing detaches. Tests separately
+check final-mask gradients reach private projection through the frozen tail,
+in addition to auxiliary-loss gradients. Metrics keep a fixed DDP schema even
+if one rank retains no new foreground slots.
+
+### Running the recipe
+
+Reuse the existing pinned Stage1/Stage2 Slurm scripts and account-specific data
+paths. Before submission commit/push, create immutable runtime, and pass the
+revision guard. Export `INCREMENTAL_ARCHITECTURE=sam_soft_aux` for BOTH stages;
+for Stage2 export `STAGE2_SHARED_SEGMENTATION=slot_private` and point STAGE1_RUN
+to THIS recipe's completed Stage1, never to the E Stage1 or an Offline run.
+The launcher defaults remain E cross-attention unless explicitly selected.
+Keep 16/GPU x4 xaccum3=192,59400 updates/stage,ROI20 and existing split/seed.
+
+Evaluation loaders create private slot modules BEFORE strict checkpoint load.
+Use the existing Stage1 old-four and Stage2 all-eight head evaluation scripts;
+enable `EVALUATE_RECONSTRUCTION=1` for Stage2. Compare new4 learning, old4 binary
+retention, final merged-mask competition, and reconstruction separately.
+This run tests whether private interaction can work through a frozen tail;
+failure alone would not prove the tail is the bottleneck (frozen P4 and slot
+representation also remain possible constraints).
+
+Verification (2026-10-06):30 CPU tests passed across incremental44, private SAM
+interaction, soft prior, H-SAM supervision, ArmF and all-seg regression suites.
+Includes final-mask gradients through frozen tail, old-logit invariance, strict
+evaluator reload, fixed empty-rank metric schema and tiny-batch loss descent
+(not a full overfit or GPU-validation claim). CLI and shell syntax checks pass.
+GPU preflight and full training are NOT yet submitted for this new recipe.

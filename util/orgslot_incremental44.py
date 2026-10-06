@@ -12,6 +12,36 @@ BASE = ("background",) + OLD
 READOUT_MODULES = ("query_norm", "query_proj", "query_cross_attention")
 
 
+def validate_incremental_architecture(args):
+    """Reject accidental mixing of the E and SAM-tail protocols."""
+    get = args.get if isinstance(args, dict) else lambda k, d=None: getattr(args, k, d)
+    signature = (get("slot_head_type"), get("query_refinement"), get("hsam_supervision", "none"))
+    if signature not in (("arm_e_multiscale_query", "cross_attn", "none"),
+                         ("arm_f_sam_tail", "none", "soft_prior_aux")):
+        raise ValueError("Unsupported incremental architecture: " + str(signature))
+    return signature[0]
+
+
+class SlotTokenInteraction(nn.Module):
+    """No pixel decoder, tail or extra prior network; copies trained Stage1 blocks."""
+    def __init__(self, decoder):
+        super().__init__()
+        self.input_proj = copy.deepcopy(decoder.input_proj)
+        self.blocks = copy.deepcopy(decoder.blocks)
+
+
+def install_slot_interactions(model):
+    from ArmFDecoder import ArmFDecoder
+    decoder = model.pixel_query_decoder
+    if not isinstance(decoder, ArmFDecoder) or decoder.readout != "sam_tail" or \
+            len(decoder.grid_size) != 2 or getattr(decoder, "hsam_supervision", "none") != "soft_prior_aux":
+        raise ValueError("Slot interactions require 2D SAM-tail soft_prior_aux")
+    if any(hasattr(model.slot_bank.get_slot(n), "interaction") for n in model.slot_names):
+        raise ValueError("Slot interactions already installed")
+    for name in model.slot_names:
+        model.slot_bank.get_slot(name).interaction = SlotTokenInteraction(decoder)
+
+
 class StageQueryReadout(nn.Module):
     """Stage-private query-only copy; shares the unchanged P4 and mask formula."""
     def __init__(self, decoder):
@@ -38,12 +68,17 @@ def install_stage_readout(model):
 
 
 def configure_stage2(model, background_policy, shared_segmentation="frozen"):
-    if shared_segmentation not in ("frozen", "train", "query_shared", "query_split"):
+    if shared_segmentation not in ("frozen", "train", "query_shared", "query_split", "slot_private"):
         raise ValueError("invalid shared segmentation policy")
     if background_policy not in ("frozen", "composition", "separation"):
         raise ValueError("invalid background policy")
     if tuple(model.slot_names) != BASE + NEW:
         raise ValueError("stage2 requires ordered background + old4 + new4")
+    if shared_segmentation == "slot_private":
+        if not all(hasattr(model.slot_bank.get_slot(n), "interaction") for n in model.slot_names):
+            install_slot_interactions(model)
+    elif any(hasattr(model.slot_bank.get_slot(n), "interaction") for n in model.slot_names):
+        raise ValueError("Private interactions require slot_private policy")
     if shared_segmentation == "query_split" and not hasattr(model, "new_stage_readout"):
         install_stage_readout(model)
     if shared_segmentation != "query_split" and hasattr(model, "new_stage_readout"):
@@ -123,7 +158,10 @@ class Incremental44Objective(nn.Module):
             for name in NEW:
                 self.student.slot_bank.get_slot(name).train(True)
             if self.args.background_policy != "frozen":
-                self.student.slot_bank.get_slot("background").train(True)
+                background = self.student.slot_bank.get_slot("background")
+                background.train(True)
+                if hasattr(background, "interaction"):
+                    background.interaction.eval()
         return self
 
     def forward(self, image, masks, old_probs, keep):
@@ -156,12 +194,23 @@ class Incremental44Objective(nn.Module):
             separation = region_mse(bg, torch.zeros_like(image), foreground)
             separation = separation + args.background_preserve_weight * region_mse(
                 bg, image, regions["background"])
-        loss = recon + args.lambda_seg * seg + args.lambda_background * separation
+        aux = seg * 0
+        aux_stats = {}
+        if getattr(args, "hsam_supervision", "none") == "soft_prior_aux":
+            from hsam_supervision import coarse_segmentation_loss
+            aux, _ = coarse_segmentation_loss(
+                {n: out["coarse_logits"][n] for n in NEW}, masks, NEW,
+                seg_keep, args, diagnostics=aux_stats)
+        loss = recon + args.lambda_seg * (seg + 0.25 * aux) + args.lambda_background * separation
         stats = {"loss": loss.detach(), "reconstruction": recon.detach(),
                  "segmentation": seg.detach(), "background_separation": separation.detach(),
                  "valid_fraction": valid.float().mean(),
                  "background_fraction": regions["background"].float().mean(),
                  "ignored_fraction": (~valid).float().mean()}
+        if getattr(args, "hsam_supervision", "none") == "soft_prior_aux":
+            stats.update({"coarse_segmentation": aux.detach(),
+                          "weighted_coarse_segmentation": args.lambda_seg * 0.25 * aux.detach(),
+                          **aux_stats})
         for i, name in enumerate(NEW):
             stats["seg_" + name] = per_slot[name].detach()
             stats["supervised_" + name] = seg_keep[:, i].float().sum()

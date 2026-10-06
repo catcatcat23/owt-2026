@@ -666,11 +666,14 @@ class OrganSlot(nn.Module):
             "query_dot", "multi_query_dot", "arm_e_multiscale_query", "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_f_reverse_dot_p2", "arm_f_reverse_dot_p2_softmask", "arm_f_sam_tail", "arm_e_multiscale_query_3d"
         ):
             raise RuntimeError("forward_query_head requires a query slot")
+        interaction_args = ({"interaction": self.interaction}
+                            if hasattr(self, "interaction") else {})
         raw_logits = decoder.forward_mask(
             pixel_features,
             tokens,
             self.head.embedding,
             output_size,
+            **interaction_args,
         )
         if isinstance(raw_logits, tuple):
             raw_logits, coarse = raw_logits

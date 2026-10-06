@@ -1,4 +1,4 @@
-"""E cross-attention + MAE encoder: label-incremental 4+4 training.
+"""E cross-attention or SAM-tail soft-prior+aux: MAE encoder 4+4 training.
 
 Separate entry point; never accepts an all-eight-organ WORD initialization.
 """
@@ -19,7 +19,7 @@ from util.label_visibility import load_visibility_config, assert_case_splits_dis
 from util.mae_transfer import load_mae_transfer_checkpoint
 from util.checkpoint_orgslot import hash_frozen_parameters, compare_parameter_hashes
 from tools.incremental44_final_checkpoint import validate_stage1_completion
-from util.orgslot_incremental44 import BASE, OLD, NEW, configure_stage2, Incremental44Objective
+from util.orgslot_incremental44 import BASE, OLD, NEW, configure_stage2, Incremental44Objective, validate_incremental_architecture
 from main_pretrain_orgslot_common8_a100 import (
     get_args_parser, _build_dataset, _model_args, _seed_worker, _sha256, _write_provenance,
 )
@@ -38,8 +38,8 @@ def parser():
     p.add_argument("--stage1_checkpoint", default="")
     p.add_argument("--test_data_path", required=True, help="Only checked for case leakage; never read for training")
     p.add_argument("--background_policy", choices=("frozen", "composition", "separation"), default="separation")
-    p.add_argument("--stage2_shared_segmentation", choices=("frozen", "train", "query_shared", "query_split"), default="frozen",
-                   help="train opens spatial+query; query_shared/split freeze P4 and train shared/new-stage query readout")
+    p.add_argument("--stage2_shared_segmentation", choices=("frozen", "train", "query_shared", "query_split", "slot_private"), default="frozen",
+                   help="train opens spatial+query; query_shared/split train E readout; slot_private trains per-slot SAM multiscale interaction")
     p.add_argument("--lambda_background", type=float, default=0.1)
     p.add_argument("--background_preserve_weight", type=float, default=0.1)
     p.add_argument("--background_lr_scale", type=float, default=0.1)
@@ -62,6 +62,9 @@ def load_stage1(path, args):
     saved = saved if isinstance(saved, dict) else vars(saved)
     if saved.get("incremental_stage") != "stage1":
         raise ValueError("Require an incremental44 stage1 checkpoint, not an offline WORD model")
+    validate_incremental_architecture(saved)
+    if saved.get("hsam_supervision", "none") != args.hsam_supervision:
+        raise ValueError("Stage1 auxiliary-supervision mismatch")
     for key in ("input_size", "token_factor", "slot_tg_depth", "slot_head_type",
                 "slot_head_channels", "query_refinement", "pixel_pe", "fusion_mode",
                 "fusion_reference_count", "seed"):
@@ -114,8 +117,14 @@ def train_stage2(model, teacher, loader, optimizer, device, epoch, scaler, args)
 
 
 def main(args):
-    if args.dimension != "2D" or args.slot_head_type != "arm_e_multiscale_query" or args.query_refinement != "cross_attn":
-        raise ValueError("This controlled baseline is 2D E cross-attention only")
+    head = validate_incremental_architecture(args)
+    if args.dimension != "2D":
+        raise ValueError("Incremental44 currently supports 2D only")
+    if args.incremental_stage == "stage2":
+        if head == "arm_f_sam_tail" and args.stage2_shared_segmentation != "slot_private":
+            raise ValueError("SAM-tail Stage2 requires frozen shared tail and slot_private interactions")
+        if head != "arm_f_sam_tail" and args.stage2_shared_segmentation == "slot_private":
+            raise ValueError("slot_private requires SAM-tail")
     if args.init_checkpoint or args.mae_init_scope != "encoder":
         raise ValueError("Only MAE encoder initialization is permitted")
     if args.seg_loss_type != "small_organ" or args.lambda_bg_seg != 0 or args.training_scope != "reconstruction":
@@ -124,7 +133,7 @@ def main(args):
         raise ValueError("Use unit tests for tiny/debug data; formal manifests must not be truncated")
     if args.lr is None or args.lr <= 0 or args.clip_grad <= 0:
         raise ValueError("Require positive explicit LR and gradient clipping")
-    if args.lambda_collector_attention or args.hsam_supervision != "none" or args.positive_roi_loss_weight:
+    if args.lambda_collector_attention or args.positive_roi_loss_weight:
         raise ValueError("Additional offline ablations are not part of incremental44")
     if args.resume and args.start_epoch:
         raise ValueError("Resume derives start_epoch from checkpoint")
@@ -222,7 +231,9 @@ def main(args):
         saved = checkpoint["args"] if isinstance(checkpoint["args"], dict) else vars(checkpoint["args"])
         if saved.get("stage2_shared_segmentation", "frozen") != args.stage2_shared_segmentation:
             raise ValueError("Resume protocol mismatch: stage2_shared_segmentation")
-        for key in ("incremental_stage", "background_policy", "train_manifest_sha256", "validation_manifest_sha256", "test_manifest_sha256", "stage1_checkpoint_sha256", "batch_size", "accum_iter", "max_optimizer_updates", "warmup_updates", "lr", "weight_decay", "lambda_seg", "lambda_background", "background_preserve_weight", "background_lr_scale", "teacher_low", "teacher_high", "seg_supervision", "fusion_mode", "fusion_reference_count", "query_refinement", "pixel_pe", "seed", "organ_roi_probability"):
+        if saved.get("hsam_supervision", "none") != args.hsam_supervision:
+            raise ValueError("Resume protocol mismatch: hsam_supervision")
+        for key in ("incremental_stage", "slot_head_type", "background_policy", "train_manifest_sha256", "validation_manifest_sha256", "test_manifest_sha256", "stage1_checkpoint_sha256", "batch_size", "accum_iter", "max_optimizer_updates", "warmup_updates", "lr", "weight_decay", "lambda_seg", "lambda_background", "background_preserve_weight", "background_lr_scale", "teacher_low", "teacher_high", "seg_supervision", "fusion_mode", "fusion_reference_count", "query_refinement", "pixel_pe", "seed", "organ_roi_probability"):
             if saved.get(key) != getattr(args, key, None):
                 raise ValueError("Resume protocol mismatch: " + key)
         misc.load_model(args, net, optimizer, scaler)

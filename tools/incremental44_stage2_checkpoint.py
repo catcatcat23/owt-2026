@@ -2,7 +2,11 @@
 import argparse
 import json
 import math
+import sys
 from pathlib import Path
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import torch
 
@@ -19,8 +23,11 @@ def final_checkpoint(run):
     args = state["args"]
     args = args if isinstance(args, dict) else vars(args)
     expected = {"incremental_stage": "stage2", "max_optimizer_updates": 59400,
-                "slot_head_type": "arm_e_multiscale_query", "query_refinement": "cross_attn",
                 "mae_init_scope": "encoder", "background_policy": "separation"}
+    from util.orgslot_incremental44 import validate_incremental_architecture
+    head = validate_incremental_architecture(args)
+    if head == "arm_f_sam_tail" and args.get("stage2_shared_segmentation") != "slot_private":
+        raise ValueError("Unexpected SAM-tail Stage2 policy")
     if any(args.get(k) != v for k, v in expected.items()) or state["epoch"] != last["epoch"]:
         raise ValueError("Unexpected Stage2 checkpoint configuration/epoch")
     steps = [float(s["step"]) for s in state["optimizer"]["state"].values() if "step" in s]

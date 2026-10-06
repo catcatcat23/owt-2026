@@ -4,6 +4,10 @@
 两组均从同一 Stage1 初始化；配置、冻结边界和验证要求见
 [增量读出对照](docs/INCREMENTAL_READOUT_ABLATION.md)。旧实验默认行为不变。
 
+新增可选 SAM-tail 增量配置：`INCREMENTAL_ARCHITECTURE=sam_soft_aux`，Stage2
+`slot_private`。每slot独立投影和三尺度token交互，soft prior＋aux不变，空间分支和
+共享tail冻结。需独立训练旧四类Stage1，不能使用八类Offline权重；详见同一[设计文档](docs/INCREMENTAL_READOUT_ABLATION.md#sam-tail-private-slot-interaction-shared-frozen-tail)。尚未提交该组GPU任务。
+
 4–4评估统一报告Offline、Stage1、Stage2的Old/New/All及逐器官Dice；
 Stage1未见新类记NA，背景单列。汇总工具`python -m tools.report_incremental44`，
 结果、遗忘量与PCDD协议差异见[统一报告](docs/RESULTS.md#44统一报告offline--stage1--stage2)。

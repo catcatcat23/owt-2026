@@ -201,6 +201,9 @@ def build_model(
     if method == "orgslot" and checkpoint_value(checkpoint, "stage2_shared_segmentation", "frozen") == "query_split":
         from util.orgslot_incremental44 import install_stage_readout
         install_stage_readout(model)
+    if method == "orgslot" and checkpoint_value(checkpoint, "stage2_shared_segmentation", "frozen") == "slot_private" and checkpoint_value(checkpoint, "incremental_stage") == "stage2":
+        from util.orgslot_incremental44 import install_slot_interactions
+        install_slot_interactions(model)
     full_state = checkpoint["model"]
     state = {
         key: value

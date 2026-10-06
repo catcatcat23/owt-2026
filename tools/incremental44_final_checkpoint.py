@@ -2,7 +2,11 @@
 import argparse
 import json
 import math
+import sys
 from pathlib import Path
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import torch
 
@@ -31,7 +35,9 @@ def final_checkpoint(run, budget=59400):
     args = validate_stage1_completion(checkpoint, budget)
     if checkpoint["epoch"] != last["epoch"]:
         raise ValueError("Checkpoint/log epoch mismatch")
-    if (args.get("slot_head_type"), args.get("query_refinement"), args.get("mae_init_scope")) != ("arm_e_multiscale_query", "cross_attn", "encoder"):
+    from util.orgslot_incremental44 import validate_incremental_architecture
+    validate_incremental_architecture(args)
+    if args.get("mae_init_scope") != "encoder":
         raise ValueError("Unexpected Stage1 architecture/initialization")
     for name, tensor in checkpoint["model"].items():
         if tensor.is_floating_point() and not torch.isfinite(tensor).all():

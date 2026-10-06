@@ -203,17 +203,24 @@ class ArmFDecoder(nn.Module):
             maps = [p.reshape(batch, time, self.channels, *p.shape[-2:]).permute(0, 2, 1, 3, 4) for p in maps]
         return maps
 
-    def forward_mask(self, maps, tokens, slot_identity, output_size):
+    def forward_mask(self, maps, tokens, slot_identity, output_size, interaction=None):
+        # Only token projection/refinement may be slot-private. Pixels and tail
+        # remain owned once by this decoder (including the final mask MLP).
+        if interaction is not None and (self.readout != "sam_tail" or
+                getattr(self, "hsam_supervision", "none") != "soft_prior_aux"):
+            raise ValueError("Private interaction requires SAM-tail soft_prior_aux")
+        input_proj = self.input_proj if interaction is None else interaction.input_proj
+        blocks = self.blocks if interaction is None else interaction.blocks
         # Local FP32 attention/FFN for the older cluster PyTorch builds.
         with torch.autocast(device_type=tokens.device.type, enabled=False):
-            x = self.input_proj(tokens.float()) + slot_identity.float()[None, None, :]
+            x = input_proj(tokens.float()) + slot_identity.float()[None, None, :]
             m2f = getattr(self, "hsam_supervision", "none") == "m2f_hard"
             stage_masks = []
             soft_prior = getattr(self, "hsam_supervision", "none") in ("soft_prior", "soft_prior_aux")
             if m2f:
                 shared_p4 = maps[2].float().flatten(2).transpose(1, 2)
                 stage_masks.append(self.stage_mask(x, shared_p4, maps[2].shape[2:]))
-            for block, feature in zip(self.blocks, maps):
+            for block, feature in zip(blocks, maps):
                 memory = feature.float().flatten(2).transpose(1, 2)
                 pe = position_encoding(feature.shape[2:], self.channels, feature.device)
                 bias = None

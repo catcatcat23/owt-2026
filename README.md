@@ -1,5 +1,9 @@
 # OrganSlot
 
+2026-10-06：新增 Stage2 **固定空间分支的共享 query 读出微调 / 新旧双读出**对照。
+两组均从同一 Stage1 初始化；配置、冻结边界和验证要求见
+[增量读出对照](docs/INCREMENTAL_READOUT_ABLATION.md)。旧实验默认行为不变。
+
 4–4评估统一报告Offline、Stage1、Stage2的Old/New/All及逐器官Dice；
 Stage1未见新类记NA，背景单列。汇总工具`python -m tools.report_incremental44`，
 结果、遗忘量与PCDD协议差异见[统一报告](docs/RESULTS.md#44统一报告offline--stage1--stage2)。

@@ -38,8 +38,8 @@ def parser():
     p.add_argument("--stage1_checkpoint", default="")
     p.add_argument("--test_data_path", required=True, help="Only checked for case leakage; never read for training")
     p.add_argument("--background_policy", choices=("frozen", "composition", "separation"), default="separation")
-    p.add_argument("--stage2_shared_segmentation", choices=("frozen", "train"), default="frozen",
-                   help="Train existing pixel decoder and query readout; ViT/reconstruction decoder remain frozen")
+    p.add_argument("--stage2_shared_segmentation", choices=("frozen", "train", "query_shared", "query_split"), default="frozen",
+                   help="train opens spatial+query; query_shared/split freeze P4 and train shared/new-stage query readout")
     p.add_argument("--lambda_background", type=float, default=0.1)
     p.add_argument("--background_preserve_weight", type=float, default=0.1)
     p.add_argument("--background_lr_scale", type=float, default=0.1)

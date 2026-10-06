@@ -362,7 +362,9 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                             ([p.index_select(0, active_head_rows) for p in pixel_features]
                              if isinstance(pixel_features, list) else
                              pixel_features.index_select(0, active_head_rows)),
-                            self.pixel_query_decoder,
+                            (self.new_stage_readout
+                             if name in getattr(self, "new_stage_readout_slots", ())
+                             else self.pixel_query_decoder),
                             output_size,
                         )
                         active_raw, active_calibrated = head_result[:2]

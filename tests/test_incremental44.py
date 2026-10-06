@@ -1,4 +1,8 @@
 from types import SimpleNamespace
+import copy
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 import unittest
 
 import torch
@@ -22,6 +26,75 @@ def options(policy="separation"):
 
 
 class Incremental44Tests(unittest.TestCase):
+    def test_query_shared_vs_split_routing_gradients_and_checkpoint(self):
+        torch.manual_seed(19)
+        initial = tiny_model(specs=[{"name": n, "raw_class_id": i} for i, n in enumerate(BASE + NEW)],
+                             slot_head_type="arm_e_multiscale_query", slot_head_channels=16,
+                             query_refinement="cross_attn").eval()
+        image = torch.rand(2, 3, 32, 32)
+        with torch.no_grad():
+            reference = initial(image, decode_reconstruction=False)["slot_logits"]
+        for policy in ("query_shared", "query_split"):
+            net = copy.deepcopy(initial)
+            configure_stage2(net, "separation", policy)
+            args = options()
+            args.stage2_shared_segmentation = policy
+            objective = Incremental44Objective(net, args).train()
+            self.assertFalse(net.pixel_query_decoder.spatial_stem.training)
+            with torch.no_grad():
+                same = net(image, decode_reconstruction=False)["slot_logits"]
+            for n in OLD + NEW:
+                torch.testing.assert_close(same[n], reference[n], atol=0, rtol=0)
+            frozen = {n: p.detach().clone() for n, p in net.named_parameters() if not p.requires_grad}
+            masks = {n: torch.zeros(2, 1, 32, 32) for n in NEW}
+            for i, n in enumerate(NEW):
+                masks[n][:, :, 2+6*i:6+6*i, 8:16] = 1
+            probs = {n: torch.zeros_like(masks[NEW[0]]) for n in OLD}
+            optimizer = torch.optim.AdamW([p for p in net.parameters() if p.requires_grad], lr=1e-3)
+            loss, _ = objective(image, masks, probs, torch.ones(2, 9, dtype=torch.bool))
+            loss.backward()
+            readout = net.new_stage_readout if policy == "query_split" else net.pixel_query_decoder
+            for name in ("query_norm", "query_proj", "query_cross_attention"):
+                grads = [p.grad for p in getattr(readout, name).parameters() if p.grad is not None]
+                self.assertTrue(grads, (policy, name))
+                self.assertTrue(all(torch.isfinite(g).all() for g in grads))
+                self.assertGreater(sum(float(g.abs().sum()) for g in grads), 0)
+            optimizer.step()
+            for n, p in net.named_parameters():
+                if n in frozen:
+                    self.assertIsNone(p.grad, n)
+                    self.assertTrue(torch.equal(p, frozen[n]), n)
+            net.eval()
+            with torch.no_grad():
+                after = net(image, decode_reconstruction=False)["slot_logits"]
+            if policy == "query_split":
+                for n in OLD:
+                    torch.testing.assert_close(after[n], reference[n], atol=0, rtol=0)
+            else:
+                self.assertTrue(any(not torch.equal(after[n], reference[n]) for n in OLD))
+            restored = copy.deepcopy(initial)
+            configure_stage2(restored, "separation", policy)
+            restored.load_state_dict(net.state_dict(), strict=True)
+            restored.eval()
+            with torch.no_grad():
+                roundtrip = restored(image, decode_reconstruction=False)["slot_logits"]
+            for n in OLD + NEW:
+                torch.testing.assert_close(after[n], roundtrip[n], atol=0, rtol=0)
+            # Exercise the actual shared head/reconstruction evaluator loader.
+            from tools.eval_common8_orgslot_reconstruction_threshold import build_model
+            with tempfile.TemporaryDirectory() as folder:
+                path = Path(folder) / "checkpoint.pth"
+                torch.save({"model": net.state_dict(), "epoch": 0,
+                            "args": {"input_size": 32, "stage2_shared_segmentation": policy}}, path)
+                with patch("tools.eval_common8_orgslot_reconstruction_threshold.build_orgslot",
+                           return_value=copy.deepcopy(initial)):
+                    evaluated, _ = build_model("orgslot", path, [], 32, "linear_sqrt")
+                evaluated.eval()
+                with torch.no_grad():
+                    evaluated_logits = evaluated(image, decode_reconstruction=False)["slot_logits"]
+                for n in OLD + NEW:
+                    torch.testing.assert_close(after[n], evaluated_logits[n], atol=0, rtol=0)
+
     def test_stage1_completion_guard(self):
         checkpoint = {"args": {"incremental_stage": "stage1", "max_optimizer_updates": 59400},
                       "optimizer": {"state": {0: {"step": torch.tensor(59400.)}, 1: {"step": 2000}}}}

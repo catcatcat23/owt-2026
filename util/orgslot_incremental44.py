@@ -1,4 +1,5 @@
 """4+4 mechanics, deliberately separate from the offline/Common8 trainer."""
+import copy
 import torch
 from torch import nn
 
@@ -8,19 +9,55 @@ OLD = ("spleen", "right_kidney", "left_kidney", "gallbladder")
 NEW = ("esophagus", "pancreas", "liver", "stomach")
 BASE = ("background",) + OLD
 
+READOUT_MODULES = ("query_norm", "query_proj", "query_cross_attention")
+
+
+class StageQueryReadout(nn.Module):
+    """Stage-private query-only copy; shares the unchanged P4 and mask formula."""
+    def __init__(self, decoder):
+        super().__init__()
+        from OrganSlotEmbed import MultiScalePixelQueryDecoder2D
+        if not isinstance(decoder, MultiScalePixelQueryDecoder2D) or decoder.query_refinement != "cross_attn":
+            raise ValueError("Stage readout requires 2D Arm E cross-attention")
+        self.channels = decoder.channels
+        for name in READOUT_MODULES:
+            setattr(self, name, copy.deepcopy(getattr(decoder, name)))
+
+    def forward_mask(self, pixel_features, tokens, slot_identity, output_size):
+        from OrganSlotEmbed import MultiScalePixelQueryDecoder2D
+        query = self.query_proj(self.query_norm(tokens).mean(dim=1)) + slot_identity.unsqueeze(0)
+        query, _ = self.query_cross_attention(query, pixel_features)
+        return MultiScalePixelQueryDecoder2D.forward_mask_from_query(self, pixel_features, query, output_size)
+
+
+def install_stage_readout(model):
+    if hasattr(model, "new_stage_readout"):
+        raise ValueError("Stage readout already installed")
+    model.new_stage_readout = StageQueryReadout(model.pixel_query_decoder)
+    model.new_stage_readout_slots = NEW
+
 
 def configure_stage2(model, background_policy, shared_segmentation="frozen"):
-    if shared_segmentation not in ("frozen", "train"):
+    if shared_segmentation not in ("frozen", "train", "query_shared", "query_split"):
         raise ValueError("invalid shared segmentation policy")
     if background_policy not in ("frozen", "composition", "separation"):
         raise ValueError("invalid background policy")
     if tuple(model.slot_names) != BASE + NEW:
         raise ValueError("stage2 requires ordered background + old4 + new4")
+    if shared_segmentation == "query_split" and not hasattr(model, "new_stage_readout"):
+        install_stage_readout(model)
+    if shared_segmentation != "query_split" and hasattr(model, "new_stage_readout"):
+        raise ValueError("Cannot reuse split-readout model for a different policy")
     model.requires_grad_(False)
     if shared_segmentation == "train":
         if model.pixel_query_decoder is None:
             raise ValueError("shared segmentation training requires pixel_query_decoder")
         model.pixel_query_decoder.requires_grad_(True)
+    elif shared_segmentation == "query_shared":
+        for name in READOUT_MODULES:
+            getattr(model.pixel_query_decoder, name).requires_grad_(True)
+    elif shared_segmentation == "query_split":
+        model.new_stage_readout.requires_grad_(True)
     for name in NEW:
         slot = model.slot_bank.get_slot(name)
         slot.requires_grad_(True)
@@ -78,6 +115,11 @@ class Incremental44Objective(nn.Module):
         if mode:
             if getattr(self.args, "stage2_shared_segmentation", "frozen") == "train":
                 self.student.pixel_query_decoder.train(True)
+            elif getattr(self.args, "stage2_shared_segmentation", "frozen") == "query_shared":
+                for name in READOUT_MODULES:
+                    getattr(self.student.pixel_query_decoder, name).train(True)
+            elif getattr(self.args, "stage2_shared_segmentation", "frozen") == "query_split":
+                self.student.new_stage_readout.train(True)
             for name in NEW:
                 self.student.slot_bank.get_slot(name).train(True)
             if self.args.background_policy != "frozen":

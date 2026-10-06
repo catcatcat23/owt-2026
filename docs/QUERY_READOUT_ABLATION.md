@@ -1,5 +1,56 @@
 # Controlled query/readout ablation
 
+## 当前架构导航（2026-10-06）
+
+本节为后续工作入口；以下历史实验记录保留，不代表仍需继续全部路线。
+
+用户确认仅保留三个主线配置：E cross_attn、SAM-tail soft_prior_aux、
+SAM-tail downsample_gt。其余配置的指标、实验目的、训练预算及比较限制保留为消融记录；
+下文提及none、soft_prior、upsample_logits等仅为解释历史对照，不是新增主线。
+当前本地/远端仅main、feature/orgslot、experiment/psem、experiment/lossbalance四个分支，
+无需再删除OrganSlot实验分支。历史detached worktree不是分支，不在分支清理中删除。
+
+共同路径：CT → ViT z；每器官 Collector → TGEnc → token_norm → 20 tokens。
+重建路径保持 tokens → AHER → canvas融合 → 共享重建decoder。
+空间路径为 CT浅层CNN跳接 + z → 共享多尺度pixel decoder → P16/P8/P4。
+448输入时P4为112×112（边长1/4、面积1/16），不是边长1/16。
+
+### E：简单读出与单query交互
+
+`slot_head_type=arm_e_multiscale_query`。
+20 tokens → query_norm → mean pool → query_proj + slot identity → query。
+`query_refinement=none`直接query·P4；`cross_attn`先query读取P4，经交互FFN再点积。
+最终logits上采样到输入尺寸。E没有F的20-token P16→P8→P4逐尺度refinement。
+
+### SAM-tail：保留两条明确区分的配置
+
+共同head为`arm_f_sam_tail`，20 tokens经投影+identity，依次读取P16/P8/P4；
+之后SAM-tail使用专用mask token、双向交互及最终回读，mask-token MLP生成
+动态权重，与tail更新后的像素特征点积，最后上采样。
+
+1. **soft prior**：`hsam_supervision=soft_prior`或`soft_prior_aux`。
+   每次读取前，以当前tokens的归一化均值与该尺度归一化pixels点积乘sqrt(C)，
+   得到粗logits。`gate=0.2+0.8*sigmoid(detach(logits))`，将`log(gate)`加入
+   token→pixel attention logits。aux版本对三张粗预测加监督；路由先验detach，
+   粗预测本身仍通过aux获得梯度。此模式不会把粗mask传入tail的prior参数。
+2. **两阶段粗到精mask**：`hsam_supervision=downsample_gt`或`upsample_logits`。
+   完成多尺度refinement后，用tokens与P4点积得到coarse mask；其sigmoid传给
+   SAM-tail作为prior，再输出final mask。两个配置分别采用缩小GT或上采样粗logits
+   的辅助监督。这里“两阶段”指一次forward内的两级解码，不是增量Stage1/Stage2，
+   也不是分两次训练。
+
+两条路线使用互斥枚举；合并soft prior与tail粗mask引导需要新的受控实验，现有
+`soft_prior_aux`不能冒充二者组合。`none`保留为SAM-tail无引导对照。
+
+### 增量与历史兼容边界
+
+当前E Stage2保留query_shared/query_split；SAM私有交互增量只支持soft_prior_aux，
+尚不支持两阶段粗mask配置的slot_private版本。冻结范围及118800/阶段预算见
+[增量设计](INCREMENTAL_READOUT_ABLATION.md)。不能仅切换枚举就声称完成对应增量实验。
+
+其它F读出、P2、hard-mask等仅保留历史加载/复现，不删除原始checkpoint及指标。
+本次仅收敛文档入口，不改模型forward、state_dict、训练配置或运行快照。
+
 ## P4 Reverse-Dot batch16 correction (2026-09-20)
 
 Replace baseline2955011/2955012 and lambda_seg0.03 chain2964744/2964745.

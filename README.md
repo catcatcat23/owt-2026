@@ -1,5 +1,21 @@
 # OrganSlot
 
+## 当前保留的架构入口（2026-10-06）
+
+后续主线收敛为 **E** 与 **SAM-tail** 两个系列；统一配置映射与路径见
+[架构导航](docs/QUERY_READOUT_ABLATION.md#当前架构导航2026-10-06)。
+
+| 系列 | 配置 | 用途 |
+|---|---|---|
+| E cross-attention | `arm_e_multiscale_query`，`query_refinement=cross_attn` | E主线 |
+| SAM-tail soft prior＋aux | `arm_f_sam_tail`，`hsam_supervision=soft_prior_aux` | 多尺度软引导和辅助监督 |
+| SAM-tail 两阶段mask预测 | `arm_f_sam_tail`，`hsam_supervision=downsample_gt` | 粗mask引导tail、最终精mask；缩小GT监督 |
+
+仅上述三个配置作为后续主线。E无cross-attention、SAM-tail无引导/无aux/上采样监督，
+以及历史F Linear/Query-Dot/Reverse-Dot/P2、硬mask等
+保留加载与复现兼容，但不作为后续主线入口。此整理不删除权重、结果或代码，
+不修改任何在运行/排队的快照。soft prior与两阶段tail引导目前是不同模式，不能同时选择。
+
 2026-10-06 预算更新：新4–4实验 Stage1、Stage2各118800 updates，warmup各5940，
 有效batch192不变；总237600，不再与Offline等总预算。Stage2要求完整预算Stage1。
 历史59400/阶段结果和评估兼容保留，旧运行快照不修改；详见[预算说明](docs/INCREMENTAL_READOUT_ABLATION.md#full-per-stage-budget-revision-2026-10-06)。

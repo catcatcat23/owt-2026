@@ -2,8 +2,8 @@
 
 共享ViT＋器官独立tokens＋共享空间分支的分割/重建框架。后续仅保留以下三个2D主线配置。
 架构图为按代码绘制的AI生成示意图，PNG供GitHub预览，PDF供下载；不是SAM/H-SAM官方复刻。
-使用内置image_gen生成（工具未提供image2.5版本选择）；[提示词记录](docs/figures/generation_prompts.json)。
-PDF是嵌入原始PNG的图片版，非可编辑矢量；图中CT/mask仅为示意，不是实验可视化结果。
+使用内置image_gen生成（工具未提供image2.5版本选择）；[重绘提示词记录](docs/figures/redraw_prompts.json)。
+采用纯白、柔和配色、英文短标签的扁平矢量风格；文件本身仍是栅格图，PDF非可编辑矢量。
 
 ## 三个配置的正式指标
 
@@ -45,6 +45,7 @@ PCDD Offline85.47%、4–4增量83.42%只是不同协议的外部参考，不是
 
 以下为Offline联合训练结构。每个器官独立Collector/TGEnc/AHER；共享ViT、浅层CNN、
 pixel decoder、读出和重建decoder。448输入下P16/P8/P4边长28/56/112；P4边长1/4、面积1/16。
+SAM图重点展开分割decoder，共用的ViT、Collector和重建路径省略处与E一致，未删除模块。
 
 ### 1. E cross-attention
 
@@ -56,6 +57,13 @@ pixel decoder、读出和重建decoder。448输入下P16/P8/P4边长28/56/112；
 20 tokens经query_norm、mean pool、query_proj及slot identity变成1个query；读取P4，经FFN后
 与原P4点积生成mask。没有20-token逐尺度交互，也没有SAM-tail。
 代码：[OrganSlotEmbed.py](OrganSlotEmbed.py)的`MultiScalePixelQueryDecoder2D`。
+
+启动配置（先执行下方公共环境准备，再用公共`sbatch`命令提交）：
+
+```bash
+export HSAM_SUPERVISION=none
+TRAIN_SCRIPT=slurm/orgslot/train/arm_e_crossattn_mae_encoder.sbatch
+```
 
 ### 2. SAM-tail＋soft prior＋aux
 
@@ -71,6 +79,13 @@ pixel decoder、读出和重建decoder。448输入下P16/P8/P4边长28/56/112；
 **此模式不会将粗mask传入tail内部作为prior**。
 分割目标：`0.01 × (L_final + 0.25 × mean(L_P16,L_P8,L_P4))`。
 
+启动配置：
+
+```bash
+export HSAM_SUPERVISION=soft_prior_aux
+TRAIN_SCRIPT=slurm/orgslot/train/sam_tail_soft_prior.sbatch
+```
+
 ### 3. SAM-tail＋两阶段mask、缩小GT监督
 
 ![SAM两阶段mask与缩小GT监督架构](docs/figures/architecture_sam_downsample_gt.png)
@@ -85,6 +100,13 @@ GT最近邻缩小后监督粗mask；其sigmoid概率不detach，门控SAM-tail�
 监控`hsam_lost_positive_slices`，检查缩小GT是否丢失小阳性区域。
 这里“两阶段”是**一次forward中的粗到精解码**，不是增量训练Stage1/Stage2。
 实现：[ArmFDecoder.py](ArmFDecoder.py)、[hsam_supervision.py](hsam_supervision.py)。
+
+启动配置：
+
+```bash
+export HSAM_SUPERVISION=downsample_gt
+TRAIN_SCRIPT=slurm/orgslot/train/arm_f_sam_tail_hsam.sbatch
+```
 
 | 差异 | E cross | SAM soft prior＋aux | SAM 缩小GT |
 |---|---|---|---|

@@ -9,13 +9,17 @@
 set -euo pipefail
 : "${EXPERIMENT_WORKDIR:?}" "${EXPECTED_COMMIT:?}" "${NEW_DATA_ROOT:?}" "${RUN_ROOT:?}"
 cd "$EXPERIMENT_WORKDIR"
-test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
-test -z "$(git status --porcelain --untracked-files=normal)"
-export ARM_F_TARGET=bolin-sip ARM_F_DIMENSION=2D
+if [[ -e .git ]]; then
+ test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+ test -z "$(git status --porcelain --untracked-files=normal)"
+else
+ test "$(<SOURCE_COMMIT)" = "$EXPECTED_COMMIT"
+fi
+export ARM_F_TARGET=${ARM_F_TARGET:-bolin-sip} ARM_F_DIMENSION=2D
 source scripts/orgslot/arm_f_environment.sh
 export PYTHON_BIN="$PYTHON" PYTHONUNBUFFERED=1 OMP_NUM_THREADS=1
 export WORD_ROOT="$NEW_DATA_ROOT/WORD"
-export MAE_CHECKPOINT=/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/orgslot_autopet_mae/Results/AutoPET_MAE/MAE_LA6D8_224_M75_U100K_seed0/checkpoint-final.pth
+export MAE_CHECKPOINT=${MAE_CHECKPOINT:-/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/orgslot_autopet_mae/Results/AutoPET_MAE/MAE_LA6D8_224_M75_U100K_seed0/checkpoint-final.pth}
 test -s "$WORD_ROOT/metadata/READY.json"
 test -s "$LPIPS_STATE"
 printf '0b3571a3e79095686a0b12649735a298aaeb8a0b3bb93a47f3484439ac4a1ec6  %s\n' "$MAE_CHECKPOINT" | sha256sum -c -

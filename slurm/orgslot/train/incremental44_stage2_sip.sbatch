@@ -9,9 +9,13 @@
 set -euo pipefail
 : "${EXPERIMENT_WORKDIR:?}" "${EXPECTED_COMMIT:?}" "${NEW_DATA_ROOT:?}" "${RUN_ROOT:?}" "${STAGE1_RUN:?}"
 cd "$EXPERIMENT_WORKDIR"
-test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
-test -z "$(git status --porcelain --untracked-files=normal)"
-export ARM_F_TARGET=bolin-sip ARM_F_DIMENSION=2D
+if [[ -e .git ]]; then
+ test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+ test -z "$(git status --porcelain --untracked-files=normal)"
+else
+ test "$(<SOURCE_COMMIT)" = "$EXPECTED_COMMIT"
+fi
+export ARM_F_TARGET=${ARM_F_TARGET:-bolin-sip} ARM_F_DIMENSION=2D
 source scripts/orgslot/arm_f_environment.sh
 export PYTHON_BIN="$PYTHON" PYTHONUNBUFFERED=1 OMP_NUM_THREADS=1
 export WORD_ROOT="$NEW_DATA_ROOT/WORD"

@@ -67,13 +67,52 @@ def install_stage_readout(model):
     model.new_stage_readout_slots = NEW
 
 
-def configure_stage2(model, background_policy, shared_segmentation="frozen"):
+def validate_readout_adapter(args):
+    get = args.get if isinstance(args, dict) else lambda k, d=None: getattr(args, k, d)
+    mode = get("stage2_readout_adapter", "none")
+    if mode not in ("none", "residual16"):
+        raise ValueError("Unknown Stage2 readout adapter")
+    if mode != "none" and (
+            get("incremental_stage") != "stage2" or
+            get("stage2_shared_segmentation") != "slot_private" or
+            get("slot_head_type") != "arm_f_sam_tail" or
+            get("hsam_supervision", "none") != "soft_prior_aux"):
+        raise ValueError("Readout adapter requires Stage2 SAM soft_prior_aux + slot_private")
+    return mode
+
+
+def install_stage_mask_adapter(model):
+    """One stage-shared residual mask-weight adapter; old organs bypass it."""
+    from ArmFDecoder import ArmFDecoder
+    decoder = model.pixel_query_decoder
+    if (not isinstance(decoder, ArmFDecoder) or decoder.readout != "sam_tail" or
+            len(decoder.grid_size) != 2 or
+            getattr(decoder, "hsam_supervision", "none") != "soft_prior_aux" or
+            tuple(model.slot_names) != BASE + NEW):
+        raise ValueError("Readout adapter requires expanded 2D SAM soft_prior_aux")
+    if hasattr(model, "new_stage_mask_adapter"):
+        raise ValueError("Readout adapter already installed")
+    with torch.random.fork_rng(devices=[]):
+        adapter = nn.Sequential(nn.Linear(decoder.channels, 16), nn.GELU(),
+                                nn.Linear(16, decoder.channels))
+        nn.init.zeros_(adapter[-1].weight)
+        nn.init.zeros_(adapter[-1].bias)
+    model.new_stage_mask_adapter = adapter
+    model.new_stage_mask_adapter_slots = NEW
+
+
+def configure_stage2(model, background_policy, shared_segmentation="frozen",
+                     readout_adapter="none"):
     if shared_segmentation not in ("frozen", "train", "query_shared", "query_split", "slot_private"):
         raise ValueError("invalid shared segmentation policy")
     if background_policy not in ("frozen", "composition", "separation"):
         raise ValueError("invalid background policy")
     if tuple(model.slot_names) != BASE + NEW:
         raise ValueError("stage2 requires ordered background + old4 + new4")
+    validate_readout_adapter({"stage2_readout_adapter": readout_adapter,
+        "incremental_stage": "stage2", "stage2_shared_segmentation": shared_segmentation,
+        "slot_head_type": model.slot_bank.get_slot(NEW[0]).head_type,
+        "hsam_supervision": getattr(model.pixel_query_decoder, "hsam_supervision", "none")})
     if shared_segmentation == "slot_private":
         if not all(hasattr(model.slot_bank.get_slot(n), "interaction") for n in model.slot_names):
             install_slot_interactions(model)
@@ -83,7 +122,13 @@ def configure_stage2(model, background_policy, shared_segmentation="frozen"):
         install_stage_readout(model)
     if shared_segmentation != "query_split" and hasattr(model, "new_stage_readout"):
         raise ValueError("Cannot reuse split-readout model for a different policy")
+    if readout_adapter == "residual16" and not hasattr(model, "new_stage_mask_adapter"):
+        install_stage_mask_adapter(model)
+    if readout_adapter == "none" and hasattr(model, "new_stage_mask_adapter"):
+        raise ValueError("Cannot disable an installed readout adapter")
     model.requires_grad_(False)
+    if readout_adapter == "residual16":
+        model.new_stage_mask_adapter.requires_grad_(True)
     if shared_segmentation == "train":
         if model.pixel_query_decoder is None:
             raise ValueError("shared segmentation training requires pixel_query_decoder")
@@ -148,6 +193,8 @@ class Incremental44Objective(nn.Module):
         super().train(False)
         # Keep old/shared paths in eval mode as well as freezing parameters.
         if mode:
+            if hasattr(self.student, "new_stage_mask_adapter"):
+                self.student.new_stage_mask_adapter.train(True)
             if getattr(self.args, "stage2_shared_segmentation", "frozen") == "train":
                 self.student.pixel_query_decoder.train(True)
             elif getattr(self.args, "stage2_shared_segmentation", "frozen") == "query_shared":

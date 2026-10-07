@@ -366,6 +366,9 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                              if name in getattr(self, "new_stage_readout_slots", ())
                              else self.pixel_query_decoder),
                             output_size,
+                            readout_adapter=(self.new_stage_mask_adapter
+                                if name in getattr(self, "new_stage_mask_adapter_slots", ())
+                                else None),
                         )
                         active_raw, active_calibrated = head_result[:2]
                         if len(head_result) == 3:

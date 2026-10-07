@@ -11,13 +11,13 @@ from test_orgslot_model import tiny_model
 from test_incremental44 import options
 from util.orgslot_incremental44 import (
     BASE, OLD, NEW, configure_stage2, Incremental44Objective,
-    install_slot_interactions, validate_incremental_architecture,
+    install_slot_interactions, validate_incremental_architecture, validate_readout_adapter,
 )
 
 
-def model():
+def model(channels=16):
     net = tiny_model(specs=[{"name": n, "raw_class_id": i} for i, n in enumerate(BASE)],
-                     slot_head_type="arm_f_sam_tail", slot_head_channels=16)
+                     slot_head_type="arm_f_sam_tail", slot_head_channels=channels)
     net.pixel_query_decoder.configure_mask_supervision("soft_prior_aux")
     return net
 
@@ -38,6 +38,12 @@ class PrivateInteractionTests(unittest.TestCase):
         torch.set_num_threads(1)
 
     def test_private_stage2_gradients_old_invariance_and_evaluator(self):
+        self.check_stage2("none")
+
+    def test_readout_adapter_gradients_old_invariance_and_evaluator(self):
+        self.check_stage2("residual16")
+
+    def check_stage2(self, adapter_mode):
         torch.manual_seed(6)
         net = model().eval()
         image = torch.rand(2, 3, 32, 32)
@@ -48,7 +54,15 @@ class PrivateInteractionTests(unittest.TestCase):
         shared = copy.deepcopy(net).eval()
         with torch.no_grad():
             original = shared(image, decode_reconstruction=False)
-        configure_stage2(net, "separation", "slot_private")
+        rng = torch.get_rng_state().clone()
+        configure_stage2(net, "separation", "slot_private", adapter_mode)
+        self.assertTrue(torch.equal(rng, torch.get_rng_state()))
+        if adapter_mode == "residual16":
+            self.assertEqual(net.new_stage_mask_adapter_slots, NEW)
+            self.assertTrue(torch.equal(net.new_stage_mask_adapter[-1].weight,
+                                        torch.zeros_like(net.new_stage_mask_adapter[-1].weight)))
+        else:
+            self.assertFalse(hasattr(net, "new_stage_mask_adapter"))
         objective = Incremental44Objective(net, args_for_test()).train()
         self.assertFalse(net.pixel_query_decoder.training)
         self.assertFalse(net.pixel_query_decoder.sam_tail.training)
@@ -75,6 +89,8 @@ class PrivateInteractionTests(unittest.TestCase):
         torch.testing.assert_close(loss.detach(), stats["reconstruction"] + .01 *
             stats["segmentation"] + stats["weighted_coarse_segmentation"] + .1 * stats["background_separation"])
         loss.backward()
+        if adapter_mode == "residual16":
+            self.assertGreater(float(net.new_stage_mask_adapter[-1].weight.grad.abs().sum()), 0)
         for n in NEW:
             interaction = net.slot_bank.get_slot(n).interaction
             for module in (interaction.input_proj, *interaction.blocks):
@@ -101,16 +117,34 @@ class PrivateInteractionTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(grad).all())
         self.assertGreater(float(grad.abs().sum()), 0)
         self.assertTrue(all(p.grad is None for p in net.pixel_query_decoder.sam_tail.parameters()))
+        if adapter_mode == "residual16":
+            for p in net.new_stage_mask_adapter.parameters():
+                self.assertIsNotNone(p.grad)
+                self.assertTrue(torch.isfinite(p.grad).all())
+            # A nonzero learned residual must not affect old heads or reconstruction.
+            with torch.no_grad():
+                before = net(image)
+                net.new_stage_mask_adapter[-1].bias.add_(1.)
+                perturbed = net(image)
+            for n in OLD:
+                torch.testing.assert_close(before["slot_logits"][n], perturbed["slot_logits"][n], atol=0, rtol=0)
+            torch.testing.assert_close(before["slot_logits"]["background"], perturbed["slot_logits"]["background"], atol=0, rtol=0)
+            torch.testing.assert_close(before["reconstruction"], perturbed["reconstruction"], atol=0, rtol=0)
+            self.assertFalse(torch.equal(before["slot_logits"][NEW[0]], perturbed["slot_logits"][NEW[0]]))
+            with torch.no_grad():
+                after = net(image, decode_reconstruction=False)["slot_logits"]
         from tools.eval_common8_orgslot_reconstruction_threshold import build_model
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "checkpoint.pth"
             torch.save({"model": net.state_dict(), "epoch": 0, "args": {
                 "input_size": 32, "incremental_stage": "stage2",
                 "slot_head_type": "arm_f_sam_tail", "hsam_supervision": "soft_prior_aux",
-                "stage2_shared_segmentation": "slot_private"}}, path)
+                "stage2_shared_segmentation": "slot_private",
+                **({"stage2_readout_adapter": adapter_mode} if adapter_mode != "none" else {})}}, path)
             with patch("tools.eval_common8_orgslot_reconstruction_threshold.build_orgslot", return_value=shared):
                 restored, report = build_model("orgslot", path, [], 32, "linear_sqrt")
             self.assertTrue(report["exact"])
+            self.assertEqual(report["stage2_readout_adapter"], adapter_mode)
             restored.eval()
             with torch.no_grad():
                 prediction = restored(image, decode_reconstruction=False)["slot_logits"]
@@ -137,6 +171,26 @@ class PrivateInteractionTests(unittest.TestCase):
         self.assertEqual(set(empty), set(full))
         self.assertEqual(float(empty["coarse_segmentation"]), 0)
         self.assertTrue(torch.isfinite(loss))
+
+    def test_adapter_size_and_configuration_guards(self):
+        net = model(channels=128)
+        for i, n in enumerate(NEW, 5):
+            net.append_slot(n, i)
+        configure_stage2(net, "separation", "slot_private", "residual16")
+        self.assertEqual(sum(p.numel() for p in net.new_stage_mask_adapter.parameters()), 4240)
+        with self.assertRaises(ValueError):
+            configure_stage2(net, "separation", "slot_private", "none")
+        valid = {"incremental_stage": "stage2", "stage2_shared_segmentation": "slot_private",
+                 "slot_head_type": "arm_f_sam_tail", "hsam_supervision": "soft_prior_aux",
+                 "stage2_readout_adapter": "residual16"}
+        self.assertEqual(validate_readout_adapter(valid), "residual16")
+        for key, value in (("incremental_stage", "stage1"),
+                           ("stage2_shared_segmentation", "query_split"),
+                           ("slot_head_type", "arm_e_multiscale_query"),
+                           ("hsam_supervision", "none"),
+                           ("stage2_readout_adapter", "typo")):
+            with self.assertRaises(ValueError):
+                validate_readout_adapter({**valid, key: value})
 
     def test_reject_incompatible_architecture(self):
         validate_incremental_architecture({"slot_head_type": "arm_e_multiscale_query", "query_refinement": "cross_attn"})

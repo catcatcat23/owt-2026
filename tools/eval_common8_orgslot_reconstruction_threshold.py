@@ -204,6 +204,15 @@ def build_model(
     if method == "orgslot" and checkpoint_value(checkpoint, "stage2_shared_segmentation", "frozen") == "slot_private" and checkpoint_value(checkpoint, "incremental_stage") == "stage2":
         from util.orgslot_incremental44 import install_slot_interactions
         install_slot_interactions(model)
+    from util.orgslot_incremental44 import validate_readout_adapter, install_stage_mask_adapter
+    adapter_mode = validate_readout_adapter({k: checkpoint_value(checkpoint, k, default) for k, default in (
+        ("stage2_readout_adapter", "none"), ("incremental_stage", None),
+        ("stage2_shared_segmentation", "frozen"), ("slot_head_type", None),
+        ("hsam_supervision", "none"))})
+    if adapter_mode != "none":
+        if method != "orgslot":
+            raise ValueError("Readout adapter requires OrganSlot")
+        install_stage_mask_adapter(model)
     full_state = checkpoint["model"]
     state = {
         key: value
@@ -214,6 +223,7 @@ def build_model(
     if result.missing_keys or result.unexpected_keys:
         raise RuntimeError("checkpoint load was not exact: {}".format(result))
     report = {
+        "stage2_readout_adapter": adapter_mode,
         "epoch": int(checkpoint.get("epoch", -1)),
         "optimizer_updates": int(checkpoint.get("optimizer_updates", -1)),
         "checkpoint_tensor_count": len(full_state),

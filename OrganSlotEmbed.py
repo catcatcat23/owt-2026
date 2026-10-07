@@ -661,13 +661,16 @@ class OrganSlot(nn.Module):
         )
         return raw_logits, calibrated_logits
 
-    def forward_query_head(self, tokens, pixel_features, decoder, output_size):
+    def forward_query_head(self, tokens, pixel_features, decoder, output_size,
+                           readout_adapter=None):
         if self.head_type not in (
             "query_dot", "multi_query_dot", "arm_e_multiscale_query", "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_f_reverse_dot_p2", "arm_f_reverse_dot_p2_softmask", "arm_f_sam_tail", "arm_e_multiscale_query_3d"
         ):
             raise RuntimeError("forward_query_head requires a query slot")
         interaction_args = ({"interaction": self.interaction}
                             if hasattr(self, "interaction") else {})
+        if readout_adapter is not None:
+            interaction_args["readout_adapter"] = readout_adapter
         raw_logits = decoder.forward_mask(
             pixel_features,
             tokens,

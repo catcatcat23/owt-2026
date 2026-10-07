@@ -38,6 +38,8 @@ def parser():
     p.add_argument("--stage1_checkpoint", default="")
     p.add_argument("--test_data_path", required=True, help="Only checked for case leakage; never read for training")
     p.add_argument("--background_policy", choices=("frozen", "composition", "separation"), default="separation")
+    p.add_argument("--stage2_readout_adapter", choices=("none", "residual16"), default="none",
+                   help="Stage2 SAM slot_private only: stage-shared residual mask-weight adapter")
     p.add_argument("--stage2_shared_segmentation", choices=("frozen", "train", "query_shared", "query_split", "slot_private"), default="frozen",
                    help="train opens spatial+query; query_shared/split train E readout; slot_private trains per-slot SAM multiscale interaction")
     p.add_argument("--lambda_background", type=float, default=0.1)
@@ -118,6 +120,8 @@ def train_stage2(model, teacher, loader, optimizer, device, epoch, scaler, args)
 
 def main(args):
     head = validate_incremental_architecture(args)
+    from util.orgslot_incremental44 import validate_readout_adapter
+    validate_readout_adapter(args)
     if args.dimension != "2D":
         raise ValueError("Incremental44 currently supports 2D only")
     if args.incremental_stage == "stage2":
@@ -211,7 +215,8 @@ def main(args):
         teacher = copy.deepcopy(net).requires_grad_(False).eval().to(device)
         for i, name in enumerate(NEW, 5):
             net.append_slot(name, i, init_from="background")
-        configure_stage2(net, args.background_policy, args.stage2_shared_segmentation)
+        configure_stage2(net, args.background_policy, args.stage2_shared_segmentation,
+                         args.stage2_readout_adapter)
         model = Incremental44Objective(net, args)
     model.to(device)
     groups = optim_factory.add_weight_decay(net, args.weight_decay)
@@ -229,6 +234,8 @@ def main(args):
     if args.resume:
         checkpoint = torch.load(args.resume, map_location="cpu")
         saved = checkpoint["args"] if isinstance(checkpoint["args"], dict) else vars(checkpoint["args"])
+        if saved.get("stage2_readout_adapter", "none") != args.stage2_readout_adapter:
+            raise ValueError("Resume protocol mismatch: stage2_readout_adapter")
         if saved.get("stage2_shared_segmentation", "frozen") != args.stage2_shared_segmentation:
             raise ValueError("Resume protocol mismatch: stage2_shared_segmentation")
         if saved.get("hsam_supervision", "none") != args.hsam_supervision:

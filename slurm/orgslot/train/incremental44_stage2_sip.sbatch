@@ -26,6 +26,7 @@ STAGE1_CHECKPOINT=$("$PYTHON_BIN" tools/incremental44_final_checkpoint.py "$STAG
 export STAGE1_CHECKPOINT
 sha256sum "$STAGE1_CHECKPOINT"
 mkdir -p "$RUN_ROOT"
+if [[ "${STAGE2_GPU_PREFLIGHT:-1}" == 1 ]]; then
 export OUTPUT_DIR="$RUN_ROOT/stage2_preflight_${SLURM_JOB_ID}"
 bash scripts/orgslot/run_incremental44.sh stage2 --max_optimizer_updates 2 --warmup_updates 0 --no_save
 "$PYTHON_BIN" - "$OUTPUT_DIR/log.txt" <<'PY_CHECK'
@@ -35,6 +36,7 @@ assert record['optimizer_updates'] == 2, record
 assert all(not isinstance(v, (int, float)) or math.isfinite(v) for v in record.values()), record
 print('STAGE2_GPU_DDP_PREFLIGHT_PASSED', flush=True)
 PY_CHECK
+fi
 # Discard the preflight weights and initialize again from the exact Stage1.
 export OUTPUT_DIR="$RUN_ROOT/stage2_${BACKGROUND_POLICY}_${SLURM_JOB_ID}"
 bash scripts/orgslot/run_incremental44.sh stage2 --save_freq 10

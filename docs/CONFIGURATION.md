@@ -237,3 +237,29 @@ weights and starts formal training from MAE. Evaluation:26-case validation-only
 threshold calibration,24-case test head fixed/calibrated and recon direct/indirect.
 Report all three splits, not just the best. Test sets overlap, so these are
 split-sensitivity runs, not three independent test cohorts or CV folds.
+# Stage2 SAM 私有交互叠加读出 adapter（可选，尚无训练结果）
+
+保持 `sam_soft_aux` / `slot_private` 不变，新增
+`--stage2_readout_adapter residual16`，默认 `none` 完全保留旧行为。
+在共享 SAM-tail 的最后 mask token 上计算：
+`w = frozen_mask_mlp(m) + stage_adapter(m)`，再与 tail 更新后的 pixels 点积。
+adapter 为 `Linear(128,16) -> GELU -> Linear(16,128)`，4240参数，
+四个新器官共享一套，只有食管、胰腺、肝、胃启用；旧四类及背景绕过。
+最后一层权重/偏置零初始化；不改变空间分支、soft prior、aux、重建和采样。
+共享tail参数冻结但保留输入梯度；原新slots、背景策略及私有交互照常训练。
+
+已配置本账号数据/环境和同一Stage1 checkpoint后，可使用：
+
+```bash
+INCREMENTAL_ARCHITECTURE=sam_soft_aux \
+STAGE2_SHARED_SEGMENTATION=slot_private \
+STAGE2_READOUT_ADAPTER=residual16 \
+bash scripts/orgslot/run_incremental44.sh stage2
+```
+
+基线将 `STAGE2_READOUT_ADAPTER` 设为 `none`，其余保持相同。
+仅支持Stage2、2D SAM `soft_prior_aux`、`slot_private`；E/Stage1拒绝开启。
+resume核验开关一致，不能将旧Stage2续训改成新实验；正式对照从同一Stage1开始。
+统一head/reconstruction evaluator依据checkpoint参数安装adapter并strict加载。
+旧checkpoint缺少此配置时按`none`处理。提交前仍须commit/push和不可变runtime检查；
+不得修改当前排队/运行的 `inc44_full_4656f1e` 源码。

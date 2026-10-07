@@ -25,7 +25,8 @@ def final_checkpoint(run, budget=None):
     args = args if isinstance(args, dict) else vars(args)
     expected = {"incremental_stage": "stage2", "max_optimizer_updates": budget,
                 "mae_init_scope": "encoder", "background_policy": "separation"}
-    from util.orgslot_incremental44 import validate_incremental_architecture
+    from util.orgslot_incremental44 import validate_incremental_architecture, validate_readout_adapter
+    validate_readout_adapter(args)
     head = validate_incremental_architecture(args)
     if head == "arm_f_sam_tail" and args.get("stage2_shared_segmentation") != "slot_private":
         raise ValueError("Unexpected SAM-tail Stage2 policy")

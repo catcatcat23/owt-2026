@@ -84,7 +84,7 @@ class SAMStyleMaskTail(nn.Module):
             nn.Linear(channels, channels), nn.GELU(),
             nn.Linear(channels, channels))
 
-    def forward(self, tokens, pixels, pixel_pe, prior=None):
+    def forward(self, tokens, pixels, pixel_pe, prior=None, readout_adapter=None):
         tokens = torch.cat((self.mask_token.expand(tokens.shape[0], -1, -1), tokens), dim=1)
         # Fixed sparse input reference, NOT geometric coordinates for organ tokens.
         token_reference = tokens
@@ -102,6 +102,8 @@ class SAMStyleMaskTail(nn.Module):
             self.final_token_to_pixel, tokens + token_reference,
             pixels + pixel_pe, pixels, prior))
         weights = self.mask_mlp(tokens[:, 0])
+        if readout_adapter is not None:
+            weights = weights + readout_adapter(tokens[:, 0])
         # Ordinary dynamic dot product, not the historical cosine readout.
         return torch.bmm(pixels, weights.unsqueeze(-1))
 
@@ -203,7 +205,10 @@ class ArmFDecoder(nn.Module):
             maps = [p.reshape(batch, time, self.channels, *p.shape[-2:]).permute(0, 2, 1, 3, 4) for p in maps]
         return maps
 
-    def forward_mask(self, maps, tokens, slot_identity, output_size, interaction=None):
+    def forward_mask(self, maps, tokens, slot_identity, output_size, interaction=None,
+                     readout_adapter=None):
+        if readout_adapter is not None and self.readout != "sam_tail":
+            raise ValueError("Readout adapter requires SAM-tail")
         # Only token projection/refinement may be slot-private. Pixels and tail
         # remain owned once by this decoder (including the final mask MLP).
         if interaction is not None and (self.readout != "sam_tail" or
@@ -265,7 +270,8 @@ class ArmFDecoder(nn.Module):
                 if combined or getattr(self, "hsam_supervision", "none") in ("downsample_gt", "upsample_logits"):
                     coarse = self.dot_readout(p, x)
                 logits = self.sam_tail(x, p, pe,
-                    prior=None if coarse is None else coarse.sigmoid())
+                    prior=None if coarse is None else coarse.sigmoid(),
+                    readout_adapter=readout_adapter)
             elif self.readout == "query_dot":
                 logits = self.dot_readout(p, x)
             else:

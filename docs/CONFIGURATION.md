@@ -18,8 +18,8 @@ tail coarse不detach，经sigmoid作为tail的V gate；三层prior路由detach�
 第二组prior预测自身仍接受辅助loss梯度。没有新增参数，不改变旧head行为。
 
 启动入口：`slurm/orgslot/train/arm_f_sam_tail_hsam.sbatch`，设置上述HSAM_SUPERVISION；
-仍自动加载AutoPET MAE encoder，并在同一GPU任务内做2 updates有限值DDP检查，
-之后正式训练从MAE重新初始化，不从preflight续训。
+仍自动加载AutoPET MAE encoder；按用户要求直接正式训练，不运行GPU smoke/preflight。
+CPU回归与数据/权重身份核验已完成，不代表GPU验证已通过。
 评估入口：`slurm/orgslot/eval/sam_tail_guided.sbatch`，checkpoint802，
 训练前6000切片校准＋原24测试病例固定/校准head＋recon；与历史基线口径一致，
 校准不是独立验证集，须披露。不要混入official96的新划分排名。

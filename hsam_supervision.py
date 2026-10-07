@@ -8,6 +8,23 @@ def stage_weight(epoch):
     return 0.6 ** (0.990 ** epoch)
 
 
+def combined_coarse_losses(logits, targets, names, keep, args, diagnostics):
+    """Tail coarse: nearest-GT loss; optional pre-read priors: full-GT loss."""
+    from copy import copy
+    stage_args = copy(args)
+    stage_args.hsam_supervision = "downsample_gt"
+    coarse, lost = coarse_segmentation_loss(
+        {name: value[0] for name, value in logits.items()},
+        targets, names, keep, stage_args)
+    aux = coarse.new_zeros(())
+    if args.hsam_supervision == "downsample_gt_soft_prior_aux":
+        stage_args.hsam_supervision = "soft_prior_aux"
+        aux, _ = coarse_segmentation_loss(
+            {name: value[1:] for name, value in logits.items()},
+            targets, names, keep, stage_args, diagnostics)
+    return coarse, lost, aux
+
+
 def coarse_segmentation_loss(logits, targets, names, keep, args, diagnostics=None):
     # TGR can produce a background-only rank while peers retain foreground.
     # Establish the metric schema before the legal empty-prediction return.

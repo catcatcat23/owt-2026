@@ -1,5 +1,33 @@
 # 统一配置与部署契约
 
+## 2026-10-07：缩小GT与soft prior的组合对照
+
+基线是旧24病例协议的SAM-tail＋MAE encoder＋`downsample_gt`（不是增量实验）。
+两组保持WORD07072、448/ROI384、ROI概率0.2、seed0、每卡16×4卡×累积3=192、
+118800 updates、warmup5940、small-organ loss和lambda_seg0.01不变。
+
+| 配置 | 多尺度读取前soft prior | tail前coarse监督 | prior辅助监督 |
+|---|---|---|---|
+| `downsample_gt_soft_prior` | 有，detach的log(0.2+0.8sigmoid)偏置 | nearest缩小GT | 无 |
+| `downsample_gt_soft_prior_aux` | 同左 | 同左 | 三层logits上采样后对全分辨率GT监督，平均后权重0.25 |
+
+两组均为 `Lrec + LPIPS + .01*(w*Lfinal + (1-w)*Lcoarse + .25*Lprior)`，
+第一组Lprior=0；w=0.6^(0.990^epoch)，沿用缩小GT基线调度。
+注意最后一层读取前P4 prior与读取后tail coarse是不同张量。
+tail coarse不detach，经sigmoid作为tail的V gate；三层prior路由detach，
+第二组prior预测自身仍接受辅助loss梯度。没有新增参数，不改变旧head行为。
+
+启动入口：`slurm/orgslot/train/arm_f_sam_tail_hsam.sbatch`，设置上述HSAM_SUPERVISION；
+仍自动加载AutoPET MAE encoder，并在同一GPU任务内做2 updates有限值DDP检查，
+之后正式训练从MAE重新初始化，不从preflight续训。
+评估入口：`slurm/orgslot/eval/sam_tail_guided.sbatch`，checkpoint802，
+训练前6000切片校准＋原24测试病例固定/校准head＋recon；与历史基线口径一致，
+校准不是独立验证集，须披露。不要混入official96的新划分排名。
+
+CPU测试：`PYTHONPATH=.:tests python -m unittest test_hsam_combined test_hsam_supervision test_sam_soft_prior test_distributed_metrics`。
+覆盖旧参数strict加载与旧模式输出不变、组合前向相同、prior路由detach/aux梯度、
+background-only rank指标schema、有限backward和双rank Gloo；GPU通过与否另记。
+
 ## Soft-prior aux 的DDP指标契约
 
 2026-10-01：`150613`失败并非已确认的NaN。TGR在某rank只保留背景时，coarse预测为空是合法情况；旧实现提前返回0辅助loss，却没有生成`soft_prior_p16_loss/p8_loss/p4_loss`，其他rank有这三个字段，`reduce_metrics`的schema检查因此终止。修复在提前返回前初始化三个0值字段，非空分支仍写实际loss；不改loss权重、mask机制或空监督语义，也不删除schema保护。回归覆盖双rank不同保留情况、有限梯度、真实字段不一致仍报错。

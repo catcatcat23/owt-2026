@@ -283,9 +283,19 @@ def train_one_epoch(
             hsam_metrics = {}
             if getattr(args, "hsam_supervision", "none") not in ("none", "soft_prior"):
                 from hsam_supervision import coarse_segmentation_loss, stage_weight
-                coarse_loss, lost = coarse_segmentation_loss(
-                    output["coarse_logits"], visible_masks, slot_names,
-                    segmentation_keep, args, diagnostics=hsam_metrics)
+                combined = args.hsam_supervision in (
+                    "downsample_gt_soft_prior", "downsample_gt_soft_prior_aux")
+                if combined:
+                    from hsam_supervision import combined_coarse_losses
+                    coarse_loss, lost, prior_aux = combined_coarse_losses(
+                        output["coarse_logits"], visible_masks, slot_names,
+                        segmentation_keep, args, hsam_metrics)
+                    total_loss = total_loss + args.lambda_seg * 0.25 * prior_aux
+                    hsam_metrics["soft_prior_weighted_aux"] = float(prior_aux.detach()) * args.lambda_seg * 0.25
+                else:
+                    coarse_loss, lost = coarse_segmentation_loss(
+                        output["coarse_logits"], visible_masks, slot_names,
+                        segmentation_keep, args, diagnostics=hsam_metrics)
                 if args.hsam_supervision == "soft_prior_aux":
                     final_weight = 1.0
                     total_loss = total_loss + args.lambda_seg * 0.25 * coarse_loss

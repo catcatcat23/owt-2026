@@ -157,10 +157,12 @@ class ArmFDecoder(nn.Module):
                 )
 
     def configure_mask_supervision(self, mode):
+        if len(self.grid_size) == 3 and mode not in ("none", "soft_prior", "soft_prior_aux", "downsample_gt"):
+            raise ValueError("3D SAM supervision supports soft_prior[_aux] or downsample_gt")
         self.hsam_supervision = mode
         if mode in ("soft_prior", "soft_prior_aux", "downsample_gt_soft_prior", "downsample_gt_soft_prior_aux"):
-            if self.readout != "sam_tail" or len(self.grid_size) != 2:
-                raise ValueError("Soft prior ablation requires 2D SAM-tail")
+            if self.readout != "sam_tail":
+                raise ValueError("Soft prior ablation requires SAM-tail")
         if mode == "m2f_hard":
             if self.readout != "sam_tail" or len(self.grid_size) != 2:
                 raise ValueError("M2F adaptation requires 2D SAM-tail")

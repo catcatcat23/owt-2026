@@ -69,14 +69,24 @@ def coarse_segmentation_loss(logits, targets, names, keep, args, diagnostics=Non
     for index, name in enumerate(names):
         prediction = logits.get(name, torch.zeros_like(reference))
         target = targets[name].to(prediction.device).float()
+        if target.ndim == 5:
+            if prediction.ndim != 5 or prediction.shape[2] != target.shape[2]:
+                raise ValueError("3D coarse supervision must preserve slice count")
+            if args.segmentation_unit != "slice":
+                raise ValueError("3D coarse supervision requires slice-wise loss")
         if args.hsam_supervision == "downsample_gt":
-            resized = F.interpolate(target, size=prediction.shape[-2:], mode="nearest")
-            lost += int((target.flatten(1).any(1) & ~resized.flatten(1).any(1)
-                         & keep[:, index]).sum().item())
+            resized = F.interpolate(target, size=prediction.shape[2:], mode="nearest")
+            if target.ndim == 5:
+                positive = target.flatten(3).any(-1).squeeze(1)
+                remaining = resized.flatten(3).any(-1).squeeze(1)
+                lost += int((positive & ~remaining & keep[:, index, None]).sum().item())
+            else:
+                lost += int((target.flatten(1).any(1) & ~resized.flatten(1).any(1)
+                             & keep[:, index]).sum().item())
             target = resized
         elif args.hsam_supervision == "upsample_logits":
-            prediction = F.interpolate(prediction.float(), size=target.shape[-2:],
-                                       mode="bilinear", align_corners=False)
+            prediction = F.interpolate(prediction.float(), size=target.shape[2:],
+                                       mode="trilinear" if target.ndim == 5 else "bilinear", align_corners=False)
         else:
             raise ValueError("invalid coarse supervision mode")
         predictions[name], labels[name] = prediction, target

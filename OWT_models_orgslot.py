@@ -125,8 +125,10 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             )
         hsam_mode = getattr(model_args, "hsam_supervision", "none")
         if hsam_mode != "none":
-            if slot_head_type != "arm_f_sam_tail" or len(grid_size) != 2:
-                raise ValueError("H-SAM supervision requires 2D SAM-tail")
+            if slot_head_type != "arm_f_sam_tail":
+                raise ValueError("H-SAM supervision requires SAM-tail")
+            if len(grid_size) == 3 and model_args.temp_stride != 1:
+                raise ValueError("3D SAM supervision requires temp_stride=1 to preserve slice supervision")
             self.pixel_query_decoder.configure_mask_supervision(hsam_mode)
         if slot_head_type in ("query_dot", "multi_query_dot"):
             self.pixel_query_decoder = SharedPixelQueryDecoder(

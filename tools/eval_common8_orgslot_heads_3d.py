@@ -114,6 +114,7 @@ def build_3d_model(checkpoint_path, slot_specs, input_size, fusion_mode, fix_fra
     model_args = _checkpoint_args(
         token_factor, len(slot_specs), fix_frame, temp_stride, arch_version
     )
+    model_args.hsam_supervision = checkpoint_value(checkpoint, "hsam_supervision", "none")
     model = build_orgslot(
         img_size=input_size,
         norm_pix_loss=False,
@@ -144,6 +145,7 @@ def build_3d_model(checkpoint_path, slot_specs, input_size, fusion_mode, fix_fra
         "input_size": saved_input,
         "fusion_mode": fusion_mode,
         "slot_head_type": slot_head_type,
+        "hsam_supervision": model_args.hsam_supervision,
         "slot_head_channels": slot_head_channels,
         "token_factor": token_factor,
         "model_parameter_count": sum(parameter.numel() for parameter in model.parameters()),

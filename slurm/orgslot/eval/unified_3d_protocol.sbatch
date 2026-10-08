@@ -9,7 +9,11 @@ set -euo pipefail
 : "${EXPERIMENT_WORKDIR:?}" "${EXPERIMENT_COMMIT:?}" "${CHECKPOINT:?}"
 : "${PROCESSED_ROOT:?}" "${PYTHON:?}" "${OUTPUT_ROOT:?}" "${EVAL_STAGE:?}"
 cd "$EXPERIMENT_WORKDIR"
-test "$(git rev-parse HEAD)" = "$EXPERIMENT_COMMIT"
+if [[ -e .git ]]; then
+    test "$(git rev-parse HEAD)" = "$EXPERIMENT_COMMIT"
+else
+    test "$(<SOURCE_COMMIT)" = "$EXPERIMENT_COMMIT"
+fi
 export PYTHONPATH="$EXPERIMENT_WORKDIR${PYTHONPATH:+:$PYTHONPATH}"
 export OMP_NUM_THREADS=4
 args=(--checkpoint "$CHECKPOINT" --test-reference-csv "$PROCESSED_ROOT/csv/WORD_Test_2D_native07072.csv"

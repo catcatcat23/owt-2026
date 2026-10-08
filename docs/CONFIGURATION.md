@@ -263,3 +263,40 @@ resume核验开关一致，不能将旧Stage2续训改成新实验；正式对�
 统一head/reconstruction evaluator依据checkpoint参数安装adapter并strict加载。
 旧checkpoint缺少此配置时按`none`处理。提交前仍须commit/push和不可变runtime检查；
 不得修改当前排队/运行的 `inc44_full_4656f1e` 源码。
+
+## 3D SAM-tail 两条主线（2026-10-08，尚未训练）
+
+复用现有3D Arm F空间路径：3D ViT输出按时间网格切片，浅层CNN及
+P16/P8/P4融合逐slice计算；随后展平T/H/W，使用t/y/x位置编码进行跨slab
+token交互及SAM-tail双向读取。不是新增3D卷积decoder，不改变Collector。
+输入4-slice、temp_stride=1；448输入时P4为[ B,128,4,112,112 ]。
+
+| 配置 | 先验位置 | 辅助监督 | 分割部分损失（lambda_seg=0.01） |
+|---|---|---|---|
+| `soft_prior_aux` | 每次P16/P8/P4读取前，log(0.2+0.8 sigmoid(coarse.detach()))加到attention logits；tail不加粗mask门控 | 三个prior logits FP32上采样至原GT，逐slice small-organ loss | .01*(Lfinal+.25*mean(L16,L8,L4)) |
+| `downsample_gt` | 多尺度读取后生成P4粗mask，sigmoid概率门控tail两次token→pixel的V；保留梯度 | GT最近邻仅缩小H/W，T保持4；粗/最终均逐slice small-organ loss | .01*(w*Lfinal+(1-w)*Lcoarse)，w=.6**(.990**epoch) |
+
+两阶段指同一次forward内的粗预测→tail细预测，不是分两次训练。
+重建及LPIPS保持不变。lost_positive_slices在3D按每个slice计数，统计缩小GT
+丢掉的阳性切片。拒绝temporal stride不为1及粗预测T不匹配；不混入3D
+M0-M3硬mask、P2或soft+两阶段组合实验。
+
+入口 `slurm/orgslot/train/arm_f_sam_tail_3d.sbatch`，分别指定：
+
+```bash
+export HSAM_SUPERVISION=soft_prior_aux  # 另一组为 downsample_gt
+# 在已分配4卡的环境中，并配置好EXPERIMENT_WORKDIR、ARM_F_TARGET、ARM_F_COMMIT：
+bash slurm/orgslot/train/arm_f_sam_tail_3d.sbatch
+```
+
+复用3D配方：每卡6×4卡×累积2=48 slabs（192 slices），118800 updates、
+ROI20、spacing .7/.7/2、BF16、clip1、small-organ loss不变。无MAE路径时
+为scratch；要做MAE对照必须显式给两组同一兼容3D `MAE_INIT_CHECKPOINT`，
+默认仅加载encoder，不隐式使用历史2D权重。
+
+3D checkpoint loader恢复hsam_supervision后严格加载；统一3D head/calibration/
+recon评估共用这个loader，不允许权重能加载但推理静默遗漏先验。
+CPU21项测试通过：全模型FP32有限反传、两种模式BF16 decoder反传、
+mixed slab/empty监督、lost-positive计数、checkpoint严格重载及2D回归。
+旧PyTorch的CPU BF16 GroupNorm不支持混合dtype，全模型CPU BF16未通过，
+没有为此更改现有空间分支；GPU未验证、未提交任务，不能宣称GPU通过。

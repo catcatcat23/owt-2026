@@ -39,4 +39,8 @@ PY_CHECK
 fi
 # Discard the preflight weights and initialize again from the exact Stage1.
 export OUTPUT_DIR="$RUN_ROOT/stage2_${BACKGROUND_POLICY}_${SLURM_JOB_ID}"
-bash scripts/orgslot/run_incremental44.sh stage2 --save_freq 10
+resume_args=()
+if [[ -n "${RESUME_CHECKPOINT:-}" ]]; then
+    resume_args+=(--resume "$RESUME_CHECKPOINT")
+fi
+bash scripts/orgslot/run_incremental44.sh stage2 --save_freq 10 "${resume_args[@]}"

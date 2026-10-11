@@ -308,7 +308,10 @@ def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler):
                 'args': args,
             }
 
-            save_on_master(to_save, checkpoint_path)
+            if is_main_process():
+                from util.checkpoint_io import atomic_checkpoint_save
+                atomic_checkpoint_save(to_save, checkpoint_path, torch.save,
+                                       keep=int(os.environ.get('CHECKPOINT_KEEP_LAST', '0')))
     else:
         client_state = {'epoch': epoch}
         model.save_checkpoint(save_dir=args.output_dir, tag="checkpoint-%s" % epoch_name, client_state=client_state)

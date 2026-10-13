@@ -102,8 +102,6 @@ retained; reuse their existing loss weights/schedules. No MAE encoder transfer
 from ViT is implemented for these CNNs. Compare against scratch SAM-tail to isolate
 the backbone change, not only against the existing MAE-initialized results.
 
-## Upstream sources
-
 ## AutoPET CNN masked pretraining (2026-10-13)
 
 `main_pretrain_autopet_mae.py --backbone nnunet_resenc_s16|mednext_b_s16`
@@ -127,6 +125,37 @@ is not the newer official-pool split. Use afterok dependencies on the completed
 pretraining job; evaluation depends on its downstream training job.
 Training scripts: `slurm/orgslot/train/cnn_mim_sip.sbatch` and
 `slurm/orgslot/train/cnn_sam_transfer_sip.sbatch`.
+
+### Submitted job chains
+
+| Encoder | Cluster / user | Pretrain | soft prior+aux train / eval | downsample GT train / eval |
+|---|---|---|---|---|
+| nnU-Net ResEnc | SIP / bolinren19 | 3048464 | 3048465 / 3048467 | 3048466 / 3048468 |
+| MedNeXt-B | XEC / sifansong | 162141 | 162142 / 162143 | 162144 / 162145 |
+
+Checked at submission: both pretrains PENDING(Priority); all downstream tasks
+PENDING(Dependency) with afterok links verified. No GPU validation yet.
+SIP pretrain/soft train use account sifansong QoS4a800; other ResEnc tasks use
+account angelosstefanidis QoS8a800 because the 4a800 submission-count limit is4.
+XEC uses account sifansong QoS8gpus. All training jobs request4 A800/24CPU/192G;
+SIP limit7days, XEC8gpus limit5days. Evaluations request1 A800/10CPU/128G/1day.
+
+Pinned runtime commits (do not update underneath jobs):
+- SIP: `7ae0689250489383a9a4611b1dd1560c513a2acf`,
+  `/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/cnn_mim_7ae0689`
+- XEC: `ab5c0aa9e3ef47cf785effdfd58a0bd29a115cf1`,
+  `/gpfs/work/aac/sifansong/worktrees/cnn_mim_ab5c0aa`
+
+Both passed check_experiment_revision.sh before submission and match GitHub
+at their submission time. The second commit only adds explicit account path
+overrides; the model/training algorithm is unchanged. CNN_PYTHON,
+CNN_PRETRAIN_CSV, CNN_WORD_ROOT, CNN_ROI_INDEX and CNN_LPIPS_STATE are explicitly
+set to sifansong paths on XEC, never the SIP defaults.
+
+CPU verification:6 CNN tests passed including transfer rejection, unchanged
+non-encoder weights and joint SAM losses. A 25-step fixed-mask two-image
+AutoPET CPU fit reduced loss0.19832->0.01306 (ResEnc),0.14443->0.00167 (MedNeXt).
+This is a pipeline check, not a GPU memory test or a generalization result.
 
 ## Source links
 

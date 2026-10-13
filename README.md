@@ -1,7 +1,7 @@
 # OrganSlot
 
 开发中的 E cross / SAM-tail 编码器对照：[nnU-Net ResEnc / MedNeXt-B 2D](docs/CNN_BACKBONES.md)。
-仅替换 backbone，CPU验证已通过，尚未提交训练；不计入下方正式指标。
+仅替换 backbone，CPU验证已通过；2026-10-13已提交两条AutoPET预训练及四条SAM-tail迁移训练依赖链，尚无分割成绩，不计入下方正式指标。
 
 共享ViT＋器官独立tokens＋共享空间分支的分割/重建框架。后续仅保留以下三个2D主线配置。
 架构图为按代码绘制的AI生成示意图，PNG供GitHub预览，PDF供下载；不是SAM/H-SAM官方复刻。

@@ -1,5 +1,92 @@
 # Stage2: shared vs stage-private query readout
 
+## Formal SAM Stage2 results (2026-10-13)
+
+This section supersedes the historical pending-submission statements below for
+the full-budget SAM `slot_private` run. Account/cluster: sifansong/XEC.
+Stage1 train/eval: 156536/156537; Stage2 train/eval: 156538/156539.
+Stage2 completed 2026-10-13 03:00:43 CST; evaluation completed 04:24:30.
+Both stages use 118800 optimizer updates; Stage2 final epoch802. This is
+237600 total updates, not compute-matched to 118800-update Offline training.
+Head `complete_split=true`, reconstruction `complete_test_set=true`; both
+exactly loaded checkpoint802 and evaluated 7315 slices / 24 cases.
+Official-pool seed42: 96 train / 26 validation / 24 test; thresholds selected
+on validation, not test. Background excluded from foreground averages.
+
+| Postprocessed case-mean Dice (%) | Old4 | New4 | All8 |
+|---|---:|---:|---:|
+| Stage1 fixed0.5 | 86.78 | N/A | N/A |
+| Stage2 fixed0.5 | 86.78 | 76.39 | 81.58 |
+| Stage1 calibrated | 87.12 | N/A | N/A |
+| Stage2 calibrated | 87.12 | 76.57 | 81.84 |
+| PCDD reported 4–4 | 84.09 | 82.75 | 83.42 |
+
+PCDD is an external reported-number reference, not a matched-protocol
+reproduction: https://ojs.aaai.org/index.php/AAAI/article/download/38406/42368
+(Table 2). Calibrated differences are +3.03 / -6.18 / -1.58 percentage points.
+Do not compare our four-class Stage1 mean directly with an eight-class mean.
+
+| Organ | Stage1 calibrated | Stage2 fixed0.5 | Stage2 calibrated | Offline E seed42 calibrated | Stage2 recon direct-post |
+|---|---:|---:|---:|---:|---:|
+| Spleen (old) | 92.83 | 92.62 | 92.83 | 94.07 | 90.72 |
+| Right kidney (old) | 92.94 | 92.18 | 92.94 | 93.72 | 90.01 |
+| Left kidney (old) | 93.14 | 92.48 | 93.14 | 93.93 | 90.05 |
+| Gallbladder (old) | 69.56 | 69.83 | 69.56 | 69.63 | 61.35 |
+| Esophagus (new) | N/A | 63.23 | 63.79 | 71.72 | 47.16 |
+| Pancreas (new) | N/A | 66.75 | 66.75 | 78.91 | 60.00 |
+| Liver (new) | N/A | 94.51 | 94.51 | 95.72 | 90.84 |
+| Stomach (new) | N/A | 81.09 | 81.23 | 87.43 | 72.13 |
+| All8 | N/A | 81.58 | 81.84 | 85.64 | 75.28 |
+
+Offline E uses the same split but a different architecture and full eight-class
+supervision; it is a reference, not a controlled ablation of private interaction.
+The unrounded Stage2 head averages are 81.5847223890469 fixed-post and
+81.84336561343312 selected-post. Old4 fixed-post forgetting is exactly 0 in the
+report; per-organ binary scores also match Stage1. Final freeze audit reports
+`match=true`, with no missing, added, or changed audited frozen parameters.
+This establishes retention for the evaluated binary outputs, not invariance of
+exclusive merged masks or a statistical claim of general zero forgetting.
+
+Adaptation: Stage1 shares multiscale interaction weights across organ calls.
+Stage2 copies its projection and P16/P8/P4 TokenBlocks into each organ slot;
+new4 slots and their private interactions train, old paths freeze. ViT, pixel
+decoder, shared SAM-tail and shared reconstruction decoder freeze. Background
+collector/TGEnc/token_norm/AHER train under the existing 0.1x-LR separation
+policy. The frozen tail remains differentiable with respect to its inputs.
+
+Head calibration thresholds (organ IDs1–8): .6/.8/.8/.3/.7/.5/.5/.6.
+Calibrated global predicted/GT volume ratios are 1.1608 for esophagus and
+1.1109 for pancreas: low Dice is not explained by underprediction alone.
+
+Reconstruction threshold .02: direct-post All8=75.28328597392482%;
+indirect-post All8=6.103221352517983%. Indirect-post predicted/GT volume ratios
+are 545.95 (esophagus) and 88.96 (pancreas). Severe indirect false positives
+are confirmed; the cause (difference definition, fusion/normalization,
+background residual, threshold scale) remains unconfirmed. A low reconstruction
+training loss does not establish good segmentation or incremental disentanglement.
+
+Next controlled comparison: adapter run157119 started 2026-10-13 04:24:30 CST,
+still training at the last check, no final result. It retains slot-private
+interaction and adds one new4-shared 4240-parameter residual readout adapter:
+`w = frozen_mask_mlp(m) + Linear16_GELU_Linear128(m)` with a zero-initialized
+last layer. Old4/background bypass it. It is neither stage-shared attention
+nor Q/V LoRA. New-class gains and old-class retention must both be evaluated.
+
+Evidence (remote sifansong/XEC, base
+`/gpfs/work/aac/sifansong/artifacts/inc44_full_20261006/SAM/`):
+
+- `stage2_evaluation/stage_comparison.json`
+- `stage2_evaluation/test/results.json` and `resolved_config.json`
+- `stage2_evaluation/reconstruction/results.json` and `resolved_config.json`
+- `stage1_evaluation/test/results.json`
+- `stage2_separation_156538/freeze_audit.json` and `log.txt`
+- Training test-manifest SHA256: `1a1a6fc6a5e82dd37276d5b5be0ee6496b32cac4147a3b18a3003f3ec5eba703`.
+
+Offline E reference (local repository root):
+`artifacts/offline_eval_recovery_20261005/evaluation/ArmE_CrossAttn_MAEenc_Official96_2998655_heads_test/results.json`.
+
+## Historical design and implementation notes
+
 Controlled 4+4 comparison, initialized from the same completed Stage1 (2998659,
 checkpoint-401). Neither run resumes a previous Stage2. Official-pool seed42
 96 training / 26 validation / 24 test cases, unchanged manifests and ROI.

@@ -1,5 +1,42 @@
 # Stage2: shared vs stage-private query readout
 
+## 阅读顺序与当前冻结矩阵（2026-10-13整理）
+
+先读本节与下方Formal SAM结果；Historical design以下是有日期的设计原文，不是当前队列。
+当前全预算为118800更新/阶段、总237600；早期E59400/阶段必须单列。
+两阶段重复访问同96病例，仅开放不同标签，不声称阶段间无旧图像访问。
+Stage1为背景+旧4类，Stage2背景+旧4+新4；Stage1新类指标为NA，不填0。
+
+| Stage2策略 | ViT/空间pixel decoder | 旧slot | 新slot | 交互/读出 | 共享recon decoder |
+|---|---|---|---|---|---|
+| E frozen | 冻结/冻结 | 冻结 | 训练 | 全冻结 | 冻结 |
+| E train，旧59400对照 | 冻结/训练 | 冻结 | 训练 | 共享query与读出训练 | 冻结 |
+| E query_shared | 冻结/冻结 | 冻结 | 训练 | 共享query投影、cross-attn、FFN训练 | 冻结 |
+| E query_split | 冻结/冻结 | 冻结 | 训练 | 旧组冻结，新4共用一套复制的读出训练 | 冻结 |
+| SAM slot_private | 冻结/冻结 | 冻结 | 训练 | 每slot投影/多尺度交互私有；新4训练，旧冻结；tail冻结 | 冻结 |
+| SAM slot_private+residual16 | 同上 | 冻结 | 训练 | 同上，额外新4共享4240参数读出adapter | 冻结 |
+
+背景Collector/TGEnc/token_norm/AHER按separation策略0.1倍LR训练，背景head/calibration冻结。
+冻结tail/decoder仍保留输入梯度，不是no_grad切断新slot反传。旧阈值锁定，新阈值用验证集。
+标签隔离、teacher 0.1/0.9、ignore和背景损失公式见[配置](CONFIGURATION.md#incremental44当前契约)。
+
+### 早期共享空间解冻的已读原始对照
+
+本轮读取SIP仓库根 `artifacts/inc44_spatial_readout_20261004/evaluation/stage_comparison.json`。
+训练3004004，59400 Stage2更新；其Stage1为2998659，不是下方SAM的Stage1。
+
+| 阶段 | 固定post旧/新/全 | 校准post旧/新/全 |
+|---|---|---|
+| E Stage1 | 84.89 / NA / NA | 85.48 / NA / NA |
+| E共享空间+读出解冻Stage2 | 0.04 / 81.20 / 40.62 | 0.09 / 82.23 / 41.16 |
+
+这是“旧slot参数冻结不保证旧输出保持”的直接反例。不能将其与SAM81.84的差距全部
+归因于私有交互：架构、Stage1、训练预算也不同。尚未完成的query_shared/query_split
+正是为了进一步隔离空间分支与交互读出的影响；实时状态另查[STATUS](STATUS.md)。
+
+诊断目标仍需区分旧参数hash、旧binary logits/指标、增加新类后的互斥mask；
+本页没有宣称跨增量顺序、跨seed的普遍零遗忘。
+
 ## Formal SAM Stage2 results (2026-10-13)
 
 This section supersedes the historical pending-submission statements below for

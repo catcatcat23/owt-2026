@@ -34,69 +34,25 @@ background-only rank指标schema、有限backward和双rank Gloo；GPU通过与�
 
 恢复脚本`slurm/orgslot/train/sam_tail_soft_prior_aux_resume.sbatch`只恢复已核验的checkpoint-0，从epoch1续训并恢复optimizer/scaler。启动后先运行两GPU NCCL指标回归；失败则不进入正式训练。新训练需新`afterok`评估；旧`150614`依赖失败不会自行恢复。
 
-## incremental44
+## incremental44：当前契约
 
-独立入口 `main_pretrain_orgslot_incremental44.py`，启动器 `scripts/orgslot/run_incremental44.sh`。
-基于 **2D E cross-attention + AutoPET MAE encoder-only**，不修改原离线训练入口。
-这是**同图像、分阶段标签开放**的4+4机制实验：两阶段都用固定96训练病例；不是禁止重访旧图像的 data-incremental/no-replay 协议。
-使用上节官方池新划分的96训练/26验证/24测试；不可使用“替换五个badcase”的探索性测试清单。
+完整冻结矩阵、标签可见性、预算沿革及结果见 [增量专项](INCREMENTAL_READOUT_ABLATION.md)。
+当前新实验每阶段118800更新、5940 warmup，共237600；旧59400/阶段记录保留于
+[整理前配置](archive/HISTORY.md#merge-configuration)，不能覆盖旧运行快照或混算收益。
+Stage1最终checkpoint按更新数和日志核验，不只凭文件名或存在性；
+Stage2从同一个已完成Stage1初始化，重置优化器，不能从已有Stage2开始新的消融。
+入口：`main_pretrain_orgslot_incremental44.py`、`scripts/orgslot/run_incremental44.sh`。
+Stage1/Stage2及五slot评估已实际运行，不再沿用“评估尚未实现”的旧通知。
 
-| 内容 | Stage1 | Stage2 |
-|---|---|---|
-| 可见器官GT | 脾、右肾、左肾、胆囊 | 食管、胰腺、肝、胃 |
-| slot数 | 背景+4旧类=5 | 背景+4旧类+4新类=9 |
-| 初始化 | 仅AutoPET MAE encoder；其余随机 | 精确加载Stage1；四个新slot分别复制同一Stage1背景slot |
-| 可训练 | 原E共享模块和5个slot | 仅4新slot；背景按下述策略；共享模块/旧slot全部冻结 |
-| ROI定向池 | 仅胆囊4 | 仅食管5、胰腺6 |
-| 重建 | 既有随机保留组合、MSE+LPIPS | 新GT+旧类teacher伪区域的masked MSE；不计算LPIPS |
-| 分割 | 旧4类small-organ loss | 新4类相同loss；默认仅保留slot监督，ROI目标强制保留 |
-
-Stage1背景=非旧4类，因此包括未来新类；**Stage2不能再把所有非新类GT位置当背景**。
-冻结Stage1 teacher的旧4类calibrated head sigmoid（与Stage1分割损失输入一致）：新GT优先；恰好一个旧类≥0.9的位置为旧伪区域；全部旧类<0.1且不在新GT的位置为候选背景；其他位置ignore。teacher背景head从未监督，不参与伪标签。
-这些阈值和背景权重是待验证的实验超参，不是论文默认值。teacher有误差，候选背景并非真实背景。
-
-Stage2三种独立运行参数 `--background_policy`：
-
-- `frozen`：背景完全冻结；只更新新slot。
-- `composition`：背景Collector、TGEnc、token_norm、AHER以新slot的0.1倍LR更新；只接受组合重建梯度。
-- `separation`（默认）：同上，额外单独解码背景canvas。在新GT和高置信旧区域目标为0，在候选背景目标为输入图像，分别求区域均值，后者乘0.1。空区域贡献0，ignore不监督。
-
-Stage2总损失=`L_composition + 0.01 L_seg_new + 0.1 L_background`；非separation模式最后一项为0。
-冻结重建decoder的参数，但不阻断其对新/背景canvas的反传。背景head及所有校准参数冻结，旧类和共享模块保持eval模式。
-现有`linear_sqrt`按保留slot数归一化，5→9会改变重建组合尺度；保留原语义并记录，不宣称重建输出也严格不变。
-
-固定：spacing0.7/0.7/2、448/384、ROI0.2、20 tokens、128 channels、seed0、small-organ原超参、AdamW7.5e-5/wd0.05、BF16+clip1。
-启动器4卡×每卡16×累积3=192。预算每阶段59400更新、2970 warmup，共118800；Stage2重置优化器。
-这是**总更新预算匹配**，不等价于每类监督次数或算力完全匹配；不得静默将每阶段都训练118800。
-
-运行前先在对应账号设置其本地绝对路径（脚本不猜跨账号路径）：
-
-```bash
-export WORD_ROOT=/该账号/数据/WORD
-export PYTHON_BIN=/该账号/环境/bin/python
-export MAE_CHECKPOINT=/该账号/AutoPET_MAE/checkpoint-final.pth
-export LPIPS_STATE=/该账号/owt_lpips_vgg16.pth
-export OUTPUT_DIR=/该账号/结果/Inc44_stage1
-bash scripts/orgslot/run_incremental44.sh stage1
-# Stage1完成后，手动确认最终59400-update checkpoint，不按测试成绩选取。
-export STAGE1_CHECKPOINT=/该账号/结果/Inc44_stage1/checkpoint-最终epoch.pth
-export OUTPUT_DIR=/该账号/结果/Inc44_stage2_separation
-export BACKGROUND_POLICY=separation
-bash scripts/orgslot/run_incremental44.sh stage2
-```
-
-提交前仍须commit/push、revision guard、固定运行快照、核验账号路径；脚本本身不提交Slurm，不更新运行中的源目录。
-保存resolved_config、manifest哈希、初始化报告、slot元数据、可训练参数清单、Stage1 checkpoint哈希；Stage2保存checkpoint时校验冻结参数哈希。
-续训必须保留同一Stage1 teacher及协议，使用`--resume`，不得从全8类WORD checkpoint启动Stage1。
-
-评估要求：同24测试病例，Stage1旧4类、Stage2旧4/新4/全部8类；原始独立binary head与互斥类别合并指标必须分开。旧类阈值在Stage1验证集确定并锁定；新类只在Stage2验证集校准。病例级Dice/P/R/体积比，另外报告旧类raw logits漂移和背景在新器官GT内的残留。**现有Common8 evaluator不能直接用来加载5-slot Stage1模型；增量评估适配与GPU预检尚未完成，不自动挂接旧评估脚本。**
-当前仅完成CPU机制测试：标签隐藏/ROI隔离、伪区域冲突与ignore、空区域finite backward、新/背景梯度、旧logits不变、背景策略、随机冻结decoder下的优化下降；这不等于真实数据过拟合或GPU/DDP通过。
-
-SIP提交脚本：`slurm/orgslot/train/incremental44_stage1_sip.sbatch`，4×A800、20CPU、192GB、7天。启动后先以同样每卡16/累积3跑独立的2-update预检，只有正常退出、更新数正确且日志数值有限才启动全新Stage1（每10epoch保存）。预检不是小样本过拟合验证，权重不用于正式训练；排队时不得宣称GPU通过。
-
-Stage2脚本 `slurm/orgslot/train/incremental44_stage2_sip.sbatch` 使用 `afterok:Stage1_JOB`，显式设置`STAGE1_RUN`。启动时解析最后一行训练日志和对应checkpoint，要求59400更新、Stage1身份、optimizer最大step同为59400、参数全有限，再严格加载。不能只看文件存在、猜checkpoint-802或把中间checkpoint当最终模型。Stage2也先独立2-update预检，随后重新加载Stage1正式训练。当前只提交默认背景separation组；frozen/composition保持可选，不自动扩大三倍预算。五slot评估适配仍待完成，没有虚挂评估依赖。
-
-审计边界：背景slot没有独立分割监督，其背景分离约束作用在重建支路；它不等价于9类softmax背景分类。旧raw/calibrated输出不变不代表互斥分类图零遗忘；必须另外评估新增类别冲突。Stage2新slot校准保持初始化scale1/bias0，旧slot校准冻结在Stage1值；新slot使用raw logits与其calibrated logits等价，但两阶段校准参数的可训练性不同，这属于明确的模块冻结方案。Stage2只有masked MSE而无LPIPS，不是完全相同的训练目标；不在未知区域上使用LPIPS以免其感受野引入错误监督。候选背景含teacher漏检风险，日志记录各旧伪区域、四新类监督数量和ignore比例。辅助权重0.1及置信度0.1/0.9尚非验证最优。
+背景separation：新GT优先；Stage1 teacher恰好一个旧类≥0.9为旧伪区域，
+全部旧类<0.1且非新GT为候选背景，其他ignore。背景head未监督，不作为teacher。
+背景Collector/TGEnc/token_norm/AHER以0.1倍LR更新；新/旧前景区域目标0，
+候选背景目标CT（该区域项权重0.1）。背景分离总权重0.1。
+Stage2基础目标为masked composition MSE + .01新类分割 + .1背景分离；
+无Stage1的LPIPS，SAM辅助项按已保存配置叠加。不要改写为两阶段同一loss。
+共享重建decoder冻结但可对输入反传；背景head/calibration冻结。
+同96训练病例可重复访问，只开放当前阶段标签，不声称禁止旧图像访问。
+旧binary分数、旧raw logits、互斥argmax分别审计；teacher误差与背景残留仍需诊断。
 
 ## 模型与数据
 
@@ -104,8 +60,8 @@ Stage2脚本 `slurm/orgslot/train/incremental44_stage2_sip.sbatch` 使用 `after
 2D WORD 对照：spacing 0.7×0.7×2.0、input/ROI 448/384、ROI probability 0.2、
 token_factor=20、seed=0、有效 batch192、118800 optimizer updates。
 ROI20 是采样概率，不是 token 数量。3D 单独记录 slab batch、T、stride 和更新次数。
-F 预定 T=4/stride=1；2D microbatch2×4卡×accum24=192 slices，
-3D microbatch1×4卡×accum12=48 slabs。相同有效 batch 不保证 legacy_batch TGR 完全相同。
+新四卡配方：2D16/卡×累积3=192 slices；3D6/卡×累积2=48 slabs，T=4/stride=1。
+早期2D2/卡、3D1/卡等属于历史快照；相同有效batch不保证legacy_batch TGR完全相同。
 
 `dimension`、`slot_head_type` 按 ARCHITECTURE.md 选择。
 C/D 的 `pixel_pe` 为 none/spatial/temporal/spatiotemporal；2D 不允许 temporal。
@@ -210,7 +166,7 @@ are added. Default `frozen` retains the previous experiment behavior.
 
 Start fresh from the same completed Stage1, NOT the completed Stage2. ViT,
 old slots and reconstruction decoder remain frozen. New slots and the existing
-background separation policy remain trainable. Use unchanged 59400 updates,
+background separation policy remain trainable. Historical experiment used 59400 updates (not the newer full-budget Stage2),
 4 GPUs x batch16 x accumulation3 = 192, LR7.5e-5, lambda_seg0.01 and seed0.
 The old slot weights remain invariant but old segmentation outputs need not:
 shared spatial/readout updates can cause forgetting. No new distillation loss
@@ -264,7 +220,7 @@ resume核验开关一致，不能将旧Stage2续训改成新实验；正式对�
 旧checkpoint缺少此配置时按`none`处理。提交前仍须commit/push和不可变runtime检查；
 不得修改当前排队/运行的 `inc44_full_4656f1e` 源码。
 
-## 3D SAM-tail 两条主线（2026-10-08，尚未训练）
+## 3D SAM-tail 两条主线
 
 复用现有3D Arm F空间路径：3D ViT输出按时间网格切片，浅层CNN及
 P16/P8/P4融合逐slice计算；随后展平T/H/W，使用t/y/x位置编码进行跨slab
@@ -299,4 +255,367 @@ recon评估共用这个loader，不允许权重能加载但推理静默遗漏先
 CPU21项测试通过：全模型FP32有限反传、两种模式BF16 decoder反传、
 mixed slab/empty监督、lost-positive计数、checkpoint严格重载及2D回归。
 旧PyTorch的CPU BF16 GroupNorm不支持混合dtype，全模型CPU BF16未通过，
-没有为此更改现有空间分支；GPU未验证、未提交任务，不能宣称GPU通过。
+没有为此更改现有空间分支。这是实现时CPU限制；后续任务已提交，见STATUS。
+该CPU记录不能替代当前GPU验证或最终评估。
+
+## 合并专项：E cross / SAM读出与监督
+
+### E cross与MAE
+
+`slot_head_type=arm_e_multiscale_query`，`query_refinement=cross_attn`：
+20 tokens → LayerNorm/mean/projection/identity → query读取P4+FFN → query·原P4。
+无F多尺度20-token refinement，无reverse。仅加载MAE encoder，decoder随机。
+启动 `slurm/orgslot/train/arm_e_crossattn_mae_encoder.sbatch`；
+统一评估 `slurm/orgslot/eval/arm_e_mae_unified.sbatch`。
+历史E no-cross的AMP/microbatch/恢复轨迹有差异，不是严格共享随机轨迹对照。
+
+### SAM soft_prior与soft_prior_aux
+
+每次读取P16/P8/P4前，以当前tokens均值与该尺度pixels归一化点积乘sqrt(C)，
+形成粗logits；`log(.2+.8*sigmoid(logits.detach()))`加到token→pixel attention logits。
+20 tokens与各heads共享器官先验；只改变读取偏置，不是二值hard mask。
+soft_prior模式无独立粗监督，aux模式三尺度logits上采样到GT后用原small-organ loss，
+`L=Lrec+LPIPS+.01*(Lfinal+.25*mean(L16,L8,L4))`。
+路由detach，但aux logits不detach。tail不接收此模式的粗mask。
+入口 `slurm/orgslot/train/sam_tail_soft_prior.sbatch`；
+`HSAM_SUPERVISION=soft_prior|soft_prior_aux`。
+.25是本项目的适配值，不是Mask2Former或H-SAM的官方默认。
+历史150613失败是DDP日志schema不一致，不是已确认NaN；修复不能被写成架构性能改进。
+
+### SAM两阶段mask与M0–M3
+
+`downsample_gt`：多尺度refinement后，用tokens与原P4生成coarse logits；
+sigmoid以不detach、无floor、不归一化的V gate引导tail两次token→pixel读取。
+P4粗logits对nearest缩小GT监督；`upsample_logits`则放大粗logits对全GT监督。
+`w=.6**(.990**epoch)`，
+`Lseg=.01*((1-w)*Lcoarse+w*Lfinal)`。
+该调度取自H-SAM公开训练器；本实现不是完整H-SAM（无CMAttn或预训练SAM decoder）。
+评估只用final mask，不把coarse/final集成。监控lost_positive_slices。
+
+`m2f_hard`：共享LayerNorm/3层mask MLP，均值tokens对共享P4预测M0；
+读取P16/P8/P4后产生M1/M2/M3。前一mask缩放到对应尺度，sigmoid>.5形成detach路由，
+全屏蔽行退回全局attention。`Lseg=.01*(Lfinal+LM0+LM1+LM2+LM3)`。
+tail无soft prior；同时改变总监督强度，不能把收益仅归于hard routing。
+没有Hungarian matching，不是Mask2Former完整复刻。
+入口 `slurm/orgslot/train/arm_f_sam_tail_hsam.sbatch`，
+评估 `slurm/orgslot/eval/sam_tail_guided.sbatch`，必须恢复checkpoint保存的mode。
+原公式、来源链接、CPU测试和提交SHA见 [原文](archive/HISTORY.md#merge-sam-tail-hsam)。
+
+### 全八类监督
+
+`slurm/orgslot/train/sam_tail_mae_all_seg.sbatch`将seg_supervision从retained改all，
+背景权重仍0；包括八前景的empty-slice监督。
+重建仍按随机keep及ROI focus保留，slot实际计算用keep OR head_mask；
+被重建丢弃的器官仍提供真实tokens。共享权重同时接收两分支梯度，不是梯度隔离。
+只用于全标注Offline，不可越过增量标签可见性。对应成绩见RESULTS。
+
+## 诊断复现：P4探针与token干预
+
+
+## E badcase extension (2026-09-30)
+
+Supports E fused P4 via a separate capture path; original F path unchanged.
+E uses one linear probe (no reverse attention exists), compared with the SAME
+checkpoint's original query head. Train organ4 and organ6 separately, fixed10
+epochs, seed42, batch16, AdamW1e-3, existing BCE+positive Dice probe objective.
+Original model fully frozen. Keep76/20 training-case split; evaluate selected
+test cases0127/0114 ONLY after epoch9, no test selection/tuning. Test and training
+IDs must be disjoint. Save all test slice probability maps and case/slice counts.
+Fixed0.5 RAW results; do not compare against historical postprocessed/calibrated
+numbers. These probes have extra supervised fitting and a different objective;
+superiority supports readability, not proof that query is the sole bottleneck.
+Script: slurm/orgslot/eval/e_badcase_probe.sbatch. Same E checkpoint as token
+interventions; do NOT reuse existing F probe weights on E features.
+
+Independent script; no changes to original model. Supports original 2D
+arm_f_attention only. Each run selects one organ (6 pancreas, 5 esophagus,
+4 gallbladder). Compare raw P4 immediately before reverse attention against
+the organ-conditioned P4 after reverse residual and FFN, before classifier.
+Hooks must fire exactly once. Both linear heads start with identical weights.
+Backbone is eval/no_grad and receives no gradients. Original head predictions
+are reported alongside probes, fixed0.5 raw without postprocessing.
+
+Run from repository root:
+
+```bash
+PYTHONPATH=. python tools/frozen_p4_probe.py --checkpoint /absolute/checkpoint-802.pth --train-csv /absolute/WORD_Training_2D_native07072.csv --class-id 6 --output /absolute/new_probe_output --batch-size 16
+```
+
+Requires current project's torch environment. Defaults: single GPU, FP32,
+10 epochs, AdamW lr1e-3, center448, no augmentation/ROI, BCE plus positive
+Dice with equal positive/negative slice-group weighting. This is a diagnostic
+probe objective, NOT the original small-organ training loss. Paired probes
+receive the exact same batches and update count. Lower batch if 4090 OOM;
+do not compare separate runs using different batches as controlled ablations.
+
+Original96 training cases are deterministically split 76/20, seed42. Case IDs,
+checkpoint and manifest hashes, load report, settings are saved. The backbone
+previously saw ALL96; holdout is only unseen to the new probes, not independent
+end-to-end validation. Never choose settings using the24 test cases. No early
+stopping or best-checkpoint selection. Output includes per-case Dice/P/R/counts
+and volume ratios for every epoch and final probe weights. Training metrics are
+online across changing head weights, explicitly flagged; not a final fixed-head
+training-set evaluation. Holdout metrics use fixed weights.
+
+Interpretation: post worse than pre suggests reduced LINEAR readability, not
+proof of information destruction. Original classifier includes LayerNorm,
+unlike these linear probes; do not attribute all baseline differences to query.
+Pre/post feature scales may affect optimization. This is the original implementation boundary, not current queue state. Final numerical probe results remain to be verified in RESULTS.
+
+### Token干预
+
+
+Inference only, no optimizer or weight update. Existing 96 training cases supply
+tokens after TGEnc, before the unchanged query LayerNorm/projection. Full training
+manifest is traversed once. Cache per-organ positive/empty sums and reservoir128
+tokens per stratum; record donor case/index. Means are slice-weighted (not
+case-weighted); reservoir sampling can underrepresent rare donor cases.
+
+Evaluate all24 test cases/6990 slices: original, all-training mean, presence-
+matched mean, three independently sampled same-organ presence-matched donors.
+Donors come only from train; select cached case uniformly then cached slice.
+GT-presence matching is diagnostic oracle information, NOT deployable inference.
+No volume or position matching; interpret replacements as interventions, not a
+proof of absence of information. Mean raw tokens may be distribution-shifted;
+retain the original LayerNorm and report mean versus donor controls separately.
+
+Compute original spatial features once per batch, reuse exactly for each organ
+readout; preserve slot identity and calibration. Assert original token re-read
+reproduces original logits. Independent organ readouts are intervened separately;
+there is no cross-class competition or joint argmax in this audit.
+
+FP32, batch2, fixed0.5 raw/post(min_size20,opening1), center448, no augmentation,
+no threshold tuning. Do not directly compare to historical calibrated Dice.
+Full test set is exploratory, already examined previously; not a blind holdout.
+No PCA/heatmap is necessary for the initial causal-use diagnostic.
+
+Outputs: provenance/checkpoint+manifest hashes, token_bank.pt, donor assignments,
+per-case Dice/P/R/volume/empty/zero-overlap/logitMAE, per-slice counts, progress,
+eight-organ summary for each condition. Donor repeats are diagnostic variation,
+not independent training seeds. No model architecture changes.
+
+## Presence ablation (2026-09-30)
+
+Use --reuse-bank PREVIOUS_OUTPUT --presence-ablation. Verify checkpoint and
+train/test manifest hashes before reusing the bank. Compare original,
+positive_only, negative_only, fixed_positive (no GT selection), mean_matched.
+Only the selected presence stratum is replaced; the other retains original
+tokens. Save maximum-GT-slice CT input, GT and probability maps as NPZ for
+gallbladder 0041/0125/0127/0145 and pancreas 0114. No retraining or threshold fit.
+Original and mean_matched must reproduce the first run before interpretation.
+
+Initial postprocessed audit: matched means reduce positive-voxel recall for
+gallbladder 74.15 to 62.53%, esophagus 82.06 to 78.34%, pancreas 83.71 to
+79.98%, while reducing negative-slice FP counts. These are pooled voxel recall,
+not case-mean recall. Gallbladder 0127 remains zero overlap. This does not
+support claiming the higher overall Dice rescued missed organs.
+
+Interpretation: true tokens outperforming donors suggests useful case-conditioned
+readout. Little change suggests limited use by this readout, not necessarily no
+information in tokens. Fixed identity conditioning may still support modularity.
+
+## 统一3D评估
+
+
+Entry: `tools/eval_common8_orgslot_unified_3d.py`; launcher:
+`slurm/orgslot/eval/unified_3d_protocol.sbatch`.
+
+The model still receives four-slice slabs. Overlapping scores are averaged at
+each original slice **before** thresholding. Each original slice is scored once.
+No retraining or architecture change is involved.
+
+| Component | Shared with current 2D evaluation |
+| --- | --- |
+| Input | WORD 0.7×0.7×2.0, fixed-255 normalization, deterministic 448 crop |
+| Calibration | First 6000 training manifest rows, disjoint test cases |
+| Threshold selection | Per-class 0.1–0.9 sweep; maximize postprocessed case Dice on calibration only |
+| Head test | Fixed 0.5 and training-calibrated thresholds, raw and post |
+| Direct recon | Keep only selected slot; original fusion and reconstruction decoder; channel mean >0.02 |
+| Indirect recon | Keep all except selected slot; clamp(input−reconstruction,0) before channel mean >0.02 |
+| Postprocessing | Shared 2D function: remove components <20 pixels, radius-1 opening per slice |
+| Aggregation | Shared 2D counters and summarize; per-case volume Dice and foreground macro mean |
+
+Calibration reads complete slabs from the relevant training cases for context,
+but only the selected first 6000 original slices contribute to calibration.
+Threshold files bind the checkpoint and test-manifest SHA256. Test sweeps are
+not performed. Reconstruction uses its fixed historical threshold, not head thresholds.
+
+Submit calibration and reconstruction independently; head must depend on successful
+calibration. Use immutable source and the repository revision gate before submission.
+Outputs include resolved configuration, exact checkpoint-load report, scoring keys,
+per-case records, metrics and completion status.
+
+**Do not compare old 3D-post results as if they used this protocol:** the previous
+3D evaluator removes 3D connected components and does not use the 2D opening.
+Slab context/fusion remain intrinsically 3D; matching evaluation protocol does not
+mean making 3D inference identical to single-slice inference.
+
+## CNN编码器与AutoPET迁移
+
+
+Status: implementation validated on CPU; submission details recorded separately;
+no accuracy measured for these CNN configurations yet.
+Validation: 5 CNN CPU unit tests (including both CNNs with both SAM-tail
+supervision modes) and 5 original E cross tests pass. Both
+encoders return finite [1,784,768] tokens on a 448x448 CPU forward. Encoder
+parameters including projection: ResEnc 35,844,992; MedNeXt-B 7,215,008.
+These counts exclude Collector, pixel decoder, and reconstruction modules.
+2D E cross and SAM-tail are supported. Existing ViT is the default and its state keys
+are unchanged. The abandoned ResNet-18 prototype is not supported.
+
+## Exact structure
+
+| Stage | Resolution (448 input) | Channels | nnU-Net ResEnc blocks | MedNeXt-B blocks / expansion |
+|---|---|---|---|---|
+| S1 | 448 x 448 | 32 | 1 | 2 / 2 |
+| S2 | 224 x 224 | 64 | 3 | 2 / 3 |
+| S4 | 112 x 112 | 128 | 4 | 2 / 4 |
+| S8 | 56 x 56 | 256 | 6 | 2 / 4 |
+| S16 | 28 x 28 | 512 | 6 | 2 / 4 |
+
+Both export only S16 through a 1x1 projection (512 -> 768 for the base model),
+flatten to [B,784,768], add the existing spatial positional embedding, and use
+the existing encoder LayerNorm. This tensor feeds the original Collector and
+the original E pixel decoder. CNN S1/S2/S4/S8 are NOT new decoder skips.
+The existing image spatial stem, query cross-attention, AHER, reconstruction
+decoder, token count and losses are unchanged. ViT encoder blocks and its
+unused CLS parameter are removed only in CNN models.
+
+### nnunet_resenc_s16
+
+nnU-Net ResEnc-style 2D encoder using the first five planner stage depths
+(1,3,4,6,6), channels (32,64,128,256,512), strides (1,2,2,2,2).
+Stem: 3x3 convolution + affine InstanceNorm + LeakyReLU(0.01).
+Residual main path: 3x3 conv -> InstanceNorm -> LeakyReLU -> 3x3 conv ->
+InstanceNorm; add skip and apply LeakyReLU. Downsampling skip uses average
+pooling then channel projection plus InstanceNorm (BasicBlockD topology).
+Convolutions use He initialization; final residual normalization starts at zero.
+
+This is a self-contained encoder adaptation, not a full nnU-Net pipeline,
+not an automatically planned WORD network, and not a claim to reproduce
+ResEnc-L scores. Depth is fixed at output stride16 for interface compatibility.
+
+### mednext_b_s16
+
+MedNeXt-v1 B encoder and bottleneck in 2D: base channels32, kernel3,
+block counts (2,2,2,2,2), expansion (2,3,4,4,4), residual blocks and residual
+downsampling enabled, GRN disabled. Stem is 1x1 convolution.
+Block: depthwise 3x3 -> per-channel GroupNorm -> 1x1 expansion -> GELU ->
+1x1 compression -> residual addition. Between stages, a separate stride2
+depthwise block changes resolution/channels, with a stride2 1x1 residual.
+Stage block counts exclude these four downsampling blocks.
+
+This is an encoder-only implementation of the official v1 B topology using
+its supported 2D operations, not MedNeXt-L, MedNeXt-v2 or the full U-shaped model.
+No official checkpoint key compatibility is claimed.
+
+## Configuration and fair comparison
+
+Use the existing E cross training recipe with exactly one of:
+
+```bash
+export BACKBONE=nnunet_resenc_s16  # or mednext_b_s16; default vit
+export SLOT_HEAD_TYPE=arm_e_multiscale_query QUERY_REFINEMENT=cross_attn
+export DIMENSION=2D MAE_INIT_CHECKPOINT=
+```
+
+The shared launcher forwards BACKBONE to --backbone. Checkpoint args retain
+the selection; unified 2D head/reconstruction evaluation rebuilds it, defaulting
+to vit for old checkpoints. Resume uses strict state loading. CNN partial
+initialization from --init_checkpoint or --mae_init_checkpoint is rejected;
+resume is for a matching CNN run, not for transferring ViT weights.
+CNN self-supervised transfer is now available separately through
+`--cnn_init_checkpoint` / `CNN_INIT_CHECKPOINT`; it must reference a completed
+matching-backbone checkpoint, not a ViT MAE checkpoint.
+
+Compare scratch against scratch with identical manifests, seed, ROI selection,
+loss, LR, batch/accumulation, update budget and evaluation. These encoders are
+not parameter/FLOP matched. Do not change batch silently: high-resolution
+encoder activations may be expensive, especially at per-GPU batch16.
+CPU validation does not establish GPU BF16 compatibility or peak memory.
+Follow the repository revision policy before any submission.
+
+## SAM-tail integration
+
+Use either CNN with the existing SAM-tail recipe, setting:
+
+```bash
+export BACKBONE=nnunet_resenc_s16  # or mednext_b_s16
+export SLOT_HEAD_TYPE=arm_f_sam_tail QUERY_REFINEMENT=none PIXEL_PE=none
+export DIMENSION=2D MAE_INIT_CHECKPOINT=
+export HSAM_SUPERVISION=soft_prior_aux  # or downsample_gt
+```
+
+`QUERY_REFINEMENT=none` disables the E-only option, NOT SAM-tail refinement.
+The original P16 -> P8 -> P4 token refinement, reverse attention, mask token,
+final token-to-pixel attention and mask readout remain in ArmFDecoder unchanged.
+CNN contributes only its S16 grid; its shallow features are not new skips.
+Both original soft-prior auxiliary loss and downsampled-GT two-stage loss are
+retained; reuse their existing loss weights/schedules. No MAE encoder transfer
+from ViT is implemented for these CNNs. Compare against scratch SAM-tail to isolate
+the backbone change, not only against the existing MAE-initialized results.
+
+## AutoPET CNN masked pretraining (2026-10-13)
+
+`main_pretrain_autopet_mae.py --backbone nnunet_resenc_s16|mednext_b_s16`
+uses the same image-only AutoPET loader and seed0 patient-level 90/10 split.
+Input224, mask75% of 16x16 patches before the encoder, masked-only raw pixel
+MSE. Dense convolution processes the masked image; this is not sparse ViT MAE.
+A temporary linear reconstruction decoder predicts 16x16x3 pixels per token.
+100000 updates, 5000 warmup, 4 GPUs x batch16 x accumulation3 =192,
+AdamW, base LR1e-4 (actual7.5e-5), weight decay.05, BF16, gradient clip1.
+
+Only stem/stages transfer (strict keys/shapes/finiteness/backbone validation).
+The pretraining reconstruction decoder is discarded; downstream 512->768
+projection, token modules, spatial decoder and SAM-tail remain randomly
+initialized and all are trained. A SHA256 load report is saved in each run.
+
+Downstream: original WORD split (28586 train slices /6990 test slices),
+0.7/0.7/2 spacing, ROI20, 118800 updates, same effective batch192,
+SAM-tail soft_prior_aux or downsample_gt. Historical training-slice calibration
+and test fixed/calibrated postprocessing are retained for comparability; this
+is not the newer official-pool split. Use afterok dependencies on the completed
+pretraining job; evaluation depends on its downstream training job.
+Training scripts: `slurm/orgslot/train/cnn_mim_sip.sbatch` and
+`slurm/orgslot/train/cnn_sam_transfer_sip.sbatch`.
+
+### Submitted job chains
+
+| Encoder | Cluster / user | Pretrain | soft prior+aux train / eval | downsample GT train / eval |
+|---|---|---|---|---|
+| nnU-Net ResEnc | SIP / bolinren19 | 3048464 | 3048465 / 3048467 | 3048466 / 3048468 |
+| MedNeXt-B | XEC / sifansong | 162141 | 162142 / 162143 | 162144 / 162145 |
+
+Checked at submission: both pretrains PENDING(Priority); all downstream tasks
+PENDING(Dependency) with afterok links verified. No GPU validation yet.
+SIP pretrain/soft train use account sifansong QoS4a800; other ResEnc tasks use
+account angelosstefanidis QoS8a800 because the 4a800 submission-count limit is4.
+XEC uses account sifansong QoS8gpus. All training jobs request4 A800/24CPU/192G;
+SIP limit7days, XEC8gpus limit5days. Evaluations request1 A800/10CPU/128G/1day.
+
+Pinned runtime commits (do not update underneath jobs):
+- SIP: `7ae0689250489383a9a4611b1dd1560c513a2acf`,
+  `/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/cnn_mim_7ae0689`
+- XEC: `ab5c0aa9e3ef47cf785effdfd58a0bd29a115cf1`,
+  `/gpfs/work/aac/sifansong/worktrees/cnn_mim_ab5c0aa`
+
+Both passed check_experiment_revision.sh before submission and match GitHub
+at their submission time. The second commit only adds explicit account path
+overrides; the model/training algorithm is unchanged. CNN_PYTHON,
+CNN_PRETRAIN_CSV, CNN_WORD_ROOT, CNN_ROI_INDEX and CNN_LPIPS_STATE are explicitly
+set to sifansong paths on XEC, never the SIP defaults.
+
+CPU verification:6 CNN tests passed including transfer rejection, unchanged
+non-encoder weights and joint SAM losses. A 25-step fixed-mask two-image
+AutoPET CPU fit reduced loss0.19832->0.01306 (ResEnc),0.14443->0.00167 (MedNeXt).
+This is a pipeline check, not a GPU memory test or a generalization result.
+
+## Source links
+
+- [nnU-Net ResEnc planner](https://github.com/MIC-DKFZ/nnUNet/blob/master/nnunetv2/experiment_planning/experiment_planners/residual_unets/residual_encoder_unet_planners.py)
+- [BasicBlockD](https://github.com/MIC-DKFZ/dynamic-network-architectures/blob/main/dynamic_network_architectures/building_blocks/residual.py)
+- [MedNeXt blocks](https://github.com/MIC-DKFZ/MedNeXt/blob/main/nnunet_mednext/network_architecture/mednextv1/blocks.py)
+- [MedNeXt preset configurations](https://github.com/MIC-DKFZ/MedNeXt/blob/main/nnunet_mednext/network_architecture/mednextv1/create_mednext_v1.py)
+
+Architecture references checked 2026-10-13. Implemented locally without importing
+or installing upstream packages; benchmark claims require separate evaluation.

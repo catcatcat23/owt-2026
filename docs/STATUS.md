@@ -1,148 +1,45 @@
-# 当前实验交接
+# 实验状态快照
 
-## 2026-09-21 16:53 Collector attention alignment 已提交
+时间口径：2026-10-13 Asia/Shanghai。
+队列/runtime本次整理约22:19前后只读核查；epoch来自21:04日志快照，**不是实时epoch**。
+本次只整理文档，未提交、取消、迁移或修改任何任务。
 
-目的：以2D Arm E scratch为基准，仅新增Collector器官外注意力软惩罚，验证器官采集定位是否改善；不增加网络模块，不使用MAE、不续训，默认lambda=0保持旧实验。
-
-| 实验 | 账号/集群 | Job | 资源与时限 | 提交后核验 |
+| 实验 | 账号/集群 | 训练 → 评估 | 队列状态 | 最近已核验训练快照 |
 |---|---|---|---|---|
-| Arm E scratch + collector loss 0.01 | sifansong / XEC，account=sifansong，QoS=4gpus | 143780 | 4×A800、20CPU、192GB、7天 | PENDING (Priority)；无GPU验证 |
-| 同协议阈值校准 + head测试 + reconstruction | 同上 | 143781 | 1×A800、10CPU、128GB、7天 | PENDING (Dependency)，afterok:143780 |
+| SAM两阶段+soft prior，无额外prior aux | antengcai23/XEC | 157058 → 157060 | RUNNING / Dependency | epoch618/803（21:03） |
+| SAM两阶段+soft prior+aux | sifansong/XEC | 157059 → 157061 | RUNNING / Dependency | epoch399；21:03仍推进但此前有23–42分钟/20step停顿 |
+| SAM增量私有交互+adapter | sifansong/XEC | 157119 → 157120 | RUNNING / Dependency | epoch194（21:03） |
+| E Stage2共享query恢复 | bolinren19/SIP | 3044537 → 3044538 | PENDING / Dependency | Resources；无新结果 |
+| E Stage2分组query恢复 | bolinren19/SIP | 3044539 → 3044540 | PENDING / Dependency | 无新结果 |
+| 3D SAM恢复 | bolinren19/SIP | 3044541 → 3044542 | PENDING / Dependency | 不能据任务名声明已恢复 |
+| 3D SAM缩小GT | antengcai23/XEC | 157599 → 157600 | PENDING / Dependency | 无最终结果 |
+| ResEnc AutoPET MIM | bolinren19/SIP | 3048464 | PENDING | 尚无GPU预训练结果 |
+| ResEnc迁移soft/缩小GT | bolinren19/SIP | 3048465/66 → 3048467/68 | Dependency | 等预训练成功 |
+| MedNeXt AutoPET MIM | sifansong/XEC | 162141 | PENDING | 尚无GPU预训练结果 |
+| MedNeXt迁移soft/缩小GT | sifansong/XEC | 162142/44 → 162143/45 | Dependency | 等预训练成功 |
+| 旧Stage1五slot评估 | bolinren19/SIP | 3001901 | JobHeldUser | 不与已完成替代评估混同 |
 
-- 固定代码：`aff9f696d50fb2dcd0edfb47bc6312e8f9caae3e`，已在提交前推送origin/feature/orgslot并通过revision guard。
-- 本地固定worktree：`/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/collector_align_aff9f69`。
-- XEC固定源码快照：`/gpfs/work/aac/sifansong/worktrees/collector_align_aff9f69`。此目录不pull、不覆盖；tar无.git时训练provenance允许unavailable，真实来源以本条full commit、源码checksum、Slurm SOURCE_COMMIT和压缩包校验为准。
-- 压缩包：`/gpfs/work/aac/sifansong/collector_align_aff9f69.tar`，SHA256=`d197f72fb8f53367e4824580c46978d3e1ba3ac3685e8fbff93db45f3237475d`，本地/远端一致。
-- train/eval入口：`slurm/orgslot/train/arm_e_collector_align.sbatch`、`slurm/orgslot/eval/arm_e_collector_align.sbatch`。
-- 训练输出：运行目录下`Results/OrganSlotBank/Common8/WORD_2D/ArmE_CollectorAlign001_scratch_143780`；Slurm日志：`/gpfs/work/aac/sifansong/logs/collector_align_aff9f69/`。
-- 2D每卡16×4卡×累积3=192；118800 updates，预计最终checkpoint-802；WORD07072、ROI20、seed0、small-organ lambda_seg0.01不变。
-- 对照：E scratch训练系列2965273 / 评估2965274。对照历史中途换过microbatch，新实验从头16；不是逐更新完全相同随机轨迹。其余已有任务未修改。
-- 本地与XEC各6项新增CPU测试通过，包括两进程Gloo；数据身份28586训练切片/6990测试切片、ROI core SHA256均匹配基线。GPU正式运行尚未开始，不能宣称GPU验证通过。
-- 下一次先查143780是否启动、resolved_config是否scratch/batch16/lambda_collect0.01、首epoch各器官collector count/foreground_mass及有限梯度、weighted_collect=0.01×raw；再检查checkpoint与143781依赖。最终比较八类head fixed/calibrated和recon，不只看attention集中度。
+SAM私有交互156538/156539的81.84结果已归档到 [增量专项](INCREMENTAL_READOUT_ABLATION.md)，
+不是每次查询COMPLETED都出现一个新实验。其它旧结果见 [台账](RESULTS.md)。
+同账号另有EEG任务，不属于OWT/OrganSlot清单，未修改。
 
+## 固定runtime与安全边界
 
-## 2026-09-18 13:53 已核验快照（当前入口）
+- SIP恢复任务：`.worktrees/quota_resume_381171c`；CNN：`.worktrees/cnn_mim_7ae0689`。
+- sifansong/XEC：`/gpfs/work/aac/sifansong/worktrees/sam_combo_7837635`、
+  `inc44_adapter_348fd46`、`cnn_mim_ab5c0aa`。
+- antengcai23/XEC：`/gpfs/work/aac/antengcai23/worktrees/sam_combo_7837635`、`sam3d_2558bac`。
+- 本次仅修改开发目录 `.worktrees/orgslot_dev_current`，上述runtime保持不动。
+- 最新commit不能自动修复旧快照；后续重提必须按AGENTS核验SHA与afterok依赖。
 
-新六组：1组运行、5组排队；未发现失败。此次文档整理未再次刷新队列。
-每组训练4×A800/20CPU/192GB；scratch、seed0、top-k small-organ loss、ROI20、
-118800 updates。2D每卡8/累积6/有效192；3D每卡6/累积2/有效48 slabs。
+## 下次优先检查
 
-| 目的 | 账号/集群 | 训练 | 校准/Head/recon评估 | QoS/时限 | 状态 |
-|---|---|---|---|---|---|
-| 2D E单query点积基线 | bolinren19/SIP | 2955007 | 2955008（统一三阶段） | 4a800/7天 | Priority |
-| 2D F Query-Dot：细化tokens、不反向读取 | bolinren19/SIP | 2955009 | 2955010（统一三阶段） | 8a800/7天 | Priority |
-| 2D F Reverse-Dot：反向读取后点积 | bolinren19/SIP | 2955011 | 2955012（统一三阶段） | 8a800/7天 | Priority |
-| 3D E式点积基线 | sifansong/XEC | 140585 | 140586 / 140587 / 140588 | 4gpus/7天 | RUNNING epoch4，checkpoint-0存在 |
-| 3D F Query-Dot | sifansong/XEC | 140591 | 140592 / 140593 / 140594 | 8gpus/5天 | Priority |
-| 3D F Reverse-Dot | antengcai23/XEC | 140595 | 140596 / 140597 / 140598 | 4gpus/7天 | Resources |
+1. 157059间歇性变慢：先查日志、GPU/进程/I/O；未确认NaN、NCCL或GPFS根因，不擅自重启。
+2. 两组SAM组合最终head/recon，与原downsample_gt基线对齐；不要用loss预测Dice。
+3. adapter新类收益与旧类binary/互斥mask分别检查；checkpoint需要加载核验。
+4. CNN预训练启动后检查数据身份、100k更新预算、权重迁移报告；CPU测试不冒充GPU验证。
+5. 已知Indirect异常仍需独立诊断；不概括为所有recon正常。
+6. 需要新状态时重新查Slurm，不沿用历史预计启动日期。
 
-3D基线最新抽查：loss≈0.2511，seg≈0.7667，weighted_seg≈0.0077，ROI≈20.3%，
-日志torch峰值allocated33.57GiB，overflow0、错误日志空。非完整稳定性证明；
-checkpoint-0仅确认文件存在，未重新加载。其余五组尚无GPU运行验证。
-
-固定运行源（不要在排队/运行目录pull）：
-
-- 2D：bolinren19/SIP `/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/arm_f_linear_2d`，
-  `5f2d1cfb7fb20d499c79cb8e901d7279718cd8bc`。目录旧名linear不代表当前提交了arm_f_linear。
-- 3D：各账号XEC `/gpfs/work/aac/<账号>/worktrees/dot3d_ac8cf99`，
-  `ac8cf992cdac30c9d7bed33cc5e2f8b8ad4d8ecd`。
-- 训练入口 `slurm/orgslot/train/arm_f.sbatch`；2D评估 `arm_e_mae_unified.sbatch`；
-  3D评估 `unified_3d_protocol.sbatch`。3D校准/recon依赖训练afterok，Head依赖校准afterok。
-- 同seed不保证共有模块初始权重逐张量相同，本轮未配平；跨架构因果解释需保留此限制。
-
-已完成：F scratch 2929821/2929822；F encoder 137867/137868；F encdec137880/137881；
-3D topk137410及140443–140445统一评估；3D mean137412/137413（旧post3d协议）；
-3D MAE2951384完成100000updates，日志报告checkpoint验证通过，尚无其下游迁移任务。
-最新指标统一见RESULTS.md，不从训练校准分数推断测试成绩。
-
-下次：优先检查140585的checkpoint10；五组排队任务启动后核验head、batch、topk、
-梯度与首epoch；140591五天时限余量偏紧；3D mean若需校准比较须补统一协议。
-F2D scratch的校准/recon仍为缺口。Indirect异常需独立诊断，不能概括为recon全正常。
-
-## 历史快照：2026-09-14（以下状态已过期，仅保留背景）
-
-日志/结果核验时间：2026-09-14 14:05 Asia/Shanghai。之后队列复查仍为4组训练运行、2组训练排队。
-epoch为快照，不是实时页面；估时不含评估和排队。结果统一见[RESULTS.md](RESULTS.md)。
-
-| 实验目的 | 账号/集群 | 训练 → 评估 | 资源/QoS | epoch / checkpoint | 状态 |
-|---|---|---|---|---|---|
-| E cross-attention：显式query与空间交互 | bolinren19/SIP | 2923562 → 2923565 | 4A800/24CPU，8a800 | 441/802，425 | RUNNING |
-| F 2D scratch：双向交互 | bolinren19/SIP | 2929821 → 2929822 | 4A800/20CPU，4a800 | 222/802，220 | RUNNING |
-| F 3D topk：从30续训 | sifansong/XEC | 137410 → 137411 | 4A800/20CPU/192GB，4gpus，7天 | 61/199，60 | RUNNING |
-| F 3D mean：背景全平均对照 | antengcai23/XEC | 137412 → 137413 | 4A800/20CPU/192GB，8gpus，5天 | 14/199，10 | RUNNING |
-| F 2D MAE encoder-only | sifansong/XEC | 137867 → 137868 | 4A800/24CPU/192GB，8gpus，5天 | — | PENDING Priority |
-| F 2D MAE encoder+重建decoder | antengcai23/XEC | 137880 → 137881 | 4A800/24CPU/192GB，4gpus，7天 | — | PENDING Priority |
-
-评估均等待对应训练；未新增任务或修改依赖。sifansong/SIP、antengcai23/SIP无活动任务。
-E scratch 2922770/2922772、E MAE encoder 135283/135284、encdec 134915/134916均已完成。
-E两条续训跨过旧541故障点并完成802；不能据此声称所有NCCL底层问题已消除。
-
-## 配置、运行源与公平性
-
-未来四卡2D每卡16×累积3=有效192；3D每卡6×累积2=有效48 slabs。
-运行中F2D仍为8×累积6，新F MAE为16×累积3；microbatch不同必须披露。
-small-organ loss分组归约意味着有效batch相同不保证梯度完全相同。
-
-- F3D两账号runtime：各自 /gpfs/work/aac/<用户名>/worktrees/arm_f_batch6_20260913；
-  固定代码2697b05642d527bfd137debc0f9ed175e9ae345f。
-- F MAE encoder：/gpfs/work/aac/sifansong/worktrees/arm_f_mae_encoder_df7ed39；
-  df7ed39cb8529afebb8f1dd982eb8daf382c8c6d。
-- F MAE encdec：/gpfs/work/aac/antengcai23/worktrees/arm_f_mae_encdec_20260913；
-  5cee1e95de7e9c758df0e3cb3fc569cdc0fa8d57。旧137869/137870已取消。
-- F MAE入口 slurm/orgslot/train/arm_f_mae.sbatch；评估 arm_f_mae_unified.sbatch。
-  7项CPU加载测试和数据/hash门禁通过，正式GPU加载及batch16显存仍待启动。
-- E encoder runtime：/gpfs/work/aac/sifansong/worktrees/arme_mae_encoder_runtime_f70b831。
-- E encdec runtime：/gpfs/work/aac/sifansong/worktrees/arme_mae_runtime_43cad30。
-- 仅开发目录同步Git；运行与排队快照保持固定。各账号数据路径不得互换。
-
-## 稳定性与估时
-
-最新epoch平均总loss/seg：E CA 0.0809/0.1266；F2D 0.1029/0.1611；
-F3D topk 0.1135/0.1920；mean 0.1744/0.3603，均有限，但只是日志抽查。
-日志打印进程的torch峰值allocated显存分别16.84、23.98、57.88、57.90 GiB；
-不是实时nvidia-smi，不是全部rank峰值，也不含全部缓存/通信开销。
-实时显存查询未成功（SIP节点SSH拒绝；XEC工具审批服务失败）。
-
-按14:05吞吐外推：E CA剩32小时；F2D约81小时；F3D topk约73–76小时；
-mean约93小时，需预留10–20%波动。mean的120小时时限余量较紧。
-F MAE尚排队，batch16没有实测，不承诺结束日期。
-
-## 下次审核
-
-1. E CA checkpoint450/500、F2D checkpoint230后稳定性。
-2. F3D topk checkpoint70、mean checkpoint20；最终看Dice/P/R/volume ratio/per-z，不用低loss证明3D已修复。
-3. F MAE启动后核验初始化scope、每卡16、有效192、GPU峰值与真实加载报告。
-4. E encoder-only recon Direct-post81.17已收齐；Indirect-post7.53异常，需独立诊断。
-5. 3D D slice-wise与spatial既有均值21.13/30.25，仍过分割；temporal/ST旧链已取消，不再列作待跑。
-6. PCDD Offline85.47固定列入对比；未匹配协议，不能宣称增量或外部SOTA。
-# SAM-tail + MAE encoder-only (2026-09-22)
-
-- Purpose: retain P16/P8/P4 refinement and test mask-token two-way tail.
-- bolinren19 / SIP, account sifansong, QoS4a800.
-- Training 2984833: 4 A800,20CPU,192GB,7days; PENDING Priority at submission.
-- Unified evaluation 2984834: afterok:2984833,1 A800,10CPU,128GB,7days;
-  train6000 threshold calibration + test6990 fixed/calibrated head + recon.
-- Runtime: /gpfs/work/aac/bolinren19/OD_OWT/.worktrees/sam_tail_encoder_b3794a6
-- Pinned code: b3794a6d9fca789fc47044f1929cadb27a0abe2b (revision guard passed).
-- Train script: slurm/orgslot/train/arm_f_sam_tail_encoder.sbatch.
-- Eval script: slurm/orgslot/eval/arm_e_mae_unified.sbatch, expected arm_f_sam_tail.
-- AutoPET MAE encoder-only, NOT scratch or encoder+decoder; checkpoint SHA
-  0b3571a3e79095686a0b12649735a298aaeb8a0b3bb93a47f3484439ac4a1ec6.
-- 2D batch16 x4 xaccum3=192; updates118800, ROI20, lambda_seg0.01, topk loss.
-- CPU: previous14 tests + SAM-tail MAE transfer test passed; data identity passed.
-  GPU/DDP/pretrained production model load report pending job start.
-- Next: verify mae_initial_checkpoint_load.json, resolved configuration, first
-  finite epoch and checkpoint. Initialization differs from scratch ablations.
-## 2026-09-30：WORD official-pool 96/26/24 重跑
-
-配置：Arm E cross-attention＋AutoPET MAE encoder-only（旧划分校准85.358%的配置），不是续训旧WORD模型。固定split seed42：官方Tr100取96，官方Val20＋Ts30取24测试（8Val＋16Ts），剩26验证/完整阈值校准，4Tr不用。此前5个badcase全部归入新训练集，不能继续视为独立测试。协议清单见 `configs/orgslot/word_official96_seed42.json`。
-
-| 阶段 | 账号/集群/Slurm account | Job | 资源/QoS | 提交后核验状态 |
-|---|---|---|---|---|
-| 准备数据 | bolinren19/SIP/sifansong | 2997385 | 4CPU/64GB/cpudebug/1h | RUNNING，CPU cv2/nibabel导入通过，开始30例官方Ts几何核验与预处理 |
-| E cross-attn＋MAE encoder | bolinren19/SIP/sifansong | 2997386 | 4A800/20CPU/192GB/8a800/7d | PENDING afterok:2997385 |
-| 固定与校准head＋recon | bolinren19/SIP/sifansong | 2997387 | 1A800/10CPU/128GB/8a800/7d | PENDING afterok:2997386 |
-
-固定运行提交 `95296e1ca9e1061896fd8f777d3be73fb68a1a11`；运行worktree `/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/e_official96_95296e1`；数据根 `/gpfs/work/aac/bolinren19/OD_OWT/artifacts/word_official96_seed42_20260930_v2`；提交回执 `artifacts/official96_submission_20260930/jobs_v2.json`。每卡16×4卡×累积3=192，118800updates；不硬编码最终802epoch。划分CPU测试3项、语法/编译、版本guard通过；GPU尚未运行。
-
-首次准备2997374因CPU节点缺libGL而在重采样前失败。已增加隔离动态库路径并在CPU节点验证导入，失效训练/评估2997375/2997376已取消重建；旧记录保留，无其他历史任务变动。下一次检查2997385是否完成、READY.json计数及2997386启动配置；新旧测试集不同，分数不得直接归因架构提升。
+历史完整状态、CPU/GPU边界、源SHA及提交记录已保存在
+[旧STATUS](archive/HISTORY.md#merge-status)；禁止把该归档当今日队列。

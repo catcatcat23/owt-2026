@@ -1,53 +1,103 @@
-# OrganSlot：研究主线与架构
+# OWT → OrganSlot：架构路线与消融逻辑
 
-## 研究主线
+核心研究目标：器官专属权重的可插拔增量学习，以及器官tokens的解耦、重接与下游可用性。
+参数隔离、语义解耦、独立模块可组合是不同主张，不能由一次联合分割Dice同时证明。
 
-主要 idea 是器官专属权重的可插拔增量学习，以及解耦后重接的器官 tokens 如何辅助下游任务。
-分割头 A–F 是检验下游读出与空间信息利用的实验，不是替代增量主线的六个独立贡献。
-参数隔离、表示解耦、独立模块可组合是三个不同主张；联合 WORD 指标不能自动证明后两者。
+## 1. 从重建到模块化
 
-## 共享与专属路径
+| 阶段 | 问题 | 实际改动 | 实验证据在哪里 |
+|---|---|---|---|
+| 原OWT | 类别条件重建能否分割 | ViT→Collector→共享TGEnc→AHER→重建Transformer | RESULTS的OWT224表 |
+| LossBalance | 小器官是否被全图损失淹没 | v1器官ROI等权；v2频率加权；v3只优化present/kept正ROI | WORD收益与AutoPET退化均保留 |
+| PSEM | 查询组合与推理状态是否匹配 | v1逐样本present组合；v2Query20；v3Direct/Context/Plus triplet+Delta | WORD v3主要修复Indirect，AutoPET未一致受益 |
+| 分辨率/ROI | 预处理是否限制细节与有效监督 | 原生0.7 spacing、448输入、ROI384概率.2 | 与224协议分开，不把多项改动归因单模块 |
+| OrganSlot | 能否独立追加器官参数 | 每器官Collector/TGEnc/AHER，append/freeze、背景slot、标签隔离 | 工程基础≠正式增量结果 |
+| A–F/SAM | tokens如何读取空间信息 | canvas→query-dot→多尺度交互→动态mask读出 | 同协议消融与负结果见RESULTS |
+| 增量适配 | 冻结共享读出时新slot能否合作 | shared/stage-split/slot-private/adapter | 冻结矩阵见INCREMENTAL_READOUT_ABLATION |
 
-共享 ViT -> z；每器官 Collector_s -> K tokens -> TGEnc_s -> AHER_s -> canvas_s。
-选定 canvases 经 fusion -> 共享 reconstruction Transformer decoder -> 图像重建。
-分割路径按 head 配置选择 canvas 或共享 pixel features，输出每器官 logit 与 calibration。
-原始 OWT 的 joint token 路径与新的器官专属模块应明确区分，不能将继承组件称为新增贡献。
-AHER 后重建路径的 spatial/temporal PE 和 Transformer 不等同于 direct head 的解码路径。
+原OWT的AHER、位置编码和重建decoder是继承模块，不是OrganSlot新增贡献。
+原始3D Collector已有T→1；不能将其当新增bug。
 
-| Arm | head 配置 | 空间路径 / token 使用 |
+## 2. 当前共同路径
+
+```text
+CT → shared encoder → z
+                      ├→ Collector_s → TGEnc_s → token_norm → 20 organ tokens
+                      │                                      ├→ AHER_s → canvas_s
+                      │                                      │           ↓
+                      │                                      │    fusion → shared recon decoder
+                      │                                      └→ segmentation query/readout
+CT → shallow CNN skips + z → shared pixel decoder → P16/P8/P4 ─────────────┘
+```
+
+八前景加背景共9个slot，每个20 tokens。ROI20表示采样概率20%，不是token数量。
+448输入：P16=28、P8=56、P4=112；P4边长1/4、面积1/16。
+浅层CNN提供空间细节；不是把ViT低分辨率特征简单放大就产生新信息。
+重建canvas路径与direct segmentation空间路径不同；重建decoder不是分割head必经模块。
+
+## 3. A–F：改了什么，不能混称什么
+
+| 配置 | tokens与空间交互 | 最终读出 |
 |---|---|---|
-| A | `linear` | AHER canvas -> 线性读出 |
-| B | `multiscale_conv` | AHER canvas -> 多尺度卷积读出 |
-| C | `query_dot` | ViT 空间分支；K tokens 汇总为单 query |
-| D | `multi_query_dot` | 保留 K queries；点积 masks 经 log-mean-exp 汇总 |
-| E | `arm_e_multiscale_query` | 输入 P4/P8 + ViT P16；单 query；当前 E 为 2D |
-| E+CA | E + `query_refinement=cross_attn` | query 读取空间特征，再点积；不等于 F |
-| F | `arm_f_attention` | K tokens 顺序读取 P16/P8/P4，再由 P4 反向读取 tokens |
-| F 对照 | `arm_f_linear` | 相同多尺度 token refinement，改用线性点积读出 |
+| A linear | AHER canvas | 线性mask |
+| B multiscale_conv | AHER canvas | 多尺度卷积mask |
+| C query_dot | K tokens汇总为1 query；ViT空间分支 | query·pixel |
+| D multi_query_dot | K独立queries | 多mask，经log-mean-exp汇聚 |
+| E no-cross | mean后的1 query | query·原P4 |
+| E cross | 1 query读取P4、FFN | refined query·原P4 |
+| F Query-Dot | 20 tokens依次读取P16/P8/P4 | mean refined tokens·原P4 |
+| F Reverse-Dot | 同上；P4反向读取tokens | mean refined tokens·updated P4 |
+| 原F attention | 同上反向读取 | LayerNorm+共享Linear分类器 |
+| SAM-tail | 多尺度refinement后加mask token、双向交互、最终回读 | mask-token MLP权重·updated pixels |
 
-448 输入对应 P16=28、P8=56、P4=112；112 是边长的 1/4、面积的 1/16。
-F 保留 20 个图像条件化 tokens；三层 cross-attention/self-attention/FFN 后反向读取，
-P4 residual + FFN + 共享分类器生成 mask。解码器跨器官共享，不做 Hungarian matching。
-F 3D stem 为逐 slice 2D 卷积，attention 读取整个 slab，不新增 temporal Conv3D。
-因此 F 与旧 3D D 不只差一个反向 attention；应使用 F linear 匹配对照隔离该因素。
-Attention 权重不是前景概率；热图不能单独证明语义解耦或因果作用。
+F不是E的cross开关；F使用query_refinement=none。
+历史arm_f_linear也不是新arm_f_query_dot的同义词，应以checkpoint head类型为准。
+20 tokens是图像条件化的器官表示，不是20个独立器官实例；没有Hungarian matching。
+Attention权重不等于前景概率，热图集中不证明表示解耦。
 
-## 增量学习的边界与待验证主张
+## 4. 最终保留三个配置
 
-原始 v0 包含 append_slot、可见标签隔离、冻结/hash 审计与 tiny 工程验证。
-这些不替代正式多阶段增量实验。新增器官时必须列明共享 ViT、pixel decoder、
-reconstruction decoder、旧 slots、calibration 的冻结/更新状态和旧数据访问权限。
-仅冻结旧 slots 而更新共享路径，仍可能改变旧器官输出；独立 binary 输出不变也不保证
-新增类别后 multiclass argmax 不受竞争影响。
+| 主线 | 多尺度token读取 | 引导/监督 | tail |
+|---|---|---|---|
+| E cross + MAE encoder | 无；mean query只读P4 | 无粗mask辅助 | 无 |
+| SAM soft_prior_aux + MAE encoder | P16→P8→P4 | 每次读取前同尺度软偏置，三尺度aux | mask-token双向tail，无额外coarse prior |
+| SAM downsample_gt + MAE encoder | P16→P8→P4 | refinement后P4粗mask，nearest GT监督 | 粗mask门控tail的两次V读取 |
 
-论文最小验证：不同增量顺序的 Old/New/All 指标；独立模块直接重接 vs 微调；
-普通分割头/固定类别 query vs 图像 organ tokens；有无重建监督；参数增长与旧数据需求。
-这些是待验证问题，不在本次文档整理中标记为完成。
+架构图和启动入口在 [README](../README.md#三张架构图与差异)。
+soft_prior_aux与downsample_gt不是同一机制；后来新增组合枚举
+downsample_gt_soft_prior / downsample_gt_soft_prior_aux，属于独立消融，不覆盖三条主线。
+精确detach、门控位置、loss权重和调度见 [CONFIGURATION](CONFIGURATION.md)。
 
-## 实现入口
+## 5. 支线实验的定位
 
-- `OWT_models_orgslot.py`、`OrganSlotEmbed.py`：主模型与器官模块。
-- `ArmFDecoder.py`：F 的多尺度双向解码与 linear 对照。
-- `main_pretrain_orgslot_common8_a100.py`：训练配置入口。
-- `engine_pretrain_orgslot_common8_a100.py`：训练、数值执行与 loss 集成。
-- 各历史设计的公式、测试和路径在历史档案中按原文件名查询。
+- **MAE**：迁移encoder与可选共享重建decoder；不直接迁移Collector、TGEnc、AHER或pixel decoder。
+- **P2**：P4 reverse后上采样并融合S2，两层卷积得到224×224的P2再点积；
+  测试的是高分辨率+浅层融合这一整体，不只是放大特征图。
+- **P2 softmask**：token→pixel加detach软偏置、floor.2，无独立aux；与SAM+aux不能混称同一实验。
+- **Collector soft loss**：用GT patch支持区惩罚器官外注意力，lambda .01；不增加参数、不强制推理GT。
+- **all-slot监督**：分割监督所有可见前景，重建仍随机keep；共享梯度仍耦合。
+- **3D**：F/SAM逐slice空间CNN+跨slab attention及t/y/x PE；不是新增3×3×3卷积decoder。
+  slice-wise、PE、temporal conv、overlap fusion必须拆开；不能用后续改善倒推唯一根因。
+- **CNN**：nnU-Net ResEnc风格或MedNeXt-B 2D输出S16，经512→768投影接原接口。
+  保留现有浅层CNN分支，不额外使用backbone的S2/S4/S8跳接；不是完整官方分割系统。
+
+所有支线结果（包括无收益和待核验）见 [RESULTS](RESULTS.md)；
+完整旧设计、参数、提交/取消链见 [历史读出消融](archive/HISTORY.md#merge-query-readout-ablation)。
+
+## 6. 增量交互与adapter
+
+Stage1共享器官交互；Stage2私有化投影和P16/P8/P4交互，旧路径冻结，新路径训练。
+ViT/pixel decoder/共享SAM-tail/共享重建decoder冻结；冻结tail仍对输入可导。
+背景单独按separation策略训练，不把未来器官永远锁在旧背景中。
+新增residual16 adapter位于tail最终mask token到动态权重的读出处，4240参数，
+**四个新器官共享一套**，旧器官与背景绕过，不是每个slot重训一个完整模型。
+完整参数策略、标签访问、预算和结果见 [增量专项](INCREMENTAL_READOUT_ABLATION.md)。
+
+## 7. 实现入口
+
+- `OWT_models_orgslot.py`、`OrganSlotEmbed.py`：主模型、slot和E空间读出。
+- `ArmFDecoder.py`：F/SAM多尺度交互、prior和mask读出。
+- `CNNBackbone.py`、`models_cnn_mim.py`：CNN编码器及masked reconstruction。
+- `main_pretrain_orgslot_common8_a100.py`、`engine_pretrain_orgslot_common8_a100.py`：离线训练/loss。
+- `main_pretrain_orgslot_incremental44.py`：增量独立入口。
+- 删除的A–D启动器在标签 `archive/20260927/abcd-before-retirement`，不代表科学结果无效。

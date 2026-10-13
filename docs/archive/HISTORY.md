@@ -1,5 +1,2854 @@
 # 历史原文档案（按需查询）
 
+## 专项文档合并原文（2026-10-13）
+
+<a id="merge-cnn-backbones"></a>
+
+### docs/CNN_BACKBONES.md
+
+来源：`feature/orgslot @ f198a191fe9460410c0e8ed32c3392564b165ae1`。历史状态不作为当前状态。
+
+`````text
+# E cross: encoder-only CNN ablation
+
+Status: implementation validated on CPU; submission details recorded separately;
+no accuracy measured for these CNN configurations yet.
+Validation: 5 CNN CPU unit tests (including both CNNs with both SAM-tail
+supervision modes) and 5 original E cross tests pass. Both
+encoders return finite [1,784,768] tokens on a 448x448 CPU forward. Encoder
+parameters including projection: ResEnc 35,844,992; MedNeXt-B 7,215,008.
+These counts exclude Collector, pixel decoder, and reconstruction modules.
+2D E cross and SAM-tail are supported. Existing ViT is the default and its state keys
+are unchanged. The abandoned ResNet-18 prototype is not supported.
+
+## Exact structure
+
+| Stage | Resolution (448 input) | Channels | nnU-Net ResEnc blocks | MedNeXt-B blocks / expansion |
+|---|---|---|---|---|
+| S1 | 448 x 448 | 32 | 1 | 2 / 2 |
+| S2 | 224 x 224 | 64 | 3 | 2 / 3 |
+| S4 | 112 x 112 | 128 | 4 | 2 / 4 |
+| S8 | 56 x 56 | 256 | 6 | 2 / 4 |
+| S16 | 28 x 28 | 512 | 6 | 2 / 4 |
+
+Both export only S16 through a 1x1 projection (512 -> 768 for the base model),
+flatten to [B,784,768], add the existing spatial positional embedding, and use
+the existing encoder LayerNorm. This tensor feeds the original Collector and
+the original E pixel decoder. CNN S1/S2/S4/S8 are NOT new decoder skips.
+The existing image spatial stem, query cross-attention, AHER, reconstruction
+decoder, token count and losses are unchanged. ViT encoder blocks and its
+unused CLS parameter are removed only in CNN models.
+
+### nnunet_resenc_s16
+
+nnU-Net ResEnc-style 2D encoder using the first five planner stage depths
+(1,3,4,6,6), channels (32,64,128,256,512), strides (1,2,2,2,2).
+Stem: 3x3 convolution + affine InstanceNorm + LeakyReLU(0.01).
+Residual main path: 3x3 conv -> InstanceNorm -> LeakyReLU -> 3x3 conv ->
+InstanceNorm; add skip and apply LeakyReLU. Downsampling skip uses average
+pooling then channel projection plus InstanceNorm (BasicBlockD topology).
+Convolutions use He initialization; final residual normalization starts at zero.
+
+This is a self-contained encoder adaptation, not a full nnU-Net pipeline,
+not an automatically planned WORD network, and not a claim to reproduce
+ResEnc-L scores. Depth is fixed at output stride16 for interface compatibility.
+
+### mednext_b_s16
+
+MedNeXt-v1 B encoder and bottleneck in 2D: base channels32, kernel3,
+block counts (2,2,2,2,2), expansion (2,3,4,4,4), residual blocks and residual
+downsampling enabled, GRN disabled. Stem is 1x1 convolution.
+Block: depthwise 3x3 -> per-channel GroupNorm -> 1x1 expansion -> GELU ->
+1x1 compression -> residual addition. Between stages, a separate stride2
+depthwise block changes resolution/channels, with a stride2 1x1 residual.
+Stage block counts exclude these four downsampling blocks.
+
+This is an encoder-only implementation of the official v1 B topology using
+its supported 2D operations, not MedNeXt-L, MedNeXt-v2 or the full U-shaped model.
+No official checkpoint key compatibility is claimed.
+
+## Configuration and fair comparison
+
+Use the existing E cross training recipe with exactly one of:
+
+```bash
+export BACKBONE=nnunet_resenc_s16  # or mednext_b_s16; default vit
+export SLOT_HEAD_TYPE=arm_e_multiscale_query QUERY_REFINEMENT=cross_attn
+export DIMENSION=2D MAE_INIT_CHECKPOINT=
+```
+
+The shared launcher forwards BACKBONE to --backbone. Checkpoint args retain
+the selection; unified 2D head/reconstruction evaluation rebuilds it, defaulting
+to vit for old checkpoints. Resume uses strict state loading. CNN partial
+initialization from --init_checkpoint or --mae_init_checkpoint is rejected;
+resume is for a matching CNN run, not for transferring ViT weights.
+CNN self-supervised transfer is now available separately through
+`--cnn_init_checkpoint` / `CNN_INIT_CHECKPOINT`; it must reference a completed
+matching-backbone checkpoint, not a ViT MAE checkpoint.
+
+Compare scratch against scratch with identical manifests, seed, ROI selection,
+loss, LR, batch/accumulation, update budget and evaluation. These encoders are
+not parameter/FLOP matched. Do not change batch silently: high-resolution
+encoder activations may be expensive, especially at per-GPU batch16.
+CPU validation does not establish GPU BF16 compatibility or peak memory.
+Follow the repository revision policy before any submission.
+
+## SAM-tail integration
+
+Use either CNN with the existing SAM-tail recipe, setting:
+
+```bash
+export BACKBONE=nnunet_resenc_s16  # or mednext_b_s16
+export SLOT_HEAD_TYPE=arm_f_sam_tail QUERY_REFINEMENT=none PIXEL_PE=none
+export DIMENSION=2D MAE_INIT_CHECKPOINT=
+export HSAM_SUPERVISION=soft_prior_aux  # or downsample_gt
+```
+
+`QUERY_REFINEMENT=none` disables the E-only option, NOT SAM-tail refinement.
+The original P16 -> P8 -> P4 token refinement, reverse attention, mask token,
+final token-to-pixel attention and mask readout remain in ArmFDecoder unchanged.
+CNN contributes only its S16 grid; its shallow features are not new skips.
+Both original soft-prior auxiliary loss and downsampled-GT two-stage loss are
+retained; reuse their existing loss weights/schedules. No MAE encoder transfer
+from ViT is implemented for these CNNs. Compare against scratch SAM-tail to isolate
+the backbone change, not only against the existing MAE-initialized results.
+
+## AutoPET CNN masked pretraining (2026-10-13)
+
+`main_pretrain_autopet_mae.py --backbone nnunet_resenc_s16|mednext_b_s16`
+uses the same image-only AutoPET loader and seed0 patient-level 90/10 split.
+Input224, mask75% of 16x16 patches before the encoder, masked-only raw pixel
+MSE. Dense convolution processes the masked image; this is not sparse ViT MAE.
+A temporary linear reconstruction decoder predicts 16x16x3 pixels per token.
+100000 updates, 5000 warmup, 4 GPUs x batch16 x accumulation3 =192,
+AdamW, base LR1e-4 (actual7.5e-5), weight decay.05, BF16, gradient clip1.
+
+Only stem/stages transfer (strict keys/shapes/finiteness/backbone validation).
+The pretraining reconstruction decoder is discarded; downstream 512->768
+projection, token modules, spatial decoder and SAM-tail remain randomly
+initialized and all are trained. A SHA256 load report is saved in each run.
+
+Downstream: original WORD split (28586 train slices /6990 test slices),
+0.7/0.7/2 spacing, ROI20, 118800 updates, same effective batch192,
+SAM-tail soft_prior_aux or downsample_gt. Historical training-slice calibration
+and test fixed/calibrated postprocessing are retained for comparability; this
+is not the newer official-pool split. Use afterok dependencies on the completed
+pretraining job; evaluation depends on its downstream training job.
+Training scripts: `slurm/orgslot/train/cnn_mim_sip.sbatch` and
+`slurm/orgslot/train/cnn_sam_transfer_sip.sbatch`.
+
+### Submitted job chains
+
+| Encoder | Cluster / user | Pretrain | soft prior+aux train / eval | downsample GT train / eval |
+|---|---|---|---|---|
+| nnU-Net ResEnc | SIP / bolinren19 | 3048464 | 3048465 / 3048467 | 3048466 / 3048468 |
+| MedNeXt-B | XEC / sifansong | 162141 | 162142 / 162143 | 162144 / 162145 |
+
+Checked at submission: both pretrains PENDING(Priority); all downstream tasks
+PENDING(Dependency) with afterok links verified. No GPU validation yet.
+SIP pretrain/soft train use account sifansong QoS4a800; other ResEnc tasks use
+account angelosstefanidis QoS8a800 because the 4a800 submission-count limit is4.
+XEC uses account sifansong QoS8gpus. All training jobs request4 A800/24CPU/192G;
+SIP limit7days, XEC8gpus limit5days. Evaluations request1 A800/10CPU/128G/1day.
+
+Pinned runtime commits (do not update underneath jobs):
+- SIP: `7ae0689250489383a9a4611b1dd1560c513a2acf`,
+  `/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/cnn_mim_7ae0689`
+- XEC: `ab5c0aa9e3ef47cf785effdfd58a0bd29a115cf1`,
+  `/gpfs/work/aac/sifansong/worktrees/cnn_mim_ab5c0aa`
+
+Both passed check_experiment_revision.sh before submission and match GitHub
+at their submission time. The second commit only adds explicit account path
+overrides; the model/training algorithm is unchanged. CNN_PYTHON,
+CNN_PRETRAIN_CSV, CNN_WORD_ROOT, CNN_ROI_INDEX and CNN_LPIPS_STATE are explicitly
+set to sifansong paths on XEC, never the SIP defaults.
+
+CPU verification:6 CNN tests passed including transfer rejection, unchanged
+non-encoder weights and joint SAM losses. A 25-step fixed-mask two-image
+AutoPET CPU fit reduced loss0.19832->0.01306 (ResEnc),0.14443->0.00167 (MedNeXt).
+This is a pipeline check, not a GPU memory test or a generalization result.
+
+## Source links
+
+- [nnU-Net ResEnc planner](https://github.com/MIC-DKFZ/nnUNet/blob/master/nnunetv2/experiment_planning/experiment_planners/residual_unets/residual_encoder_unet_planners.py)
+- [BasicBlockD](https://github.com/MIC-DKFZ/dynamic-network-architectures/blob/main/dynamic_network_architectures/building_blocks/residual.py)
+- [MedNeXt blocks](https://github.com/MIC-DKFZ/MedNeXt/blob/main/nnunet_mednext/network_architecture/mednextv1/blocks.py)
+- [MedNeXt preset configurations](https://github.com/MIC-DKFZ/MedNeXt/blob/main/nnunet_mednext/network_architecture/mednextv1/create_mednext_v1.py)
+
+Architecture references checked 2026-10-13. Implemented locally without importing
+or installing upstream packages; benchmark claims require separate evaluation.
+`````
+
+<a id="merge-frozen-p4-probe"></a>
+
+### docs/FROZEN_P4_PROBE.md
+
+来源：`feature/orgslot @ f198a191fe9460410c0e8ed32c3392564b165ae1`。历史状态不作为当前状态。
+
+`````text
+# Frozen P4 probe diagnostic
+
+## E badcase extension (2026-09-30)
+
+Supports E fused P4 via a separate capture path; original F path unchanged.
+E uses one linear probe (no reverse attention exists), compared with the SAME
+checkpoint's original query head. Train organ4 and organ6 separately, fixed10
+epochs, seed42, batch16, AdamW1e-3, existing BCE+positive Dice probe objective.
+Original model fully frozen. Keep76/20 training-case split; evaluate selected
+test cases0127/0114 ONLY after epoch9, no test selection/tuning. Test and training
+IDs must be disjoint. Save all test slice probability maps and case/slice counts.
+Fixed0.5 RAW results; do not compare against historical postprocessed/calibrated
+numbers. These probes have extra supervised fitting and a different objective;
+superiority supports readability, not proof that query is the sole bottleneck.
+Script: slurm/orgslot/eval/e_badcase_probe.sbatch. Same E checkpoint as token
+interventions; do NOT reuse existing F probe weights on E features.
+
+Independent script; no changes to original model. Supports original 2D
+arm_f_attention only. Each run selects one organ (6 pancreas, 5 esophagus,
+4 gallbladder). Compare raw P4 immediately before reverse attention against
+the organ-conditioned P4 after reverse residual and FFN, before classifier.
+Hooks must fire exactly once. Both linear heads start with identical weights.
+Backbone is eval/no_grad and receives no gradients. Original head predictions
+are reported alongside probes, fixed0.5 raw without postprocessing.
+
+Run from repository root:
+
+```bash
+PYTHONPATH=. python tools/frozen_p4_probe.py --checkpoint /absolute/checkpoint-802.pth --train-csv /absolute/WORD_Training_2D_native07072.csv --class-id 6 --output /absolute/new_probe_output --batch-size 16
+```
+
+Requires current project's torch environment. Defaults: single GPU, FP32,
+10 epochs, AdamW lr1e-3, center448, no augmentation/ROI, BCE plus positive
+Dice with equal positive/negative slice-group weighting. This is a diagnostic
+probe objective, NOT the original small-organ training loss. Paired probes
+receive the exact same batches and update count. Lower batch if 4090 OOM;
+do not compare separate runs using different batches as controlled ablations.
+
+Original96 training cases are deterministically split 76/20, seed42. Case IDs,
+checkpoint and manifest hashes, load report, settings are saved. The backbone
+previously saw ALL96; holdout is only unseen to the new probes, not independent
+end-to-end validation. Never choose settings using the24 test cases. No early
+stopping or best-checkpoint selection. Output includes per-case Dice/P/R/counts
+and volume ratios for every epoch and final probe weights. Training metrics are
+online across changing head weights, explicitly flagged; not a final fixed-head
+training-set evaluation. Holdout metrics use fixed weights.
+
+Interpretation: post worse than pre suggests reduced LINEAR readability, not
+proof of information destruction. Original classifier includes LayerNorm,
+unlike these linear probes; do not attribute all baseline differences to query.
+Pre/post feature scales may affect optimization. This implementation has not
+yet been GPU-preflighted or submitted. Full-checkpoint loading and peak memory
+must be checked on actual4090 before claiming operational validation.
+`````
+
+<a id="merge-token-intervention"></a>
+
+### docs/TOKEN_INTERVENTION.md
+
+来源：`feature/orgslot @ f198a191fe9460410c0e8ed32c3392564b165ae1`。历史状态不作为当前状态。
+
+`````text
+# Frozen Arm E + MAE token intervention
+
+Inference only, no optimizer or weight update. Existing 96 training cases supply
+tokens after TGEnc, before the unchanged query LayerNorm/projection. Full training
+manifest is traversed once. Cache per-organ positive/empty sums and reservoir128
+tokens per stratum; record donor case/index. Means are slice-weighted (not
+case-weighted); reservoir sampling can underrepresent rare donor cases.
+
+Evaluate all24 test cases/6990 slices: original, all-training mean, presence-
+matched mean, three independently sampled same-organ presence-matched donors.
+Donors come only from train; select cached case uniformly then cached slice.
+GT-presence matching is diagnostic oracle information, NOT deployable inference.
+No volume or position matching; interpret replacements as interventions, not a
+proof of absence of information. Mean raw tokens may be distribution-shifted;
+retain the original LayerNorm and report mean versus donor controls separately.
+
+Compute original spatial features once per batch, reuse exactly for each organ
+readout; preserve slot identity and calibration. Assert original token re-read
+reproduces original logits. Independent organ readouts are intervened separately;
+there is no cross-class competition or joint argmax in this audit.
+
+FP32, batch2, fixed0.5 raw/post(min_size20,opening1), center448, no augmentation,
+no threshold tuning. Do not directly compare to historical calibrated Dice.
+Full test set is exploratory, already examined previously; not a blind holdout.
+No PCA/heatmap is necessary for the initial causal-use diagnostic.
+
+Outputs: provenance/checkpoint+manifest hashes, token_bank.pt, donor assignments,
+per-case Dice/P/R/volume/empty/zero-overlap/logitMAE, per-slice counts, progress,
+eight-organ summary for each condition. Donor repeats are diagnostic variation,
+not independent training seeds. No model architecture changes.
+
+## Presence ablation (2026-09-30)
+
+Use --reuse-bank PREVIOUS_OUTPUT --presence-ablation. Verify checkpoint and
+train/test manifest hashes before reusing the bank. Compare original,
+positive_only, negative_only, fixed_positive (no GT selection), mean_matched.
+Only the selected presence stratum is replaced; the other retains original
+tokens. Save maximum-GT-slice CT input, GT and probability maps as NPZ for
+gallbladder 0041/0125/0127/0145 and pancreas 0114. No retraining or threshold fit.
+Original and mean_matched must reproduce the first run before interpretation.
+
+Initial postprocessed audit: matched means reduce positive-voxel recall for
+gallbladder 74.15 to 62.53%, esophagus 82.06 to 78.34%, pancreas 83.71 to
+79.98%, while reducing negative-slice FP counts. These are pooled voxel recall,
+not case-mean recall. Gallbladder 0127 remains zero overlap. This does not
+support claiming the higher overall Dice rescued missed organs.
+
+Interpretation: true tokens outperforming donors suggests useful case-conditioned
+readout. Little change suggests limited use by this readout, not necessarily no
+information in tokens. Fixed identity conditioning may still support modularity.
+`````
+
+<a id="merge-unified-3d-evaluation"></a>
+
+### docs/UNIFIED_3D_EVALUATION.md
+
+来源：`feature/orgslot @ f198a191fe9460410c0e8ed32c3392564b165ae1`。历史状态不作为当前状态。
+
+`````text
+# 3D inference, shared 2D evaluation protocol
+
+Entry: `tools/eval_common8_orgslot_unified_3d.py`; launcher:
+`slurm/orgslot/eval/unified_3d_protocol.sbatch`.
+
+The model still receives four-slice slabs. Overlapping scores are averaged at
+each original slice **before** thresholding. Each original slice is scored once.
+No retraining or architecture change is involved.
+
+| Component | Shared with current 2D evaluation |
+| --- | --- |
+| Input | WORD 0.7×0.7×2.0, fixed-255 normalization, deterministic 448 crop |
+| Calibration | First 6000 training manifest rows, disjoint test cases |
+| Threshold selection | Per-class 0.1–0.9 sweep; maximize postprocessed case Dice on calibration only |
+| Head test | Fixed 0.5 and training-calibrated thresholds, raw and post |
+| Direct recon | Keep only selected slot; original fusion and reconstruction decoder; channel mean >0.02 |
+| Indirect recon | Keep all except selected slot; clamp(input−reconstruction,0) before channel mean >0.02 |
+| Postprocessing | Shared 2D function: remove components <20 pixels, radius-1 opening per slice |
+| Aggregation | Shared 2D counters and summarize; per-case volume Dice and foreground macro mean |
+
+Calibration reads complete slabs from the relevant training cases for context,
+but only the selected first 6000 original slices contribute to calibration.
+Threshold files bind the checkpoint and test-manifest SHA256. Test sweeps are
+not performed. Reconstruction uses its fixed historical threshold, not head thresholds.
+
+Submit calibration and reconstruction independently; head must depend on successful
+calibration. Use immutable source and the repository revision gate before submission.
+Outputs include resolved configuration, exact checkpoint-load report, scoring keys,
+per-case records, metrics and completion status.
+
+**Do not compare old 3D-post results as if they used this protocol:** the previous
+3D evaluator removes 3D connected components and does not use the 2D opening.
+Slab context/fusion remain intrinsically 3D; matching evaluation protocol does not
+mean making 3D inference identical to single-slice inference.
+`````
+
+<a id="merge-query-readout-ablation"></a>
+
+### docs/QUERY_READOUT_ABLATION.md
+
+来源：`feature/orgslot @ f198a191fe9460410c0e8ed32c3392564b165ae1`。历史状态不作为当前状态。
+
+`````text
+# Controlled query/readout ablation
+
+## 当前架构导航（2026-10-06）
+
+本节为后续工作入口；以下历史实验记录保留，不代表仍需继续全部路线。
+
+用户确认仅保留三个主线配置：E cross_attn、SAM-tail soft_prior_aux、
+SAM-tail downsample_gt。其余配置的指标、实验目的、训练预算及比较限制保留为消融记录；
+下文提及none、soft_prior、upsample_logits等仅为解释历史对照，不是新增主线。
+当前本地/远端仅main、feature/orgslot、experiment/psem、experiment/lossbalance四个分支，
+无需再删除OrganSlot实验分支。历史detached worktree不是分支，不在分支清理中删除。
+
+共同路径：CT → ViT z；每器官 Collector → TGEnc → token_norm → 20 tokens。
+重建路径保持 tokens → AHER → canvas融合 → 共享重建decoder。
+空间路径为 CT浅层CNN跳接 + z → 共享多尺度pixel decoder → P16/P8/P4。
+448输入时P4为112×112（边长1/4、面积1/16），不是边长1/16。
+
+### E：简单读出与单query交互
+
+`slot_head_type=arm_e_multiscale_query`。
+20 tokens → query_norm → mean pool → query_proj + slot identity → query。
+`query_refinement=none`直接query·P4；`cross_attn`先query读取P4，经交互FFN再点积。
+最终logits上采样到输入尺寸。E没有F的20-token P16→P8→P4逐尺度refinement。
+
+### SAM-tail：保留两条明确区分的配置
+
+共同head为`arm_f_sam_tail`，20 tokens经投影+identity，依次读取P16/P8/P4；
+之后SAM-tail使用专用mask token、双向交互及最终回读，mask-token MLP生成
+动态权重，与tail更新后的像素特征点积，最后上采样。
+
+1. **soft prior**：`hsam_supervision=soft_prior`或`soft_prior_aux`。
+   每次读取前，以当前tokens的归一化均值与该尺度归一化pixels点积乘sqrt(C)，
+   得到粗logits。`gate=0.2+0.8*sigmoid(detach(logits))`，将`log(gate)`加入
+   token→pixel attention logits。aux版本对三张粗预测加监督；路由先验detach，
+   粗预测本身仍通过aux获得梯度。此模式不会把粗mask传入tail的prior参数。
+2. **两阶段粗到精mask**：`hsam_supervision=downsample_gt`或`upsample_logits`。
+   完成多尺度refinement后，用tokens与P4点积得到coarse mask；其sigmoid传给
+   SAM-tail作为prior，再输出final mask。两个配置分别采用缩小GT或上采样粗logits
+   的辅助监督。这里“两阶段”指一次forward内的两级解码，不是增量Stage1/Stage2，
+   也不是分两次训练。
+
+两条路线使用互斥枚举；合并soft prior与tail粗mask引导需要新的受控实验，现有
+`soft_prior_aux`不能冒充二者组合。`none`保留为SAM-tail无引导对照。
+
+### 增量与历史兼容边界
+
+当前E Stage2保留query_shared/query_split；SAM私有交互增量只支持soft_prior_aux，
+尚不支持两阶段粗mask配置的slot_private版本。冻结范围及118800/阶段预算见
+[增量设计](INCREMENTAL_READOUT_ABLATION.md)。不能仅切换枚举就声称完成对应增量实验。
+
+其它F读出、P2、hard-mask等仅保留历史加载/复现，不删除原始checkpoint及指标。
+本次仅收敛文档入口，不改模型forward、state_dict、训练配置或运行快照。
+
+## P4 Reverse-Dot batch16 correction (2026-09-20)
+
+Replace baseline2955011/2955012 and lambda_seg0.03 chain2964744/2964745.
+Both use arm_f_reverse_dot, four GPUs, microbatch16/accum3/effective192,
+scratch seed0, WORD07072 ROI20, topk small-organ loss, LR7.5e-5,
+118800 updates/warmup5940. Only lambda_seg differs: 0.01 vs 0.03.
+Baseline had only just started (about7min), with no checkpoint at inspection;
+both replacements start from epoch0, no resume or MAE. Retain old artifacts.
+Keep bolinren19/SIP associations: baseline sifansong/8a800;
+lambda0.03 angelosstefanidis/8a800. Train4A800/20CPU/192GB, seven days;
+unified head calibration/test/recon eval1A800/10CPU/128GB, seven days,
+afterok new training. Eval EXPECTED_LAMBDA_SEG must match each arm.
+Use latest origin/feature/orgslot in a new pinned worktree, not either old runtime.
+Microbatch16 GPU memory/throughput remain unverified. Do not call it a GPU-tested
+configuration based on CPU compatibility tests from earlier work.
+
+Submitted 2026-09-20 01:43 CST; both trainings Pending(Priority):
+
+| lambda_seg | Train | Unified eval | Slurm account / QoS |
+| --- | --- | --- | --- |
+| 0.01 | 2965316 | 2965317, afterok:2965316 | sifansong / 8a800 |
+| 0.03 | 2965318 | 2965319, afterok:2965318 | angelosstefanidis / 8a800 |
+
+Runtime /gpfs/work/aac/bolinren19/OD_OWT/.worktrees/p4_b16_db9c788,
+source db9c788152b87d755ef67dc46eb59c7d70526c5f. Revision gate and shell
+configuration assertions (micro16/accum3/effective192/lambda per arm) passed.
+Training/evaluation paths and afterok dependencies verified after submission.
+Logs: artifacts/p4_b16_db9c788/logs. Old four jobs confirmed cancelled;
+2955011 used8min43sec before cancellation, no saved progress used in replacement.
+No GPU preflight run and no claim of batch16 GPU validation.
+
+## SIP E / Query-Dot batch16 resume (2026-09-20)
+
+User requested changing running 2D E2955007 and Query-Dot2955009 from
+microbatch8/accum6 to microbatch16/accum3, retaining four GPUs/effective192.
+Resume sources: arm_f_linear_2d/Results/OrganSlotBank/Common8/WORD_2D/
+ArmF_2D_2955007/checkpoint-120.pth and ArmF_2D_2955009/checkpoint-10.pth.
+E saved checkpoint120 during checks; validated and selected the newer file.
+Restore model/optimizer/scaler, start at epoch121 / epoch11 respectively.
+Both old/new microbatch settings yield148 optimizer updates per epoch;
+retain LR7.5e-5, total118800 updates, WORD07072 ROI20, topk small-organ loss,
+lambda_seg0.01, scratch lineage, no MAE. Resumed runs write separate job outputs.
+Use latest origin/feature/orgslot in a new immutable worktree. Cancel old
+training/evaluation chains only after checkpoint validation; rebuild afterok
+evaluations against the new job IDs. Preserve all old results/checkpoints.
+This is mixed-microbatch training, not a clean batch16-from-scratch experiment:
+group-reduced losses can change gradients despite equal effective batch.
+GPU peak memory/throughput at batch16 are not yet verified.
+
+Submitted 2026-09-20 01:34 CST on bolinren19/SIP (Slurm account sifansong):
+E train2965273 / eval2965274 (4a800); Query-Dot train2965275 / eval2965276
+(8a800). Train4A800/20CPU/192GB; eval1A800/10CPU/128GB; seven days each.
+Both training jobs initially Priority; both afterok evaluation dependencies
+verified. Cancelled old2955007/2955008/2955009/2955010; old artifacts retained.
+Runtime /gpfs/work/aac/bolinren19/OD_OWT/.worktrees/sip_2d_b16_d7dedbe,
+source d7dedbe5a03d32224103fadf68f808d7f6266614; revision gate passed.
+CPU strict model/optimizer loading and tensor finiteness passed on real
+checkpoints, optimizer steps17908 / 1628. Scaler key present; training restores
+it through existing resume logic (BF16 scaler disabled). GPU resume not yet tested.
+
+## Active P2 submissions — batch16 correction, 2026-09-20 01:16 CST
+
+| Experiment | Train | Unified eval | Status at submission |
+| --- | --- | --- | --- |
+| P2 baseline | 141130 | 141131, afterok:141130 | Priority / Dependency |
+| P2 + soft mask | 141132 | 141133, afterok:141132 | Priority / Dependency |
+
+Both: antengcai23/XEC, Slurm account sifansong, QoS8gpus, partition gpua8001t,
+4A800/20CPU/192GB training; 1A800/10CPU/128GB evaluation; five-day limit.
+Microbatch16 x 4 GPUs x accumulation3 = effective192. Scratch seed0,
+lambda_seg0.01, topk background, WORD07072 ROI20, 118800 optimizer updates.
+Pinned source efcef0739b581ec49c969c312d07c97574308cbb;
+runtime /gpfs/work/aac/antengcai23/worktrees/p2_b16_efcef07.
+Scripts: slurm/orgslot/train/arm_f.sbatch and
+slurm/orgslot/eval/arm_e_mae_unified.sbatch. Both job paths/dependencies verified.
+Seven CPU tests and dataset identity passed on XEC; revision gate passed.
+No GPU preflight performed. Peak memory for microbatch16 remains unknown.
+Cancelled the four still-pending batch8 jobs 141125/141126/141128/141129;
+no training progress lost, historical source snapshots retained.
+
+## P2 + soft spatial attention prior (2026-09-20)
+
+Independent 2D head: `arm_f_reverse_dot_p2_softmask`. Control:
+`arm_f_reverse_dot_p2`. Both P2 arms use microbatch16/accum3 on four GPUs.
+The original batch8 job chains 141125/141126 and 141128/141129 are superseded
+before starting; preserve their historical runtime snapshots.
+Only token-to-pixel cross-attention changes. Before each P16/P8/P4 block,
+compute `M = sigmoid(sqrt(C) * normalize(memory) dot normalize(mean(tokens)))`
+from the current projected/refined organ tokens and that scale's original
+pixel features. Broadcast the same organ prior to all 20 tokens / 4 heads:
+`attention = softmax(QK/sqrt(d) + log(0.2 + 0.8*M))`.
+The prior is detached, alpha=1, epsilon=0.2; no GT masks, extra trainable
+parameters, auxiliary losses, mask threshold, mask annealing or token matching.
+The floor bounds the bias to [log(0.2), 0]; it does not guarantee recovery of
+missed organs. P16 uses input-projected tokens; later scales use refined tokens.
+This is same-scale self-guidance, not an exact Mask2Former/H-SAM reproduction
+or a previous-layer supervised mask decoder. Coarse dot priors are not separately
+supervised/calibrated and their usefulness remains an experimental hypothesis.
+
+P4 reverse attention, S2/P2 fusion, dot readout, reconstruction and loss remain
+identical. State-dict keys and initial values match P2 exactly. Checkpoint args
+must retain the new head name: identical tensor keys alone cannot identify routing.
+The existing FP32 attention region also computes this bias. 3D is rejected.
+
+Use existing training entry point with
+`ARM_F_HEAD_TYPE=arm_f_reverse_dot_p2_softmask`, `ARM_F_DIMENSION=2D`,
+`ARM_F_MICRO_BATCH=16`, `ARM_F_ACCUM_ITER=3`, `ARM_F_LAMBDA_SEG=0.01`,
+`BACKGROUND_REDUCTION=topk`, scratch seed0, no MAE init, and the same WORD07072
+ROI20 dataset / 118800 updates / effective batch192 as P2. Evaluation must use
+`EXPECTED_SLOT_HEAD_TYPE=arm_f_reverse_dot_p2_softmask` and the same unified
+train-calibrated head + reconstruction protocol. Batch16 GPU memory is unverified;
+do not silently reduce microbatch if it fails. Seven CPU tests passed on XEC.
+
+Tests cover alpha=0 exact baseline equivalence, strict P2 weight loading,
+identical initialization, finite non-hard biases, preferential synthetic routing,
+BF16-input finite backward, full-model gradients and checkpoint roundtrip,
+and unchanged legacy heads. GPU validation and scientific benefit remain pending.
+Assess small-organ recall, empty-slice FP and predicted/GT volume as well as Dice;
+more concentrated attention alone is not evidence of better organ localization.
+
+## P2 shallow-skip readout (2026-09-20)
+
+New 2D-only head `arm_f_reverse_dot_p2`. Keep P16/P8/P4 token refinement,
+P4 reverse attention, 20-token mean query and normalized dot scale unchanged.
+Return existing stem S2 (64 channels at standard width128); bilinearly upsample
+organ-conditioned refined P4, concatenate with 1x1-projected S2, then apply
+two 3x3 Conv/GroupNorm(1)/GELU layers at width128. Dot readout now occurs on P2
+(224x224 for input448), followed by the original full-size bilinear resize.
+Fusion is shared across organs, evaluated per organ. No mask attention, no
+extra supervision, no new temporal mixing. Existing head defaults/weights stay
+unchanged; P2 is explicitly rejected for 3D. Added modules preserve constructor
+RNG for later slots. P2 increases memory/compute; GPU throughput is unverified.
+
+Controlled training: scratch seed0, WORD07072 ROI20, lambda_seg0.01, topk
+small-organ loss, LR7.5e-5, 118800 updates/warmup5940, four A800,
+microbatch16/accum3/effective192. Control is original Reverse-Dot2955011, NOT
+the lambda0.03 experiment. Different SIP/XEC software/hardware is a caveat.
+Target antengcai23/XEC, account sifansong, QoS8gpus (maximum five days).
+Use the existing unified2D calibration/head/recon evaluator with
+EXPECTED_SLOT_HEAD_TYPE=arm_f_reverse_dot_p2 and EXPECTED_LAMBDA_SEG=0.01.
+This tests the P2 fusion/readout package, not resolution alone.
+
+Historical batch8 submission, superseded before starting: antengcai23/XEC train141125
+(Priority), eval141126 (afterok:141125 verified), both QoS8gpus/5days.
+Runtime /gpfs/work/aac/antengcai23/worktrees/reverse_dot_p2_3150ff3,
+commit3150ff306ae47e57aa081b538c40de602a0c630a. Six CPU tests passed
+locally and on XEC; dataset identity and revision gates passed.
+GPU memory/throughput and training stability remain unverified until start.
+
+Existing E, `arm_f_attention`, and `arm_f_linear` implementations are retained.
+New heads are `arm_f_query_dot` and `arm_f_reverse_dot`.
+
+| Head | Token refinement | Reverse pixel update | Readout |
+| --- | --- | --- | --- |
+| arm_e_multiscale_query | Existing mean-pool query | None | Existing normalized dot |
+| arm_f_query_dot | Existing F P16/P8/P4 blocks | None | Mean refined tokens, normalized dot with original P4 |
+| arm_f_reverse_dot | Same F blocks | Existing reverse attention + residual + FFN | Same query, normalized dot with updated P4 |
+| arm_f_attention | Unchanged | Unchanged | Existing LayerNorm + linear classifier |
+
+New dot heads use `sqrt(channels) * cosine(pixel, mean(refined_tokens))`.
+No learned pooling or added query projection. Slot identity is already injected
+before refinement and is not added again. E's own query construction is unchanged.
+The two new paths support 2D and 3D; the controlled E/F experiment is 2D because
+the existing E baseline supports only 2D.
+
+Planned common protocol: WORD native07072, 448/global448/ROI384, ROI probability
+0.2, scratch, seed0, 20 tokens, 128 channels, small-organ loss, lambda_seg0.01,
+LR7.5e-5, 118800 updates, warmup5940, 4 GPUs, microbatch8/accum6/effective192.
+Use identical background reduction and optimizer settings across runs. No resume
+or MAE initialization. Retain token self-attention, FFN and F attention PE.
+
+Use the existing unified 2D evaluator with EXPECTED_SLOT_HEAD_TYPE set explicitly:
+training first6000 calibration, test fixed0.5 and calibrated, raw/post, plus recon.
+Do not compare calibrated results against an uncalibrated historical baseline.
+
+Same seed alone does not ensure identical common-module initialization across
+architectures (constructor RNG consumption differs). Before claiming an exact
+initial-weight-matched ablation, audit or explicitly synchronize shared initial
+weights in a separate experiment initialization step. Legacy initialization is
+not changed here. E vs F also changes query aggregation/projection and PE, so it
+tests the refinement design as a package, not cross-attention alone.
+
+CPU tests cover new paths in 2D/3D, finite gradients and strict round-trip loading;
+legacy decoder tests compare keys, initialization and outputs against fd9cf91.
+No GPU training is implied by these tests.
+
+## 2D Reverse-Dot segmentation-weight ablation (2026-09-20)
+
+Add one independent scratch run against Reverse-Dot train2955011/eval2955012.
+Only lambda_seg changes from 0.01 to 0.03. Set ARM_F_LAMBDA_SEG=0.03 for
+training and EXPECTED_LAMBDA_SEG=0.03 for the unified evaluator; both defaults
+remain 0.01 for existing experiments. The reconstruction/LPIPS weights, head,
+seed0, WORD07072 split, ROI20, topk small-organ loss, LR7.5e-5, 118800 updates,
+warmup5940, four GPUs and microbatch8/accum6/effective192 remain unchanged.
+No MAE initialization or resume. Keep the original run and evaluation chain.
+Evaluate fixed0.5 and training-calibrated head masks plus reconstruction with
+the existing protocol. Increased loss weight alone is not evidence of improved
+Dice; compare segmentation gains and possible reconstruction degradation.
+
+Submitted 2026-09-20 00:04 CST on bolinren19/SIP, Slurm account
+angelosstefanidis, QoS8a800: train2964744 (4A800/20CPU/192GB/7days),
+eval2964745 (1A800/10CPU/128GB/7days), afterok:2964744 verified.
+Initial states: Priority / Dependency. Pinned source
+188555c2c18de95ebb76a21bb23ea3c50cba7db3 at
+/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/arm_f_reverse_dot_seg003_188555c.
+CPU configuration/metadata checks passed; GPU execution remains pending.
+
+## 3D controlled extension
+
+The new `arm_e_multiscale_query_3d` baseline reuses F's slice-wise E spatial
+stem/fusion without token refinement or reverse attention. Its query is exactly
+E-style: token LayerNorm, mean, projection, slot identity; normalized dot with
+P4 followed by trilinear upsampling. It does not modify the existing 2D E head.
+The other two arms use `arm_f_query_dot` and `arm_f_reverse_dot` with dimension=3D.
+F attention blocks operate across the slab with existing axial temporal/spatial PE;
+the baseline adds no new PE or temporal convolution.
+
+Use ARM_F_DIMENSION=3D, ARM_F_HEAD_TYPE explicitly selected, BACKGROUND_REDUCTION=topk,
+scratch/seed0, microbatch6, four GPUs, accumulation2 (48 slabs), 118800 updates,
+WORD07072 and ROI20. All three use the unified 3D calibration/head/reconstruction
+evaluator, not the older post3d-only evaluator. No training jobs were submitted
+as part of implementing this extension.
+# Multiscale F + SAM-style tail (2026-09-22)
+
+Requested first training is **2D MAE encoder-only**, not scratch. Launcher:
+`slurm/orgslot/train/arm_f_sam_tail_encoder.sbatch`; AutoPET 2D MAE final
+checkpoint SHA256 `0b3571a3e79095686a0b12649735a298aaeb8a0b3bb93a47f3484439ac4a1ec6`.
+Only the existing encoder transfer mapping is loaded; organ modules, spatial
+decoder, reconstruction decoder and SAM tail retain random initialization.
+No optimizer resume. 4 GPUs x 16 x accumulation3 = 192, 118800 updates,
+lambda_seg0.01, historical top-k small-organ loss. Compared with scratch
+Query/Reverse-Dot this changes BOTH initialization and decoder; use the MAE
+encoder-only counterparts for architectural comparisons.
+
+New opt-in head: `arm_f_sam_tail`. Implementation only; no GPU job submitted.
+Existing E/F heads, losses, reconstruction and frozen job worktrees are unchanged.
+
+Path: existing 20 organ tokens -> existing P16/P8/P4 TokenBlocks ->
+prepend ONE shared learned mask token -> token self-attention ->
+token-to-P4 attention -> token FFN -> P4-to-token attention ->
+final token-to-updated-P4 attention -> mask token MLP ->
+ordinary dynamic dot product with updated P4 -> existing output interpolation.
+
+One terminal two-way block, four attention heads, usual width128. It retains
+the F axial spatial PE (temporal + spatial for 3D); the input 21-token sequence
+is a fixed sparse content reference within the tail, not a geometric prompt.
+Post-residual LayerNorm follows each tail sublayer. The MLP is three Linear
+layers with GELU between them. The readout has no cosine normalization or
+sqrt(C) multiplier. There is no pixel FFN in the terminal reverse step.
+Mask token and tail weights are shared across organs; organ conditioning comes
+from existing slot-specific tokens/identity. No GT prompt, P2, soft mask,
+IoU head, multimask output, new loss, or SAM/MAE weights are introduced.
+
+This is a SAM-inspired tail, NOT original SAM: retained multiscale front end,
+one rather than two blocks, existing axial PE and PyTorch MHA projections,
+GELU, no SAM upscaler. Reference:
+https://github.com/facebookresearch/segment-anything/blob/main/segment_anything/modeling/transformer.py
+and the adjacent mask_decoder.py.
+
+CLI: `--slot_head_type arm_f_sam_tail --pixel_pe none --query_refinement none`.
+Existing launcher accepts `ARM_F_HEAD_TYPE=arm_f_sam_tail`; for historical
+small-organ comparisons explicitly set `BACKGROUND_REDUCTION=topk` (launcher
+default is mean), `ARM_F_MICRO_BATCH=16 ARM_F_ACCUM_ITER=3` in 2D.
+Set evaluation `EXPECTED_SLOT_HEAD_TYPE=arm_f_sam_tail`. New head requires its
+own trained checkpoint; old-head checkpoints are not exact new-head resumes.
+No submission until commit/push and immutable-runtime revision verification.
+
+CPU tests cover 2D/3D shapes, operation order, BF16-input finite backward,
+nonzero gradients through all tail parameters and organ inputs, token
+conditioning, model/reconstruction integration, strict checkpoint roundtrip,
+and exact pre-change outputs/state dictionaries of all six older F heads.
+GPU/DDP, production-memory and accuracy remain unvalidated. 3D support here
+uses the existing slice-wise spatial branch and flattened slab attention;
+it is not evidence that this resolves previous 3D segmentation issues.
+`````
+
+<a id="merge-architecture"></a>
+
+### docs/ARCHITECTURE.md
+
+来源：`feature/orgslot @ f198a191fe9460410c0e8ed32c3392564b165ae1`。历史状态不作为当前状态。
+
+`````text
+# OrganSlot：研究主线与架构
+
+## 研究主线
+
+主要 idea 是器官专属权重的可插拔增量学习，以及解耦后重接的器官 tokens 如何辅助下游任务。
+分割头 A–F 是检验下游读出与空间信息利用的实验，不是替代增量主线的六个独立贡献。
+参数隔离、表示解耦、独立模块可组合是三个不同主张；联合 WORD 指标不能自动证明后两者。
+
+## 共享与专属路径
+
+共享 ViT -> z；每器官 Collector_s -> K tokens -> TGEnc_s -> AHER_s -> canvas_s。
+选定 canvases 经 fusion -> 共享 reconstruction Transformer decoder -> 图像重建。
+分割路径按 head 配置选择 canvas 或共享 pixel features，输出每器官 logit 与 calibration。
+原始 OWT 的 joint token 路径与新的器官专属模块应明确区分，不能将继承组件称为新增贡献。
+AHER 后重建路径的 spatial/temporal PE 和 Transformer 不等同于 direct head 的解码路径。
+
+| Arm | head 配置 | 空间路径 / token 使用 |
+|---|---|---|
+| A | `linear` | AHER canvas -> 线性读出 |
+| B | `multiscale_conv` | AHER canvas -> 多尺度卷积读出 |
+| C | `query_dot` | ViT 空间分支；K tokens 汇总为单 query |
+| D | `multi_query_dot` | 保留 K queries；点积 masks 经 log-mean-exp 汇总 |
+| E | `arm_e_multiscale_query` | 输入 P4/P8 + ViT P16；单 query；当前 E 为 2D |
+| E+CA | E + `query_refinement=cross_attn` | query 读取空间特征，再点积；不等于 F |
+| F | `arm_f_attention` | K tokens 顺序读取 P16/P8/P4，再由 P4 反向读取 tokens |
+| F 对照 | `arm_f_linear` | 相同多尺度 token refinement，改用线性点积读出 |
+
+448 输入对应 P16=28、P8=56、P4=112；112 是边长的 1/4、面积的 1/16。
+F 保留 20 个图像条件化 tokens；三层 cross-attention/self-attention/FFN 后反向读取，
+P4 residual + FFN + 共享分类器生成 mask。解码器跨器官共享，不做 Hungarian matching。
+F 3D stem 为逐 slice 2D 卷积，attention 读取整个 slab，不新增 temporal Conv3D。
+因此 F 与旧 3D D 不只差一个反向 attention；应使用 F linear 匹配对照隔离该因素。
+Attention 权重不是前景概率；热图不能单独证明语义解耦或因果作用。
+
+## 增量学习的边界与待验证主张
+
+原始 v0 包含 append_slot、可见标签隔离、冻结/hash 审计与 tiny 工程验证。
+这些不替代正式多阶段增量实验。新增器官时必须列明共享 ViT、pixel decoder、
+reconstruction decoder、旧 slots、calibration 的冻结/更新状态和旧数据访问权限。
+仅冻结旧 slots 而更新共享路径，仍可能改变旧器官输出；独立 binary 输出不变也不保证
+新增类别后 multiclass argmax 不受竞争影响。
+
+论文最小验证：不同增量顺序的 Old/New/All 指标；独立模块直接重接 vs 微调；
+普通分割头/固定类别 query vs 图像 organ tokens；有无重建监督；参数增长与旧数据需求。
+这些是待验证问题，不在本次文档整理中标记为完成。
+
+## 实现入口
+
+- `OWT_models_orgslot.py`、`OrganSlotEmbed.py`：主模型与器官模块。
+- `ArmFDecoder.py`：F 的多尺度双向解码与 linear 对照。
+- `main_pretrain_orgslot_common8_a100.py`：训练配置入口。
+- `engine_pretrain_orgslot_common8_a100.py`：训练、数值执行与 loss 集成。
+- 各历史设计的公式、测试和路径在历史档案中按原文件名查询。
+`````
+
+
+## 文档整理原文备份（2026-10-13）
+
+以下为整理前原文，包含过期状态；当前结论以 [结果台账](../RESULTS.md) 为准。
+代码块中的相对路径以原分支/原文件为基准，不表示当前可执行命令。
+
+- [README.md](#merge-readme)
+- [docs/RESULTS.md](#merge-results)
+- [docs/STATUS.md](#merge-status)
+- [docs/CONFIGURATION.md](#merge-configuration)
+- [docs/E_CROSSATTN_MAE.md](#merge-e-crossattn-mae)
+- [docs/SAM_SOFT_PRIOR.md](#merge-sam-soft-prior)
+- [docs/SAM_TAIL_HSAM.md](#merge-sam-tail-hsam)
+- [docs/SAM_TAIL_ALL_SEG.md](#merge-sam-tail-all-seg)
+- [docs/ABCD_RETIREMENT.md](#merge-abcd-retirement)
+- [docs/CLEANUP_20260927.md](#merge-cleanup-20260927)
+- [main:docs/RESULTS.md](#owt-results)
+- [experiment/psem:docs/RESULTS.md](#psem-results)
+- [experiment/lossbalance:docs/EXPERIMENTS.md](#lossbalance-experiments)
+
+<a id="merge-readme"></a>
+
+### README.md
+
+来源：`feature/orgslot @ f198a191fe9460410c0e8ed32c3392564b165ae1`。原文完整保留。
+
+`````text
+# OrganSlot
+
+开发中的 E cross / SAM-tail 编码器对照：[nnU-Net ResEnc / MedNeXt-B 2D](docs/CNN_BACKBONES.md)。
+仅替换 backbone，CPU验证已通过；2026-10-13已提交两条AutoPET预训练及四条SAM-tail迁移训练依赖链，尚无分割成绩，不计入下方正式指标。
+
+共享ViT＋器官独立tokens＋共享空间分支的分割/重建框架。后续仅保留以下三个2D主线配置。
+架构图为按代码绘制的AI生成示意图，PNG供GitHub预览，PDF供下载；不是SAM/H-SAM官方复刻。
+使用内置image_gen生成（工具未提供image2.5版本选择）；[重绘提示词记录](docs/figures/redraw_prompts.json)。
+采用纯白、柔和配色、英文短标签的扁平矢量风格；文件本身仍是栅格图，PDF非可编辑矢量。
+
+## 三个配置的正式指标
+
+### 最新增量结果：SAM Stage2 私有交互（2026-10-13）
+
+训练 `156538`、评估 `156539`（sifansong/XEC）均完成；checkpoint-802精确加载，
+118800次Stage2更新，24病例／7315切片完整评估。官方池seed42，验证集选择阈值。
+
+| 结果（Dice %，后处理） | 旧四类 | 新四类 | 八类平均 |
+|---|---:|---:|---:|
+| Stage1，固定0.5 | 86.78 | — | — |
+| Stage2，固定0.5 | 86.78 | 76.39 | 81.58 |
+| Stage1，校准 | 87.12 | — | — |
+| **Stage2，校准** | **87.12** | **76.57** | **81.84** |
+| PCDD论文4–4参考 | 84.09 | 82.75 | 83.42 |
+
+旧四类逐器官二值指标保持不变，不等于互斥八类合并mask也零遗忘。
+与PCDD报告值相比旧类+3.03、新类−6.18、全部−1.58个百分点；划分、预处理及评估
+未完全对齐，不能当作严格同协议胜负。重建direct-post为75.28%，indirect-post仅6.10%，
+后者存在大面积假阳性，尚待诊断。此结果不混入Offline排序。
+完整八类指标、适配方式和证据路径见[增量实验记录](docs/INCREMENTAL_READOUT_ABLATION.md#formal-sam-stage2-results-2026-10-13)。
+
+### 最新汇总：E cross＋MAE三次同协议随机划分（2026-10-08）
+
+**主指标：固定0.5平均Dice 85.62%，验证集校准平均Dice 86.22%。**
+使用官方池划分seed0/1/42，分别独立训练；每次96例训练、26例验证、24例测试，
+模型seed均为0。以下为三次八类病例Dice均值的等权算术平均，不合并重复病例。
+这是重复随机划分评估，不是三折交叉验证：seed0/1、0/42、1/42分别有13、10、11例
+共同测试病例。旧划分及替换5病例的探索性评估不纳入主均值。
+
+| E cross＋MAE encoder配置 | 训练Job | 测试病例／切片 | 阈值校准数据 | 固定0.5 | 校准后 |
+|---|---|---|---|---:|---:|
+| 官方池seed42 | 2998655，bolinren19/SIP | 24／7315 | 独立26例验证集 | 84.95 | 85.64 |
+| 官方池seed0 | 3006796，bolinren19/SIP | 24／6854 | 独立26例验证集 | 85.20 | 85.57 |
+| 官方池seed1 | 3006797，bolinren19/SIP | 24／7079 | 独立26例验证集 | 86.71 | 87.44 |
+| **官方池三次划分平均（同协议）** | seed42/0/1等权 | 非互斥测试集 | 验证集校准 | **85.62** | **86.22** |
+
+八类校准Dice：
+
+| 器官 | 旧划分 | seed42 | seed0 | seed1 |
+|---|---:|---:|---:|---:|
+| 脾脏 | 94.74 | 94.07 | 94.71 | 94.92 |
+| 右肾 | 94.62 | 93.72 | 94.22 | 95.21 |
+| 左肾 | 94.46 | 93.93 | 94.52 | 94.69 |
+| 胆囊 | 62.34 | 69.63 | 69.92 | 74.64 |
+| 食管 | 78.00 | 71.72 | 70.80 | 75.40 |
+| 胰腺 | 77.29 | 78.91 | 77.39 | 80.91 |
+| 肝脏 | 95.29 | 95.72 | 95.67 | 96.17 |
+| 胃 | 86.13 | 87.43 | 87.34 | 87.61 |
+
+### SOTA数值汇总（按展示值降序，协议不同，不是公平胜负排名）
+
+| 方法 | 校准Dice展示值 | 汇总口径 |
+|---|---:|---|
+| E cross＋MAE encoder | **86.22** | 官方池seed0/1/42三次同协议随机划分平均 |
+| SAM soft prior＋aux | 85.55 | 旧划分单次，尚未完成相同三次划分 |
+| SAM两阶段mask、缩小GT监督 | 85.23 | 旧划分单次，尚未完成相同三次划分 |
+
+不能凭这张混合协议汇总表断言E优于SAM。严格同旧划分的E仍为85.36，
+下方消融排序保留原单次值。PCDD Offline85.47是外部论文参考，未核实相同
+病例划分，不能据86.22宣称同协议超过。正式方法比较应使用所有方法相同
+划分集合的均值。
+
+单列记录（不参与上述均值）：旧划分训练148833固定84.30%、校准85.36%，
+采用训练集前6000切片校准；替换5个badcase的评估复用该checkpoint，
+属于测试病例组成的探索性分析，不是独立重训，也不纳入主排序。
+
+结果来源：旧划分路径见下方；seed42为仓库根
+`artifacts/offline_eval_recovery_20261005/evaluation/ArmE_CrossAttn_MAEenc_Official96_2998655_heads_test/results.json`；
+seed0/1为`.worktrees/offline_splits_d553bc7/Results/OrganSlotBank/evaluation/Common8/WORD_2D/ArmE_CrossAttn_MAEenc_Official96_{3006796,3006797}_heads_test/results.json`。
+均读取`binary_post/selected_post.foreground_mean_case_dice_presence_mean`的未舍入值求平均。
+
+### 旧划分同协议比较
+
+**旧24例测试划分、6990张切片、checkpoint-802、MAE encoder-only**。Dice单位%，
+按病例计算再按八个前景器官平均，固定/校准结果均后处理。校准使用训练集前6000切片，
+不是测试GT调参，也不是独立验证集校准。单seed，不能据微小差距声称稳定优势。
+
+| 主线 | 固定0.5 | 校准后 | 训练Job / 账号集群 |
+|---|---:|---:|---|
+| E cross-attention | 84.30 | 85.36 | 148833 / sifansong-XEC |
+| SAM-tail＋soft prior＋aux | **84.86** | **85.55** | 150971 / sifansong-XEC |
+| SAM-tail＋两阶段mask、缩小GT监督 | 84.41 | 85.23 | 2998657 / bolinren19-SIP |
+
+| 器官（校准后） | E cross | SAM soft prior＋aux | SAM 缩小GT |
+|---|---:|---:|---:|
+| 脾脏 | 94.74 | 94.74 | **94.83** |
+| 右肾 | 94.62 | 94.43 | **94.66** |
+| 左肾 | 94.46 | 94.45 | **94.47** |
+| 胆囊 | 62.34 | **64.15** | 61.59 |
+| 食管 | 78.00 | 78.47 | **78.50** |
+| 胰腺 | **77.29** | 76.46 | 76.73 |
+| 肝脏 | 95.29 | 95.30 | **95.32** |
+| 胃 | 86.13 | **86.43** | 85.77 |
+| 平均 | 85.36 | **85.55** | 85.23 |
+
+soft prior＋aux相对E主要改善胆囊，胰腺并未全面改善。核验来源为以下目录的
+`results.json`（`complete_split=true`，`binary_post/selected_post`）：
+
+- E：`sifansong/XEC:/gpfs/work/aac/sifansong/worktrees/e_cross_mae_9791e87/Results/OrganSlotBank/evaluation/Common8/WORD_2D/ArmE_CrossAttn_MAEenc_148833_ckpt802_heads_test/`
+- soft prior＋aux：`sifansong/XEC:/gpfs/work/aac/sifansong/worktrees/sam_soft_aux_2b5aa2f/Results/OrganSlotBank/evaluation/Common8/WORD_2D/ArmF_2D_150971_ckpt802_heads_test/`
+- 缩小GT：`bolinren19/SIP:.worktrees/quota_recovery_b5a4792/Results/OrganSlotBank/evaluation/Common8/WORD_2D/ArmF_2D_2998657_ckpt802_heads_test/`
+
+**新划分单列**：官方池96训练/26验证/24测试（seed42），E cross＋MAE固定84.95%、
+验证集校准85.64%，7315测试切片，训练2998655。不混入上表。
+PCDD Offline85.47%、4–4增量83.42%只是不同协议的外部参考，不是同病例、同预处理的复现比较。
+完整历史见[RESULTS](docs/RESULTS.md)。
+
+## 三张架构图与差异
+
+以下为Offline联合训练结构。每个器官独立Collector/TGEnc/AHER；共享ViT、浅层CNN、
+pixel decoder、读出和重建decoder。448输入下P16/P8/P4边长28/56/112；P4边长1/4、面积1/16。
+SAM图重点展开分割decoder，共用的ViT、Collector和重建路径省略处与E一致，未删除模块。
+
+### 1. E cross-attention
+
+![E cross-attention架构](docs/figures/architecture_e_cross.png)
+
+[下载PDF](docs/figures/architecture_e_cross.pdf)
+
+`slot_head_type=arm_e_multiscale_query`，`query_refinement=cross_attn`，`hsam_supervision=none`。
+20 tokens经query_norm、mean pool、query_proj及slot identity变成1个query；读取P4，经FFN后
+与原P4点积生成mask。没有20-token逐尺度交互，也没有SAM-tail。
+代码：[OrganSlotEmbed.py](OrganSlotEmbed.py)的`MultiScalePixelQueryDecoder2D`。
+
+启动配置（先执行下方公共环境准备，再用公共`sbatch`命令提交）：
+
+```bash
+export HSAM_SUPERVISION=none
+TRAIN_SCRIPT=slurm/orgslot/train/arm_e_crossattn_mae_encoder.sbatch
+```
+
+### 2. SAM-tail＋soft prior＋aux
+
+![SAM soft prior与辅助监督架构](docs/figures/architecture_sam_soft_prior_aux.png)
+
+[下载PDF](docs/figures/architecture_sam_soft_prior_aux.pdf)
+
+`slot_head_type=arm_f_sam_tail`，`query_refinement=none`，`hsam_supervision=soft_prior_aux`。
+20 tokens依次读取P16→P8→P4。每次读取前，用当前tokens归一化均值与该尺度pixels
+余弦读出粗logits，`log(0.2+0.8*sigmoid(logits.detach()))`作为attention-score bias。
+三张粗logits上采样至完整GT大小，辅助loss取均值；路由detach，aux保留梯度。
+之后SAM-tail用mask token、双向交互、最终回读及MLP动态点积生成最终mask。
+**此模式不会将粗mask传入tail内部作为prior**。
+分割目标：`0.01 × (L_final + 0.25 × mean(L_P16,L_P8,L_P4))`。
+
+启动配置：
+
+```bash
+export HSAM_SUPERVISION=soft_prior_aux
+TRAIN_SCRIPT=slurm/orgslot/train/sam_tail_soft_prior.sbatch
+```
+
+### 3. SAM-tail＋两阶段mask、缩小GT监督
+
+![SAM两阶段mask与缩小GT监督架构](docs/figures/architecture_sam_downsample_gt.png)
+
+[下载PDF](docs/figures/architecture_sam_downsample_gt.pdf) · [三图合并PDF](docs/figures/organslot_three_architectures.pdf)
+
+`slot_head_type=arm_f_sam_tail`，`query_refinement=none`，`hsam_supervision=downsample_gt`。
+20 tokens完成不带mask引导的P16→P8→P4交互后，先与P4生成112×112粗mask。
+GT最近邻缩小后监督粗mask；其sigmoid概率不detach，门控SAM-tail两次token读取中的
+投影V，不重新归一化attention。最终mask上采样并使用完整GT。
+分割目标：`0.01 × [w(e)L_final + (1-w(e))L_coarse]`，`w(e)=0.6^(0.990^e)`。
+监控`hsam_lost_positive_slices`，检查缩小GT是否丢失小阳性区域。
+这里“两阶段”是**一次forward中的粗到精解码**，不是增量训练Stage1/Stage2。
+实现：[ArmFDecoder.py](ArmFDecoder.py)、[hsam_supervision.py](hsam_supervision.py)。
+
+启动配置：
+
+```bash
+export HSAM_SUPERVISION=downsample_gt
+TRAIN_SCRIPT=slurm/orgslot/train/arm_f_sam_tail_hsam.sbatch
+```
+
+| 差异 | E cross | SAM soft prior＋aux | SAM 缩小GT |
+|---|---|---|---|
+| 交互tokens | pool后的1个query | 20个tokens | 20个tokens |
+| 交互尺度 | P4 | P16→P8→P4 | P16→P8→P4 |
+| mask引导位置 | 无 | 三尺度attention logits | tail两次token读取的V |
+| 粗监督 | 无 | 三尺度logits放大后监督 | P4大小的缩小GT监督 |
+| 最终读出 | query · 原P4 | mask-token MLP · 更新后P4 | mask-token MLP · 更新后P4 |
+
+## 公共配置与启动
+
+| 配置项 | 2D Offline主线 |
+|---|---|
+| 数据 / spacing / ROI | WORD八类＋背景slot；0.7×0.7×2.0；448输入、384 ROI、概率0.2 |
+| tokens / channels | 每slot20 tokens；pixel channels128 |
+| 初始化 / seed | AutoPET MAE encoder-only，其它随机初始化；seed0 |
+| 更新 / warmup | 118800 / 5940 |
+| batch | 16/卡 × 4GPU × 累积3 = 192 |
+| 优化 | AdamW，LR7.5e-5，weight decay0.05，clip_grad1，BF16及局部FP32 |
+| 分割监督 | retained slots；small-organ loss；lambda_seg0.01、lambda_bg_seg0 |
+| 阳性切片loss | Tversky(FP0.3/FN0.7)＋0.5 BalancedFocal；alpha0.75、gamma2 |
+| 阴性切片loss | top2% hard-negative BCE，权重0.1 |
+| 重建 | 保留原有重建与感知目标，三种head均不删除重建分支 |
+
+以下为 **sifansong/XEC旧划分复现示例**。E脚本固定此账号路径，不能原样跨账号使用；
+每个账号必须核对Python、WORD、ROI、LPIPS和MAE文件。先准备最新干净的固定runtime。
+
+```bash
+export EXPERIMENT_WORKDIR=/absolute/path/to/pinned/runtime
+bash "$EXPERIMENT_WORKDIR/tools/check_experiment_revision.sh" "$EXPERIMENT_WORKDIR"
+export ARM_F_TARGET=sifan-xec
+export ARM_F_COMMIT=$(git -C "$EXPERIMENT_WORKDIR" rev-parse HEAD)
+export MAE_INIT_CHECKPOINT=/gpfs/work/aac/sifansong/Results/AutoPET_MAE/MAE_LA6D8_224_M75_U100K_seed0/checkpoint-final.pth
+mkdir -p "$EXPERIMENT_WORKDIR/logs"
+
+# 三选一：E cross
+export HSAM_SUPERVISION=none
+TRAIN_SCRIPT=slurm/orgslot/train/arm_e_crossattn_mae_encoder.sbatch
+
+# 或：SAM soft prior + aux
+# export HSAM_SUPERVISION=soft_prior_aux
+# TRAIN_SCRIPT=slurm/orgslot/train/sam_tail_soft_prior.sbatch
+
+# 或：SAM两阶段缩小GT
+# export HSAM_SUPERVISION=downsample_gt
+# TRAIN_SCRIPT=slurm/orgslot/train/arm_f_sam_tail_hsam.sbatch
+
+sbatch --parsable --account=sifansong --partition=gpua8001t --qos=8gpus \
+  --nodes=1 --ntasks=1 --gres=gpu:a800:4 --cpus-per-task=20 --mem=192G \
+  --time=5-00:00:00 --export=ALL --chdir="$EXPERIMENT_WORKDIR" \
+  --output="$EXPERIMENT_WORKDIR/logs/%j.out" --error="$EXPERIMENT_WORKDIR/logs/%j.err" \
+  "$EXPERIMENT_WORKDIR/$TRAIN_SCRIPT"
+```
+
+提交前记录SHA、runtime、账号和manifest；远端archive须核验校验和。不得更新运行快照。
+新96/26/24划分使用[独立入口](docs/CONFIGURATION.md#word-official96-protocol)，不混用上述旧划分。
+
+### 推理
+
+[统一head＋recon脚本](slurm/orgslot/eval/arm_e_mae_unified.sbatch)需要设置
+`EVAL_WORKDIR`、`RUN_NAME`、`ACCOUNT_ROOT`、`DATA`、`PYTHON`、`EXPECTED_SLOT_HEAD_TYPE`。
+E运行名`ArmE_CrossAttn_MAEenc_JOB`；SAM运行名`ArmF_2D_JOB`。
+SAM可用[sam_tail_guided.sbatch](slurm/orgslot/eval/sam_tail_guided.sbatch)核验HSAM配置。
+使用1GPU并显式指定评估时限及`afterok:训练JOB`。旧脚本固定checkpoint802、训练6000切片校准，
+输出固定/校准head和recon direct/indirect；recon阈值0.02。新划分使用验证26例校准入口。
+
+## 消融实验记录
+
+旧24例协议的主要已核验消融，按校准后Dice降序；非全部历史3D/P2的穷尽列表。
+除注明scratch或encoder+decoder外，均MAE encoder-only。
+
+| 消融配置 | 固定0.5 | 校准后 | 训练Job |
+|---|---:|---:|---|
+| **SAM soft prior＋aux** | 84.86 | **85.55** | 150971 |
+| **E cross** | 84.30 | **85.36** | 148833 |
+| SAM粗logits放大监督 | 84.26 | 85.30 | 150173 |
+| **SAM缩小GT监督** | 84.41 | **85.23** | 2998657 |
+| E无cross | 84.58 | 84.99 | 135283 |
+| SAM-tail无引导 | 83.99 | 84.94 | 2984833 |
+| 原F reverse＋Linear | 84.21 | 84.93 | 137867 |
+| SAM M0～M3硬mask引导 | 84.68 | 84.84 | 150175 |
+| SAM全部8类分割监督 | 84.27 | 84.81 | 149295 |
+| E无cross＋MAE encoder+decoder | 84.48 | 84.76 | 134915 |
+| SAM soft prior无aux | 84.28 | 84.68 | 150615 |
+| 原F＋MAE encoder+decoder | 83.88 | 84.59 | 137880 |
+| E无cross scratch | 83.53 | 83.72 | 2922770 |
+
+- soft prior＋aux优先对比无aux、SAM无引导，不能将增益全部归于引导机制。
+- 缩小GT与放大logits比较监督分辨率；E cross对比E无cross比较query读取。
+- SAM与E同时改变多个模块，不是单因素消融。历史microbatch/TGR等差异须查原记录。
+- 3D、P2、早期A/B/C/D详见[历史记录](docs/QUERY_READOUT_ABLATION.md)和[RESULTS](docs/RESULTS.md)。
+
+## 增量实验边界
+
+新4→4任务每阶段118800更新，总237600；旧四类为脾/右肾/左肾/胆囊，新四类为食管/胰腺/肝/胃。
+E支持共享query微调和新旧分组query；SAM soft_prior_aux支持slot私有交互、共享tail冻结。
+**缩小GT配置尚无对应slot_private增量实现**。见[增量设计](docs/INCREMENTAL_READOUT_ABLATION.md)。
+以下旧通知是历史快照，不代表当前实时队列。
+
+<details>
+<summary>历史更新与仓库导航（保留记录）</summary>
+
+## 当前保留的架构入口（2026-10-06）
+
+后续主线收敛为 **E** 与 **SAM-tail** 两个系列；统一配置映射与路径见
+[架构导航](docs/QUERY_READOUT_ABLATION.md#当前架构导航2026-10-06)。
+
+| 系列 | 配置 | 用途 |
+|---|---|---|
+| E cross-attention | `arm_e_multiscale_query`，`query_refinement=cross_attn` | E主线 |
+| SAM-tail soft prior＋aux | `arm_f_sam_tail`，`hsam_supervision=soft_prior_aux` | 多尺度软引导和辅助监督 |
+| SAM-tail 两阶段mask预测 | `arm_f_sam_tail`，`hsam_supervision=downsample_gt` | 粗mask引导tail、最终精mask；缩小GT监督 |
+
+仅上述三个配置作为后续主线。E无cross-attention、SAM-tail无引导/无aux/上采样监督，
+以及历史F Linear/Query-Dot/Reverse-Dot/P2、硬mask等
+保留加载与复现兼容，但不作为后续主线入口。此整理不删除权重、结果或代码，
+不修改任何在运行/排队的快照。soft prior与两阶段tail引导目前是不同模式，不能同时选择。
+
+2026-10-06 预算更新：新4–4实验 Stage1、Stage2各118800 updates，warmup各5940，
+有效batch192不变；总237600，不再与Offline等总预算。Stage2要求完整预算Stage1。
+历史59400/阶段结果和评估兼容保留，旧运行快照不修改；详见[预算说明](docs/INCREMENTAL_READOUT_ABLATION.md#full-per-stage-budget-revision-2026-10-06)。
+
+2026-10-06：新增 Stage2 **固定空间分支的共享 query 读出微调 / 新旧双读出**对照。
+两组均从同一 Stage1 初始化；配置、冻结边界和验证要求见
+[增量读出对照](docs/INCREMENTAL_READOUT_ABLATION.md)。旧实验默认行为不变。
+
+新增可选 SAM-tail 增量配置：`INCREMENTAL_ARCHITECTURE=sam_soft_aux`，Stage2
+`slot_private`。每slot独立投影和三尺度token交互，soft prior＋aux不变，空间分支和
+共享tail冻结。需独立训练旧四类Stage1，不能使用八类Offline权重；详见同一[设计文档](docs/INCREMENTAL_READOUT_ABLATION.md#sam-tail-private-slot-interaction-shared-frozen-tail)。尚未提交该组GPU任务。
+
+4–4评估统一报告Offline、Stage1、Stage2的Old/New/All及逐器官Dice；
+Stage1未见新类记NA，背景单列。汇总工具`python -m tools.report_incremental44`，
+结果、遗忘量与PCDD协议差异见[统一报告](docs/RESULTS.md#44统一报告offline--stage1--stage2)。
+
+新增独立 **4+4 类增量训练入口**：基于 E cross-attention＋MAE encoder，Stage1五个slot，Stage2九个slot；背景冻结/组合更新/显式分离三个对照。仅实现，未提交GPU训练；协议和运行方式见 [4+4 配置](docs/CONFIGURATION.md#incremental44)。旧全八类入口不变。
+
+2026-09-30 新协议：官方100训练病例中固定抽96训练，官方20验证＋30测试池中固定抽24测试，余26验证/阈值校准（seed42）。使用 E cross-attention＋MAE encoder 重新训练，不能复用旧 WORD checkpoint，也不能与旧划分85.36%作严格横向比较。清单见 [word_official96_seed42.json](configs/orgslot/word_official96_seed42.json)，执行细节见 [CONFIGURATION](docs/CONFIGURATION.md#word-official96-protocol)。旧数据与任务不变。
+
+新增可选 head：`arm_f_sam_tail`（2026-09-22，仅实现，未提交GPU任务）。
+保留P16→P8→P4 token refinement，追加共享mask token、一次双向交互、
+最终token回读和MLP动态点积。旧E/F不变；14项CPU测试通过，GPU/DDP待验证。
+配置和SAM差异见 [Query readout ablation](docs/QUERY_READOUT_ABLATION.md)。
+
+新增受控实验：**2D Arm E scratch + Collector attention alignment**。不增加网络模块，只在阳性保留器官上加入 `lambda_collector_attention=0.01` 的器官外注意力惩罚；默认0保持历史行为。每卡16、4卡累积3次、有效batch192，118800次更新。设计和可比性限制见 [CONFIGURATION](docs/CONFIGURATION.md#collector-attention-alignment)，任务状态见 [STATUS](docs/STATUS.md)。
+
+最新实验汇总（2026-09-18）：F 2D MAE encoder-only固定84.21%、校准84.93%；encoder+重建decoder固定83.88%、校准84.59%。F 3D top-k统一协议固定83.29%、校准84.46%。既有E MAE encoder-only校准84.99%仍略高，单seed不能判定稳定优势。PCDD Offline参考85.47%尚非同协议复现。八类与协议边界见[RESULTS](docs/RESULTS.md)。
+
+已提交2D/3D各三组受控读出对照：E式基线、F Query-Dot、F Reverse-Dot；保留旧F分类器路径，不覆盖旧实验。配置与机制见[读出消融](docs/QUERY_READOUT_ABLATION.md)，任务编号和核验时间见[STATUS](docs/STATUS.md)，3D统一校准/recon协议见[评估说明](docs/UNIFIED_3D_EVALUATION.md)。状态文档是带时间戳的快照，不是实时队列。
+
+请从 [docs/README.md](docs/README.md) 开始。该入口按任务指向架构、配置、结果或交接，避免重复加载历史记录。
+
+| 分支 | 职责 |
+|---|---|
+| `main` | 原始 OWT / 全类别基线；不是最新 OrganSlot |
+| `feature/orgslot` | OrganSlot 统一架构、配置和正式结果入口 |
+| `experiment/psem` | PSEM v1/v2/v3 查询与组合重建实验 |
+| `experiment/lossbalance` | 重建 ROI loss v2/v3；不要混同 small-organ segmentation loss |
+
+</details>
+`````
+
+<a id="merge-results"></a>
+
+### docs/RESULTS.md
+
+来源：`feature/orgslot @ f198a191fe9460410c0e8ed32c3392564b165ae1`。原文完整保留。
+
+`````text
+# 已记录结果与证据
+
+2026-10-08：E cross＋MAE主指标及八类明细已统一记录到
+[README最新汇总](../README.md#三个配置的正式指标)。官方池seed0/1/42三次
+同协议随机划分平均固定85.62、校准86.22，模型seed均为0。
+这是重复随机划分，不是三折交叉验证；旧划分与替换5病例探索性评估
+单列，不纳入主均值。历史同划分消融保留。seed0/1的indirect reconstruction异常
+（7.19/7.10）仍待诊断，不作为有效重建SOTA；head完整结果单独记录。
+
+## 4–4统一报告：Offline / Stage1 / Stage2
+
+旧四类为脾、右肾、左肾、胆囊；新四类为食管、胰腺、肝、胃。
+每个阶段单列旧四类、新四类、八类病例Dice均值及八个器官明细，背景不计入均值。
+Stage1仅有旧四类输出，新四类和八类整体记为NA（尚未学习、无输出头），不能把背景当新类，不能填造一个实测0分。
+如另做“未见类别强制空预测”的诊断，必须单列，不能冒充PCDD主表口径。
+
+| 方法/阶段 | 旧四类 | 新四类 | 八类整体 |
+|---|---:|---:|---:|
+| PCDD论文Offline参考 | 86.18 | 84.77 | 85.47 |
+| PCDD论文4–4最终阶段参考 | 84.09 | 82.75 | 83.42 |
+| 本项目历史Offline E cross+MAE，旧划分fixed-post | 85.22 | 83.37 | 84.30 |
+| 本项目历史Offline E cross+MAE，旧划分calibrated-post | 86.54 | 84.18 | 85.36 |
+| 本项目同划分Offline | 待完成 | 待完成 | 待完成 |
+| Stage1固定0.5 post | 84.89 | NA | NA |
+| Stage1验证集校准post | 85.48 | NA | NA |
+| Stage2 | 待完成 | 待完成 | 待完成 |
+
+Stage1证据：sifansong/XEC152957，完整24病例7315切片，checkpoint401精确加载；
+`/gpfs/work/aac/sifansong/artifacts/inc44_stage1_eval_20261003/evaluation_90min/test/results.json`。
+Offline为官方池96/26/24划分E cross-attention+MAE训练2998655及评估2998656；不能用历史旧划分模型代替。
+Stage2训练2998660，最终评估尚未提交（2026-10-03核验）。
+
+2026-10-04：Stage2完成59400更新、checkpoint401，最终freeze_audit通过。
+新增`slurm/orgslot/eval/incremental44_stage2.sbatch`，验证集26例校准后测试24例7315切片，
+报告fixed/calibrated、raw/post及Old/New/All；与Stage1固定0.5比较遗忘量。
+提交目标为sifansong/XEC单RTX4090，沿用已校验Stage1数据副本，运行输出独立保存。
+checkpoint选择器检查最终日志、优化器步数、有限权重、配置与冻结审计；GPU状态以提交记录为准。
+
+历史Offline是八类联合训练的Arm E cross-attention+MAE encoder，训练148833、checkpoint802。
+2026-10-03核验完整24病例/6990切片、exact加载；校准使用训练集6000切片，阈值固定后测试。
+结果位于sifansong/XEC：
+`/gpfs/work/aac/sifansong/worktrees/e_cross_mae_9791e87/Results/OrganSlotBank/evaluation/Common8/WORD_2D/ArmE_CrossAttn_MAEenc_148833_ckpt802_heads_test/results.json`。
+此行是旧划分参考，不能与当前Stage1/Stage2新24例计算遗忘量或严格的Offline差距。
+
+| 历史Offline输出 | 脾 | 右肾 | 左肾 | 胆囊 | 食管 | 胰腺 | 肝 | 胃 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| fixed0.5 post | 94.22 | 93.60 | 93.70 | 59.39 | 75.05 | 76.93 | 95.29 | 86.21 |
+| calibrated post | 94.74 | 94.62 | 94.46 | 62.34 | 78.00 | 77.29 | 95.29 | 86.13 |
+
+统一汇总入口：
+```bash
+python -m tools.report_incremental44 --offline OFFLINE_TEST/results.json \
+  --stage1 STAGE1_TEST/results.json --stage2 STAGE2_TEST/results.json
+```
+各参数可在结果未齐时省略。工具核验相同24病例、每病例切片数、评估设置和精确加载；
+分别输出raw/post和fixed/calibrated。遗忘量=Stage1旧类fixed-post减Stage2旧类fixed-post（百分点）；
+逐阶段各自校准的差值不作为主遗忘量。结果均使用完整病例体积统计，而非切片Dice平均。
+
+与PCDD一致的目标是4–4类别顺序、分阶段标签可见性以及Old/New/All统计。
+当前使用同一96病例池分阶段暴露不同标签，不能据此宣称复现了PCDD的阶段间病例分配；
+其论文问题定义提到旧阶段数据不可访问，而公开实验细节未给出可核对的阶段病例清单。
+PCDD附录使用120例随机96/24、1×1×3mm、3D Swin UNETR；本项目使用官方池96/26/24、0.7×0.7×2mm、2D模型。
+这些差异必须保留，不能写“完全同协议复现”。来源：
+[论文Table2](https://ojs.aaai.org/index.php/AAAI/article/download/38406/42368)、
+[附录C](https://arxiv.org/html/2511.07749v1#A3)、
+[官方仓库](https://github.com/shengqianzhu/PCDD)（本次检查仍为Coming soon）。
+
+## 2026-10-03 增量4–4 Stage1评估记录
+
+Stage1训练2998659已完成59400更新，最终checkpoint-401；Stage2训练2998660已自动加载该模型。
+Stage1独立评估此前缺失，现补slurm/orgslot/eval/incremental44_stage1.sbatch。
+模型含5个slot：背景、脾、右肾、左肾、胆囊；主指标报告旧4类病例Dice均值。
+背景head未被直接监督，背景诊断使用旧4类预测并集的补集；GT背景为原始标签0、5、6、7、8。
+固定官方池96/26/24划分，完整验证集选阈值；测试同时报告固定0.5与验证集校准、raw/post。
+背景Dice单列，禁止纳入旧4类前景均值。逐病例CSV另含precision、recall、体积比。
+遗忘量须比较同一测试集Stage1/Stage2旧4类固定0.5结果；stage-specific校准另列。
+输出：artifacts/incremental44_20261001/stage1_evaluation/{validation,test}。
+提交前8项CPU测试通过，最终五slot模型CPU精确加载检查完成后提交；GPU结果以正式任务为准。
+
+## 2026-09-18：F预训练与3D评估更新
+
+测试集均24病例/6990切片；下表主指标为病例级前景Dice均值（%）。
+校准只用训练集前6000切片；不使用测试集选阈值。2D checkpoint802、3D checkpoint199。
+
+| 实验 | 固定0.5 post | 校准post | Direct recon post | 备注 |
+|---|---:|---:|---:|---|
+| F 2D scratch | 82.91 | 未补 | 未补 | 2929821/2929822 |
+| F 2D MAE encoder | 84.21 | 84.93 | 79.81 | 137867/137868，完整结束 |
+| F 2D MAE encoder+recon decoder | 83.88 | 84.59 | 79.36 | 137880/137881，完整结束 |
+| F 3D top-k | 83.29 | 84.46 | 78.64 | 140443–140445统一协议 |
+
+F encoder比scratch固定阈值提高约1.31个百分点，但scratch microbatch8、MAE16，
+有效batch均192不消除small-organ分组归约差异。F encdec相比encoder固定/校准均低约0.34，
+主要落在胆囊、胰腺；单seed不证明decoder迁移普遍有害。既有E encoder校准84.99，
+F encoder84.93仅差0.06，不作稳定胜负或外部SOTA宣称。
+
+| 输出 | 脾 | 右肾 | 左肾 | 胆囊 | 食管 | 胰腺 | 肝 | 胃 | 均值 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| F2D scratch fixed | 94.15 | 93.23 | 93.29 | 55.34 | 74.87 | 73.82 | 95.16 | 83.39 | 82.91 |
+| F2D encoder calibrated | 94.83 | 94.77 | 94.31 | 60.62 | 77.29 | 75.92 | 95.32 | 86.39 | 84.93 |
+| F2D encdec fixed | 94.50 | 93.88 | 93.70 | 57.46 | 75.23 | 74.76 | 95.35 | 86.16 | 83.88 |
+| F2D encdec calibrated | 94.88 | 94.80 | 94.37 | 59.10 | 77.45 | 74.73 | 95.35 | 86.05 | 84.59 |
+| F3D topk fixed | 94.34 | 93.50 | 92.93 | 56.26 | 73.57 | 74.32 | 95.32 | 86.11 | 83.29 |
+| F3D topk calibrated | 94.83 | 94.52 | 93.96 | 59.40 | 77.30 | 74.53 | 95.32 | 85.84 | 84.46 |
+
+3D背景归约消融：旧post3d固定协议下topk83.25、mean78.77（137413），差4.48。
+mean Precision71.01%、Recall92.72%，胆囊预测/GT总体积比2.72。此结果支持topk更有效
+抑制假阳性，但不得把旧post3d均值与统一2D后处理/校准值当作同协议比较。
+Indirect仍异常：F3D topk6.95%、F2D encdec7.91%；Direct正常不意味着差分重建正常。
+
+结果证据（各账号路径独立，不互换）：
+
+- F scratch：bolinren19/SIP `.worktrees/arm_f_2d_batch8/Results/OrganSlotBank/evaluation/ArmF_2D_2929821/results.json`。
+- F encoder：sifansong/XEC `worktrees/arm_f_mae_encoder_df7ed39/Results/OrganSlotBank/evaluation/Common8/WORD_2D/ArmF_2D_137867_ckpt802_*`。
+- F encdec：antengcai23/XEC `worktrees/arm_f_mae_encdec_20260913/Results/OrganSlotBank/evaluation/Common8/WORD_2D/ArmF_2D_137880_ckpt802_*`。
+- 3D topk统一：sifansong/XEC `evaluations/arm_f_3d_137410_unified_d53bb66/{head,reconstruction}/results.json`。
+- 3D mean旧协议：antengcai23/XEC `worktrees/arm_f_batch6_20260913/Results/OrganSlotBank/evaluation/ArmF_3D_137412/results.json`。
+
+## 2026-09-14 最新：Arm E MAE三臂
+
+24病例/6990切片，checkpoint802精确加载。主指标为case Dice presence mean；
+fixed0.5 binary_post与训练集校准selected_post分列，禁止测试集逐器官拼接最优输出。
+
+| 初始化 | 固定0.5 post | 训练集校准 post | Recon Direct-post |
+|---|---:|---:|---:|
+| Encoder-only | **84.58** | **84.99** | **81.17** |
+| Encoder+reconstruction decoder | 84.48 | 84.76 | 80.29 |
+| Scratch | 83.53 | 83.72 | 79.54 |
+| PCDD论文Offline全量监督参考 | **85.47** | — | — |
+
+PCDD来源：[AAAI2026论文Table2](https://ojs.aaai.org/index.php/AAAI/article/download/38406/42368)。
+85.47是Offline，不是增量方法成绩。WORD增量4-4/4-2/2-2/7-1的All分别83.42/83.50/72.02/72.89。
+该行是跨协议参考，尚未同划分复现；不能用全量监督胜过增量行来宣称抗遗忘优势。
+encoder-only距Offline固定阈值0.89、校准0.48个百分点。单seed的小差异不能认定稳定优势。
+
+| 初始化/输出 | 脾 | 右肾 | 左肾 | 胆囊 | 食管 | 胰腺 | 肝 | 胃 | 均值 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Encoder fixed | 94.24 | 93.55 | 93.68 | 60.72 | 75.82 | 76.61 | 95.34 | 86.72 | 84.58 |
+| Encdec fixed | 94.34 | 93.84 | 93.95 | 59.56 | 75.72 | 76.47 | 95.36 | 86.58 | 84.48 |
+| Scratch fixed | 94.11 | 93.80 | 93.35 | 57.34 | 74.53 | 75.34 | 95.05 | 84.71 | 83.53 |
+| Encoder calibrated | 94.66 | 94.56 | 94.38 | 60.76 | 76.81 | 76.86 | 95.34 | 86.55 | 84.99 |
+| Encdec calibrated | 94.74 | 94.79 | 94.50 | 59.04 | 77.28 | 76.14 | 95.36 | 86.21 | 84.76 |
+| Scratch calibrated | 94.61 | 94.45 | 93.86 | 57.19 | 76.09 | 74.54 | 95.05 | 83.96 | 83.72 |
+| Encoder recon Direct-post | 93.13 | 92.01 | 92.37 | 53.14 | 72.17 | 71.53 | 94.65 | 80.37 | 81.17 |
+| Encdec recon Direct-post | 92.64 | 92.37 | 91.56 | 50.57 | 69.85 | 70.06 | 94.56 | 80.74 | 80.29 |
+| Scratch recon Direct-post | 92.76 | 91.50 | 91.02 | 48.46 | 69.37 | 70.09 | 94.38 | 78.72 | 79.54 |
+
+Encoder-only head/recon都略高，暂不支持“decoder提升重建但牺牲分割”解释。
+迁移decoder输入分布不匹配和训练波动仍是假设。此处decoder是重建Transformer，
+不是pixel decoder、AHER或分割head。Encoder recon Indirect-post仅7.53，scratch为7.21；
+不能把Direct正常概括为所有重建分割输出正常。
+
+证据入口（各目录内heads_test、reconstruction_fixedthr002的results.json）：
+
+- sifansong/XEC，runtime worktrees/arme_mae_encoder_runtime_f70b831，
+  Results/OrganSlotBank/evaluation/Common8/WORD_2D/ArmE_MAE_encoder_resume500_135283_ckpt802_*；
+  评估135284 COMPLETED exit0，head完整6990，recon6990，均exact。
+- sifansong/XEC，runtime worktrees/arme_mae_runtime_43cad30，
+  同上评估父目录/ArmE_MAE_encdec_resume500_134915_ckpt802_*；134916 COMPLETED exit0。
+- bolinren19/SIP，.worktrees/orgslot_querymask_multiscale_pixel，
+  同上评估父目录/OrgSlot_WORD07072_ROI20_ArmE_Resume500_2922770_ckpt802_*。
+
+以下保留历史结果；旧局部排名不代表最新全项目排名。
+
+
+
+本页合并既有已提交文档，不是本次重新推理或重新审核全部 JSON。
+只称“项目内已记录结果”；没有外部 PCDD 同协议复核，不能声称公开 SOTA。
+八类顺序：脾、右肾、左肾、胆囊、食管、胰腺、肝、胃。数值单位为百分比。
+
+## WORD head 已记录均值（来源摘要，不作严格统一排名）
+
+| 方法 | 八类 mean Dice | 证据与限制 |
+|---|---:|---|
+| D multi-query | 82.12 | 原分支 README；阈值协议和八类向量需从正式结果重新核验 |
+| C single-query | 82.01 | 原分支 README；阈值协议和八类向量需从正式结果重新核验 |
+| B MAE encoder+decoder | 81.09 | MAE 专项已核验记录 |
+| B MAE encoder-only | 80.60 | MAE 专项已核验记录 |
+| B scratch | 79.89 | 下方完整八类表 |
+
+这是已找到来源的摘要，不补写 Arm A/E/F 或新3D未核验数字，不代表全量最新排行。
+Arm B 三行使用 fixed0.5；不将 C/D 摘要默认为相同阈值协议。
+下方历史表中的“排名/最优”限定于该表候选，不覆盖后来 C/D。
+
+## 排名口径
+
+本表只比较 WORD 同一完整测试集上的 OrganSlot 实验：24 个病例、6990 张切片，
+八类顺序固定为脾脏、右肾、左肾、胆囊、食管、胰腺、肝脏、胃。指标为
+case-level Dice presence mean，表中乘以 100。
+
+主排名要求同一个 checkpoint、同一种输出和一套预先固定的后处理，不允许按测试集
+为不同器官临时挑选不同方法。小器官均值固定为胆囊、食管、胰腺三类的算术平均。
+这里的“SOTA”仅指本项目内已完成且协议匹配的实验，不代表公开 WORD benchmark
+或 PCDD 的外部 SOTA。
+
+## 已完成结果：统一输出排名
+
+| 排名 | 实验 / 输出 | 脾脏 | 右肾 | 左肾 | 胆囊 | 食管 | 胰腺 | 肝脏 | 胃 | 小器官均值 | 八类均值 |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **1** | **Arm B joint small-organ / reconstruction Direct-post** | 92.74 | 91.48 | 91.92 | **53.74** | **69.48** | **70.35** | **94.58** | 79.28 | **64.53** | **80.45** |
+| 2 | Arm B head / train-calibrated selected-post | **92.98** | **91.73** | **92.38** | 51.45 | 68.75 | 68.71 | 94.41 | 82.47 | 62.97 | 80.36 |
+| 3 | Arm B head / fixed-0.5 binary-post | 92.62 | 91.04 | 91.80 | 49.72 | 67.86 | 69.03 | 94.41 | **82.65** | 62.20 | 79.89 |
+| 4 | 0.7 spacing ROI20 / no segmentation head / reconstruction Direct-post | 92.11 | 91.03 | 91.51 | 40.54 | 67.32 | 69.53 | 93.84 | 79.40 | 59.13 | 78.16 |
+| 5 | 1.0 spacing ROI20 / no segmentation head / reconstruction Direct-post | 90.22 | 89.96 | 89.47 | 40.60 | 58.67 | 63.92 | 93.26 | 75.48 | 54.40 | 75.20 |
+
+Arm B 的 train-calibrated 阈值为
+`[0.7, 0.8, 0.8, 0.9, 0.9, 0.8, 0.5, 0.6]`，来自训练集 calibration，
+并在测试前固定；因此可报告，但固定 0.5 仍是 head 的主结果。reconstruction 使用
+固定阈值 0.02。post-processing 统一使用 minimum component size 20 和 opening
+radius 1。
+
+
+## 可追溯来源
+
+- 0.7 spacing baseline：
+  `bolinren19 / SIP` 的
+  `/gpfs/work/aac/bolinren19/OD_OWT_orgslot_resolution/Results/OrganSlotBank/Common8/WORD_2D/OrgSlot_WORD07072_C448_R384_BaseLoss_ROI20_1664156_eval/results.json`。
+- Arm B reconstruction：
+  `antengcai23 / XEC` 的
+  `.../OrgSlot_WORD07072_ROI20_RetainedMultiConv_SmallOrgan_L0.01_121398_reconstruction_fixedthr002/results.json`。
+- Arm B head：
+  `antengcai23 / XEC` 的
+  `.../OrgSlot_WORD07072_ROI20_RetainedMultiConv_SmallOrgan_L0.01_121398_heads_test/results.json`
+  和同目录 `resolved_config.json`。
+- 1.0 spacing ROI20 baseline：
+  [ORGAN_SLOTBANK_EXPERIMENT_SUMMARY_CN.md](archive/HISTORY.md#source-7)。
+
+Arm B 两个正式 JSON 均加载 epoch 802 checkpoint，`exact=true`；reconstruction
+结果标记完整测试集，head 结果标记 `complete_split=true`，样本数均为 6990。
+
+
+## 已完成的 Arm B MAE：统一八类结果
+指标：24 病例 / 6990 切片，checkpoint-802 exact=true，case Dice presence mean ×100。
+Reconstruction 为 Direct-post，固定阈值 0.02，min_size=20、opening_radius=1。
+两组 MAE 原始 JSON 已归档到 artifacts/mae_recon_audit_20260908/。
+原始 Arm B 数字来自既有 ORGSLOT_WORD_COMMON8_SOTA_CN.md 的已验证记录。
+
+| 初始化 / recon | 脾脏 | 右肾 | 左肾 | 胆囊 | 食管 | 胰腺 | 肝脏 | 胃 | 八类均值 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Encoder+decoder | 93.19 | 92.12 | 92.21 | 57.05 | 69.83 | 71.33 | 94.70 | 80.95 | **81.42** |
+| Encoder-only | 92.56 | 92.61 | 91.78 | 50.98 | 71.00 | 71.10 | 94.25 | 80.25 | **80.57** |
+| Scratch Arm B | 92.74 | 91.48 | 91.92 | 53.74 | 69.48 | 70.35 | 94.58 | 79.28 | **80.45** |
+
+| 初始化 | Head fixed-0.5 post | Head train-calibrated post | Recon Direct-post |
+|---|---:|---:|---:|
+| Scratch Arm B | 79.89 | 80.36 | 80.45 |
+| Encoder-only | 80.60 | 80.97 | 80.57 |
+| Encoder+decoder | 81.09 | 81.69 | 81.42 |
+
+Head 数字沿用此前已核验汇报；本次新核验的是 recon JSON。
+Encoder+decoder 相对 encoder-only 的 recon 提高 0.8552 个百分点。
+相对 scratch recon 约 +0.97；胆囊提升最明显，但 encoder-only 胆囊低于 scratch。
+不能声称所有器官同步获益，或凭单 seed 证明收益机制。
+以上是 Arm B MAE 内部排名，不是全项目新 SOTA；Arm C/D 的既有约 82% 结果仍需同列比较。
+Head/recon 各自单独排名，不在测试集逐器官挑输出拼接。
+
+## 数据来源
+- Encoder-only：sifansong / XEC，训练 128402，评估 128404。
+  worktree: /gpfs/work/aac/sifansong/worktrees/orgslot_autopet_mae
+  result: Results/OrganSlotBank/evaluation/Common8/WORD_2D/OrgSlot_WORD07072_ROI20_RetainedMultiConv_SmallOrgan_L001_AutoPETMAE_EncoderOnly_128402_ckpt802_reconstruction_fixedthr002/results.json
+- Encoder+decoder：antengcai23 / XEC，训练 128401，评估 128403。
+  worktree: /gpfs/work/aac/antengcai23/worktrees/orgslot_autopet_mae
+  result: Results/OrganSlotBank/evaluation/Common8/WORD_2D/OrgSlot_WORD07072_ROI20_RetainedMultiConv_SmallOrgan_L001_AutoPETMAE_EncDec_128401_ckpt802_reconstruction_fixedthr002/results.json
+- 两文件 complete_test_set=true，samples=6990，八类 case_count 均为24。
+
+
+## 跨路线边界
+
+PSEM/AutoPET 四类、WORD224 与 WORD070 不混排；见 experiment/psem 的 RESULTS。
+早期3D异常与后续slice/PE实验需在正式结果中分开。当前摘要不将“诊断运行完成”
+写成“3D问题已解决”。全量增量学习 Old/New/All 表仍需独立验证，不由联合head分数推导。
+`````
+
+<a id="merge-status"></a>
+
+### docs/STATUS.md
+
+来源：`feature/orgslot @ f198a191fe9460410c0e8ed32c3392564b165ae1`。原文完整保留。
+
+`````text
+# 当前实验交接
+
+## 2026-09-21 16:53 Collector attention alignment 已提交
+
+目的：以2D Arm E scratch为基准，仅新增Collector器官外注意力软惩罚，验证器官采集定位是否改善；不增加网络模块，不使用MAE、不续训，默认lambda=0保持旧实验。
+
+| 实验 | 账号/集群 | Job | 资源与时限 | 提交后核验 |
+|---|---|---|---|---|
+| Arm E scratch + collector loss 0.01 | sifansong / XEC，account=sifansong，QoS=4gpus | 143780 | 4×A800、20CPU、192GB、7天 | PENDING (Priority)；无GPU验证 |
+| 同协议阈值校准 + head测试 + reconstruction | 同上 | 143781 | 1×A800、10CPU、128GB、7天 | PENDING (Dependency)，afterok:143780 |
+
+- 固定代码：`aff9f696d50fb2dcd0edfb47bc6312e8f9caae3e`，已在提交前推送origin/feature/orgslot并通过revision guard。
+- 本地固定worktree：`/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/collector_align_aff9f69`。
+- XEC固定源码快照：`/gpfs/work/aac/sifansong/worktrees/collector_align_aff9f69`。此目录不pull、不覆盖；tar无.git时训练provenance允许unavailable，真实来源以本条full commit、源码checksum、Slurm SOURCE_COMMIT和压缩包校验为准。
+- 压缩包：`/gpfs/work/aac/sifansong/collector_align_aff9f69.tar`，SHA256=`d197f72fb8f53367e4824580c46978d3e1ba3ac3685e8fbff93db45f3237475d`，本地/远端一致。
+- train/eval入口：`slurm/orgslot/train/arm_e_collector_align.sbatch`、`slurm/orgslot/eval/arm_e_collector_align.sbatch`。
+- 训练输出：运行目录下`Results/OrganSlotBank/Common8/WORD_2D/ArmE_CollectorAlign001_scratch_143780`；Slurm日志：`/gpfs/work/aac/sifansong/logs/collector_align_aff9f69/`。
+- 2D每卡16×4卡×累积3=192；118800 updates，预计最终checkpoint-802；WORD07072、ROI20、seed0、small-organ lambda_seg0.01不变。
+- 对照：E scratch训练系列2965273 / 评估2965274。对照历史中途换过microbatch，新实验从头16；不是逐更新完全相同随机轨迹。其余已有任务未修改。
+- 本地与XEC各6项新增CPU测试通过，包括两进程Gloo；数据身份28586训练切片/6990测试切片、ROI core SHA256均匹配基线。GPU正式运行尚未开始，不能宣称GPU验证通过。
+- 下一次先查143780是否启动、resolved_config是否scratch/batch16/lambda_collect0.01、首epoch各器官collector count/foreground_mass及有限梯度、weighted_collect=0.01×raw；再检查checkpoint与143781依赖。最终比较八类head fixed/calibrated和recon，不只看attention集中度。
+
+
+## 2026-09-18 13:53 已核验快照（当前入口）
+
+新六组：1组运行、5组排队；未发现失败。此次文档整理未再次刷新队列。
+每组训练4×A800/20CPU/192GB；scratch、seed0、top-k small-organ loss、ROI20、
+118800 updates。2D每卡8/累积6/有效192；3D每卡6/累积2/有效48 slabs。
+
+| 目的 | 账号/集群 | 训练 | 校准/Head/recon评估 | QoS/时限 | 状态 |
+|---|---|---|---|---|---|
+| 2D E单query点积基线 | bolinren19/SIP | 2955007 | 2955008（统一三阶段） | 4a800/7天 | Priority |
+| 2D F Query-Dot：细化tokens、不反向读取 | bolinren19/SIP | 2955009 | 2955010（统一三阶段） | 8a800/7天 | Priority |
+| 2D F Reverse-Dot：反向读取后点积 | bolinren19/SIP | 2955011 | 2955012（统一三阶段） | 8a800/7天 | Priority |
+| 3D E式点积基线 | sifansong/XEC | 140585 | 140586 / 140587 / 140588 | 4gpus/7天 | RUNNING epoch4，checkpoint-0存在 |
+| 3D F Query-Dot | sifansong/XEC | 140591 | 140592 / 140593 / 140594 | 8gpus/5天 | Priority |
+| 3D F Reverse-Dot | antengcai23/XEC | 140595 | 140596 / 140597 / 140598 | 4gpus/7天 | Resources |
+
+3D基线最新抽查：loss≈0.2511，seg≈0.7667，weighted_seg≈0.0077，ROI≈20.3%，
+日志torch峰值allocated33.57GiB，overflow0、错误日志空。非完整稳定性证明；
+checkpoint-0仅确认文件存在，未重新加载。其余五组尚无GPU运行验证。
+
+固定运行源（不要在排队/运行目录pull）：
+
+- 2D：bolinren19/SIP `/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/arm_f_linear_2d`，
+  `5f2d1cfb7fb20d499c79cb8e901d7279718cd8bc`。目录旧名linear不代表当前提交了arm_f_linear。
+- 3D：各账号XEC `/gpfs/work/aac/<账号>/worktrees/dot3d_ac8cf99`，
+  `ac8cf992cdac30c9d7bed33cc5e2f8b8ad4d8ecd`。
+- 训练入口 `slurm/orgslot/train/arm_f.sbatch`；2D评估 `arm_e_mae_unified.sbatch`；
+  3D评估 `unified_3d_protocol.sbatch`。3D校准/recon依赖训练afterok，Head依赖校准afterok。
+- 同seed不保证共有模块初始权重逐张量相同，本轮未配平；跨架构因果解释需保留此限制。
+
+已完成：F scratch 2929821/2929822；F encoder 137867/137868；F encdec137880/137881；
+3D topk137410及140443–140445统一评估；3D mean137412/137413（旧post3d协议）；
+3D MAE2951384完成100000updates，日志报告checkpoint验证通过，尚无其下游迁移任务。
+最新指标统一见RESULTS.md，不从训练校准分数推断测试成绩。
+
+下次：优先检查140585的checkpoint10；五组排队任务启动后核验head、batch、topk、
+梯度与首epoch；140591五天时限余量偏紧；3D mean若需校准比较须补统一协议。
+F2D scratch的校准/recon仍为缺口。Indirect异常需独立诊断，不能概括为recon全正常。
+
+## 历史快照：2026-09-14（以下状态已过期，仅保留背景）
+
+日志/结果核验时间：2026-09-14 14:05 Asia/Shanghai。之后队列复查仍为4组训练运行、2组训练排队。
+epoch为快照，不是实时页面；估时不含评估和排队。结果统一见[RESULTS.md](RESULTS.md)。
+
+| 实验目的 | 账号/集群 | 训练 → 评估 | 资源/QoS | epoch / checkpoint | 状态 |
+|---|---|---|---|---|---|
+| E cross-attention：显式query与空间交互 | bolinren19/SIP | 2923562 → 2923565 | 4A800/24CPU，8a800 | 441/802，425 | RUNNING |
+| F 2D scratch：双向交互 | bolinren19/SIP | 2929821 → 2929822 | 4A800/20CPU，4a800 | 222/802，220 | RUNNING |
+| F 3D topk：从30续训 | sifansong/XEC | 137410 → 137411 | 4A800/20CPU/192GB，4gpus，7天 | 61/199，60 | RUNNING |
+| F 3D mean：背景全平均对照 | antengcai23/XEC | 137412 → 137413 | 4A800/20CPU/192GB，8gpus，5天 | 14/199，10 | RUNNING |
+| F 2D MAE encoder-only | sifansong/XEC | 137867 → 137868 | 4A800/24CPU/192GB，8gpus，5天 | — | PENDING Priority |
+| F 2D MAE encoder+重建decoder | antengcai23/XEC | 137880 → 137881 | 4A800/24CPU/192GB，4gpus，7天 | — | PENDING Priority |
+
+评估均等待对应训练；未新增任务或修改依赖。sifansong/SIP、antengcai23/SIP无活动任务。
+E scratch 2922770/2922772、E MAE encoder 135283/135284、encdec 134915/134916均已完成。
+E两条续训跨过旧541故障点并完成802；不能据此声称所有NCCL底层问题已消除。
+
+## 配置、运行源与公平性
+
+未来四卡2D每卡16×累积3=有效192；3D每卡6×累积2=有效48 slabs。
+运行中F2D仍为8×累积6，新F MAE为16×累积3；microbatch不同必须披露。
+small-organ loss分组归约意味着有效batch相同不保证梯度完全相同。
+
+- F3D两账号runtime：各自 /gpfs/work/aac/<用户名>/worktrees/arm_f_batch6_20260913；
+  固定代码2697b05642d527bfd137debc0f9ed175e9ae345f。
+- F MAE encoder：/gpfs/work/aac/sifansong/worktrees/arm_f_mae_encoder_df7ed39；
+  df7ed39cb8529afebb8f1dd982eb8daf382c8c6d。
+- F MAE encdec：/gpfs/work/aac/antengcai23/worktrees/arm_f_mae_encdec_20260913；
+  5cee1e95de7e9c758df0e3cb3fc569cdc0fa8d57。旧137869/137870已取消。
+- F MAE入口 slurm/orgslot/train/arm_f_mae.sbatch；评估 arm_f_mae_unified.sbatch。
+  7项CPU加载测试和数据/hash门禁通过，正式GPU加载及batch16显存仍待启动。
+- E encoder runtime：/gpfs/work/aac/sifansong/worktrees/arme_mae_encoder_runtime_f70b831。
+- E encdec runtime：/gpfs/work/aac/sifansong/worktrees/arme_mae_runtime_43cad30。
+- 仅开发目录同步Git；运行与排队快照保持固定。各账号数据路径不得互换。
+
+## 稳定性与估时
+
+最新epoch平均总loss/seg：E CA 0.0809/0.1266；F2D 0.1029/0.1611；
+F3D topk 0.1135/0.1920；mean 0.1744/0.3603，均有限，但只是日志抽查。
+日志打印进程的torch峰值allocated显存分别16.84、23.98、57.88、57.90 GiB；
+不是实时nvidia-smi，不是全部rank峰值，也不含全部缓存/通信开销。
+实时显存查询未成功（SIP节点SSH拒绝；XEC工具审批服务失败）。
+
+按14:05吞吐外推：E CA剩32小时；F2D约81小时；F3D topk约73–76小时；
+mean约93小时，需预留10–20%波动。mean的120小时时限余量较紧。
+F MAE尚排队，batch16没有实测，不承诺结束日期。
+
+## 下次审核
+
+1. E CA checkpoint450/500、F2D checkpoint230后稳定性。
+2. F3D topk checkpoint70、mean checkpoint20；最终看Dice/P/R/volume ratio/per-z，不用低loss证明3D已修复。
+3. F MAE启动后核验初始化scope、每卡16、有效192、GPU峰值与真实加载报告。
+4. E encoder-only recon Direct-post81.17已收齐；Indirect-post7.53异常，需独立诊断。
+5. 3D D slice-wise与spatial既有均值21.13/30.25，仍过分割；temporal/ST旧链已取消，不再列作待跑。
+6. PCDD Offline85.47固定列入对比；未匹配协议，不能宣称增量或外部SOTA。
+# SAM-tail + MAE encoder-only (2026-09-22)
+
+- Purpose: retain P16/P8/P4 refinement and test mask-token two-way tail.
+- bolinren19 / SIP, account sifansong, QoS4a800.
+- Training 2984833: 4 A800,20CPU,192GB,7days; PENDING Priority at submission.
+- Unified evaluation 2984834: afterok:2984833,1 A800,10CPU,128GB,7days;
+  train6000 threshold calibration + test6990 fixed/calibrated head + recon.
+- Runtime: /gpfs/work/aac/bolinren19/OD_OWT/.worktrees/sam_tail_encoder_b3794a6
+- Pinned code: b3794a6d9fca789fc47044f1929cadb27a0abe2b (revision guard passed).
+- Train script: slurm/orgslot/train/arm_f_sam_tail_encoder.sbatch.
+- Eval script: slurm/orgslot/eval/arm_e_mae_unified.sbatch, expected arm_f_sam_tail.
+- AutoPET MAE encoder-only, NOT scratch or encoder+decoder; checkpoint SHA
+  0b3571a3e79095686a0b12649735a298aaeb8a0b3bb93a47f3484439ac4a1ec6.
+- 2D batch16 x4 xaccum3=192; updates118800, ROI20, lambda_seg0.01, topk loss.
+- CPU: previous14 tests + SAM-tail MAE transfer test passed; data identity passed.
+  GPU/DDP/pretrained production model load report pending job start.
+- Next: verify mae_initial_checkpoint_load.json, resolved configuration, first
+  finite epoch and checkpoint. Initialization differs from scratch ablations.
+## 2026-09-30：WORD official-pool 96/26/24 重跑
+
+配置：Arm E cross-attention＋AutoPET MAE encoder-only（旧划分校准85.358%的配置），不是续训旧WORD模型。固定split seed42：官方Tr100取96，官方Val20＋Ts30取24测试（8Val＋16Ts），剩26验证/完整阈值校准，4Tr不用。此前5个badcase全部归入新训练集，不能继续视为独立测试。协议清单见 `configs/orgslot/word_official96_seed42.json`。
+
+| 阶段 | 账号/集群/Slurm account | Job | 资源/QoS | 提交后核验状态 |
+|---|---|---|---|---|
+| 准备数据 | bolinren19/SIP/sifansong | 2997385 | 4CPU/64GB/cpudebug/1h | RUNNING，CPU cv2/nibabel导入通过，开始30例官方Ts几何核验与预处理 |
+| E cross-attn＋MAE encoder | bolinren19/SIP/sifansong | 2997386 | 4A800/20CPU/192GB/8a800/7d | PENDING afterok:2997385 |
+| 固定与校准head＋recon | bolinren19/SIP/sifansong | 2997387 | 1A800/10CPU/128GB/8a800/7d | PENDING afterok:2997386 |
+
+固定运行提交 `95296e1ca9e1061896fd8f777d3be73fb68a1a11`；运行worktree `/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/e_official96_95296e1`；数据根 `/gpfs/work/aac/bolinren19/OD_OWT/artifacts/word_official96_seed42_20260930_v2`；提交回执 `artifacts/official96_submission_20260930/jobs_v2.json`。每卡16×4卡×累积3=192，118800updates；不硬编码最终802epoch。划分CPU测试3项、语法/编译、版本guard通过；GPU尚未运行。
+
+首次准备2997374因CPU节点缺libGL而在重采样前失败。已增加隔离动态库路径并在CPU节点验证导入，失效训练/评估2997375/2997376已取消重建；旧记录保留，无其他历史任务变动。下一次检查2997385是否完成、READY.json计数及2997386启动配置；新旧测试集不同，分数不得直接归因架构提升。
+`````
+
+<a id="merge-configuration"></a>
+
+### docs/CONFIGURATION.md
+
+来源：`feature/orgslot @ f198a191fe9460410c0e8ed32c3392564b165ae1`。原文完整保留。
+
+`````text
+# 统一配置与部署契约
+
+## 2026-10-07：缩小GT与soft prior的组合对照
+
+基线是旧24病例协议的SAM-tail＋MAE encoder＋`downsample_gt`（不是增量实验）。
+两组保持WORD07072、448/ROI384、ROI概率0.2、seed0、每卡16×4卡×累积3=192、
+118800 updates、warmup5940、small-organ loss和lambda_seg0.01不变。
+
+| 配置 | 多尺度读取前soft prior | tail前coarse监督 | prior辅助监督 |
+|---|---|---|---|
+| `downsample_gt_soft_prior` | 有，detach的log(0.2+0.8sigmoid)偏置 | nearest缩小GT | 无 |
+| `downsample_gt_soft_prior_aux` | 同左 | 同左 | 三层logits上采样后对全分辨率GT监督，平均后权重0.25 |
+
+两组均为 `Lrec + LPIPS + .01*(w*Lfinal + (1-w)*Lcoarse + .25*Lprior)`，
+第一组Lprior=0；w=0.6^(0.990^epoch)，沿用缩小GT基线调度。
+注意最后一层读取前P4 prior与读取后tail coarse是不同张量。
+tail coarse不detach，经sigmoid作为tail的V gate；三层prior路由detach，
+第二组prior预测自身仍接受辅助loss梯度。没有新增参数，不改变旧head行为。
+
+启动入口：`slurm/orgslot/train/arm_f_sam_tail_hsam.sbatch`，设置上述HSAM_SUPERVISION；
+仍自动加载AutoPET MAE encoder；按用户要求直接正式训练，不运行GPU smoke/preflight。
+CPU回归与数据/权重身份核验已完成，不代表GPU验证已通过。
+评估入口：`slurm/orgslot/eval/sam_tail_guided.sbatch`，checkpoint802，
+训练前6000切片校准＋原24测试病例固定/校准head＋recon；与历史基线口径一致，
+校准不是独立验证集，须披露。不要混入official96的新划分排名。
+
+CPU测试：`PYTHONPATH=.:tests python -m unittest test_hsam_combined test_hsam_supervision test_sam_soft_prior test_distributed_metrics`。
+覆盖旧参数strict加载与旧模式输出不变、组合前向相同、prior路由detach/aux梯度、
+background-only rank指标schema、有限backward和双rank Gloo；GPU通过与否另记。
+
+## Soft-prior aux 的DDP指标契约
+
+2026-10-01：`150613`失败并非已确认的NaN。TGR在某rank只保留背景时，coarse预测为空是合法情况；旧实现提前返回0辅助loss，却没有生成`soft_prior_p16_loss/p8_loss/p4_loss`，其他rank有这三个字段，`reduce_metrics`的schema检查因此终止。修复在提前返回前初始化三个0值字段，非空分支仍写实际loss；不改loss权重、mask机制或空监督语义，也不删除schema保护。回归覆盖双rank不同保留情况、有限梯度、真实字段不一致仍报错。
+
+恢复脚本`slurm/orgslot/train/sam_tail_soft_prior_aux_resume.sbatch`只恢复已核验的checkpoint-0，从epoch1续训并恢复optimizer/scaler。启动后先运行两GPU NCCL指标回归；失败则不进入正式训练。新训练需新`afterok`评估；旧`150614`依赖失败不会自行恢复。
+
+## incremental44
+
+独立入口 `main_pretrain_orgslot_incremental44.py`，启动器 `scripts/orgslot/run_incremental44.sh`。
+基于 **2D E cross-attention + AutoPET MAE encoder-only**，不修改原离线训练入口。
+这是**同图像、分阶段标签开放**的4+4机制实验：两阶段都用固定96训练病例；不是禁止重访旧图像的 data-incremental/no-replay 协议。
+使用上节官方池新划分的96训练/26验证/24测试；不可使用“替换五个badcase”的探索性测试清单。
+
+| 内容 | Stage1 | Stage2 |
+|---|---|---|
+| 可见器官GT | 脾、右肾、左肾、胆囊 | 食管、胰腺、肝、胃 |
+| slot数 | 背景+4旧类=5 | 背景+4旧类+4新类=9 |
+| 初始化 | 仅AutoPET MAE encoder；其余随机 | 精确加载Stage1；四个新slot分别复制同一Stage1背景slot |
+| 可训练 | 原E共享模块和5个slot | 仅4新slot；背景按下述策略；共享模块/旧slot全部冻结 |
+| ROI定向池 | 仅胆囊4 | 仅食管5、胰腺6 |
+| 重建 | 既有随机保留组合、MSE+LPIPS | 新GT+旧类teacher伪区域的masked MSE；不计算LPIPS |
+| 分割 | 旧4类small-organ loss | 新4类相同loss；默认仅保留slot监督，ROI目标强制保留 |
+
+Stage1背景=非旧4类，因此包括未来新类；**Stage2不能再把所有非新类GT位置当背景**。
+冻结Stage1 teacher的旧4类calibrated head sigmoid（与Stage1分割损失输入一致）：新GT优先；恰好一个旧类≥0.9的位置为旧伪区域；全部旧类<0.1且不在新GT的位置为候选背景；其他位置ignore。teacher背景head从未监督，不参与伪标签。
+这些阈值和背景权重是待验证的实验超参，不是论文默认值。teacher有误差，候选背景并非真实背景。
+
+Stage2三种独立运行参数 `--background_policy`：
+
+- `frozen`：背景完全冻结；只更新新slot。
+- `composition`：背景Collector、TGEnc、token_norm、AHER以新slot的0.1倍LR更新；只接受组合重建梯度。
+- `separation`（默认）：同上，额外单独解码背景canvas。在新GT和高置信旧区域目标为0，在候选背景目标为输入图像，分别求区域均值，后者乘0.1。空区域贡献0，ignore不监督。
+
+Stage2总损失=`L_composition + 0.01 L_seg_new + 0.1 L_background`；非separation模式最后一项为0。
+冻结重建decoder的参数，但不阻断其对新/背景canvas的反传。背景head及所有校准参数冻结，旧类和共享模块保持eval模式。
+现有`linear_sqrt`按保留slot数归一化，5→9会改变重建组合尺度；保留原语义并记录，不宣称重建输出也严格不变。
+
+固定：spacing0.7/0.7/2、448/384、ROI0.2、20 tokens、128 channels、seed0、small-organ原超参、AdamW7.5e-5/wd0.05、BF16+clip1。
+启动器4卡×每卡16×累积3=192。预算每阶段59400更新、2970 warmup，共118800；Stage2重置优化器。
+这是**总更新预算匹配**，不等价于每类监督次数或算力完全匹配；不得静默将每阶段都训练118800。
+
+运行前先在对应账号设置其本地绝对路径（脚本不猜跨账号路径）：
+
+```bash
+export WORD_ROOT=/该账号/数据/WORD
+export PYTHON_BIN=/该账号/环境/bin/python
+export MAE_CHECKPOINT=/该账号/AutoPET_MAE/checkpoint-final.pth
+export LPIPS_STATE=/该账号/owt_lpips_vgg16.pth
+export OUTPUT_DIR=/该账号/结果/Inc44_stage1
+bash scripts/orgslot/run_incremental44.sh stage1
+# Stage1完成后，手动确认最终59400-update checkpoint，不按测试成绩选取。
+export STAGE1_CHECKPOINT=/该账号/结果/Inc44_stage1/checkpoint-最终epoch.pth
+export OUTPUT_DIR=/该账号/结果/Inc44_stage2_separation
+export BACKGROUND_POLICY=separation
+bash scripts/orgslot/run_incremental44.sh stage2
+```
+
+提交前仍须commit/push、revision guard、固定运行快照、核验账号路径；脚本本身不提交Slurm，不更新运行中的源目录。
+保存resolved_config、manifest哈希、初始化报告、slot元数据、可训练参数清单、Stage1 checkpoint哈希；Stage2保存checkpoint时校验冻结参数哈希。
+续训必须保留同一Stage1 teacher及协议，使用`--resume`，不得从全8类WORD checkpoint启动Stage1。
+
+评估要求：同24测试病例，Stage1旧4类、Stage2旧4/新4/全部8类；原始独立binary head与互斥类别合并指标必须分开。旧类阈值在Stage1验证集确定并锁定；新类只在Stage2验证集校准。病例级Dice/P/R/体积比，另外报告旧类raw logits漂移和背景在新器官GT内的残留。**现有Common8 evaluator不能直接用来加载5-slot Stage1模型；增量评估适配与GPU预检尚未完成，不自动挂接旧评估脚本。**
+当前仅完成CPU机制测试：标签隐藏/ROI隔离、伪区域冲突与ignore、空区域finite backward、新/背景梯度、旧logits不变、背景策略、随机冻结decoder下的优化下降；这不等于真实数据过拟合或GPU/DDP通过。
+
+SIP提交脚本：`slurm/orgslot/train/incremental44_stage1_sip.sbatch`，4×A800、20CPU、192GB、7天。启动后先以同样每卡16/累积3跑独立的2-update预检，只有正常退出、更新数正确且日志数值有限才启动全新Stage1（每10epoch保存）。预检不是小样本过拟合验证，权重不用于正式训练；排队时不得宣称GPU通过。
+
+Stage2脚本 `slurm/orgslot/train/incremental44_stage2_sip.sbatch` 使用 `afterok:Stage1_JOB`，显式设置`STAGE1_RUN`。启动时解析最后一行训练日志和对应checkpoint，要求59400更新、Stage1身份、optimizer最大step同为59400、参数全有限，再严格加载。不能只看文件存在、猜checkpoint-802或把中间checkpoint当最终模型。Stage2也先独立2-update预检，随后重新加载Stage1正式训练。当前只提交默认背景separation组；frozen/composition保持可选，不自动扩大三倍预算。五slot评估适配仍待完成，没有虚挂评估依赖。
+
+审计边界：背景slot没有独立分割监督，其背景分离约束作用在重建支路；它不等价于9类softmax背景分类。旧raw/calibrated输出不变不代表互斥分类图零遗忘；必须另外评估新增类别冲突。Stage2新slot校准保持初始化scale1/bias0，旧slot校准冻结在Stage1值；新slot使用raw logits与其calibrated logits等价，但两阶段校准参数的可训练性不同，这属于明确的模块冻结方案。Stage2只有masked MSE而无LPIPS，不是完全相同的训练目标；不在未知区域上使用LPIPS以免其感受野引入错误监督。候选背景含teacher漏检风险，日志记录各旧伪区域、四新类监督数量和ignore比例。辅助权重0.1及置信度0.1/0.9尚非验证最优。
+
+## 模型与数据
+
+以运行目录 `resolved_config.json`、`command.txt`、checkpoint args 为准，不以脚本名推断配置。
+2D WORD 对照：spacing 0.7×0.7×2.0、input/ROI 448/384、ROI probability 0.2、
+token_factor=20、seed=0、有效 batch192、118800 optimizer updates。
+ROI20 是采样概率，不是 token 数量。3D 单独记录 slab batch、T、stride 和更新次数。
+F 预定 T=4/stride=1；2D microbatch2×4卡×accum24=192 slices，
+3D microbatch1×4卡×accum12=48 slabs。相同有效 batch 不保证 legacy_batch TGR 完全相同。
+
+`dimension`、`slot_head_type` 按 ARCHITECTURE.md 选择。
+C/D 的 `pixel_pe` 为 none/spatial/temporal/spatiotemporal；2D 不允许 temporal。
+F 内部固定 axial sin/cos PE：2D y/x，3D t/y/x；`pixel_pe=none` 不会关闭 F 内部 PE。
+F 使用 `query_refinement=none`，不能套用 E 的 cross_attn 开关。
+旧 3D 默认 `segmentation_unit=slab`；受控修正版显式 `slice`，2D 行为不变。
+
+## Loss：不能误写成 Dice 重建 + Focal
+
+当前 small-organ 联合路线：L2 reconstruction + LPIPS + 0.01×segmentation loss。
+retained slot supervision，lambda_bg_seg=0；不要混同原 v0 DiceBCE 和旧 Focal 实验。
+阳性切片：Tversky（FP/FN=0.3/0.7，eps=1e-6）+0.5×Balanced Focal。
+Focal 前景和 top2% 背景分别平均，alpha_pos/neg=0.75/0.25、gamma=2。
+空切片：0.1×top2% hard-negative BCE，不算 Tversky。
+slice-wise 3D 对阳性/空切片分别统计平均后组合，不把整个 slab 当一个阳性样本。
+核验 loss_version=L2-LPIPS、lambda_lpips=1、fusion_mode/reference count 与对应基线一致；
+不可从其他 Loss3/PSEM 实验继承额外权重。
+
+## 初始化与数值：新训练和历史续训分开
+
+MAE encoder-only 只载共享 encoder；encoder_decoder 还载共享重建 decoder，
+不加载 pixel decoder、Collector/TGEnc/AHER。必须保存迁移 key 报告及来源权重 hash。
+MAE 初始化不等于 resume；resume 要恢复 epoch、optimizer/scaler 和更新预算。
+
+新 A800 实验显式配置 AMP_DTYPE=bf16、CLIP_GRAD=1.0、FINITE_CHECK_INTERVAL=1。
+默认入口仍可能回退 FP16，不能只凭模型支持 BF16 判断启用；以解析配置和日志为准。
+历史 Arm E MAE 三臂/续训保留原 FP16 GradScaler、不新增裁剪，以保持原协议；
+不得在修复 NCCL 时默默切换 loss/AMP/采样。
+BF16 不能防止非法运算，梯度裁剪不能修复 NaN；老 PyTorch 的插值/depthwise3D
+需要局部 FP32 fallback。F attention/FFN/readout 局部 FP32，不要 model.bfloat16()。
+
+NCCL ALLREDUCE 超时不是 NaN 的同义词。E encdec 恢复采用固定 schema/顺序的指标归约，
+并仅对确认为冻结 LPIPS 常量的 buffers 允许关闭逐 forward broadcast；梯度同步仍启用。
+这属于缓解措施，不能宣称已定位原始失联 rank 的根因。旧 checkpoint 未保存 RNG/worker
+状态，恢复 optimizer 不等于逐位重演原训练轨迹。
+
+## 三账号、两集群与版本
+
+- Linux 用户、Slurm account、QoS 是不同字段；不得替换用户名猜数据绝对路径。
+- SIP 与 XEC 分别查 Slurm。Python、CSV、ROI index、LPIPS、ckpt、输出目录逐项核验。
+- 新提交前 fetch origin，核验开发分支与实际运行树；执行
+  `bash tools/check_experiment_revision.sh RUNTIME_WORKTREE`。
+- 修复先 commit/push；源快照不可变，记录完整 commit/hash、账号、脚本、资源、输出。
+- 不更新运行中/排队任务引用的源目录。旧任务失败后须重建评估 afterok，不会自动转依赖。
+- 用户要求按允许最高时限申请，但上限必须提交时查实际 partition/QoS，不把旧天数当常量。
+- CPU 测试与 GPU 验证分别报告；当前用户要求的提交流程优先，不额外擅自排 smoke。
+
+## 评估
+
+WORD070：24病例/6990切片；保存 evaluator 的 presence/all-cases 等聚合定义，
+2D 模型也可堆叠成病例体积评估，不能仅凭训练维度命名指标。
+head fixed0.5 为主结果；train-calibrated 单列并明确校准来源；新阈值优先用验证集选。
+reconstruction Direct-post 与 head 分开排行；不得测试集逐器官选输出拼最优。
+旧 recon 固定阈值0.02、min component20/opening1，仍需核验具体协议。
+3D 记录 slab overlap fusion、volume ratio、precision/recall、per-z，以及 head/recon 路径。
+checkpoint 必须 strict/exact 加载；评估完成标记和病例完整性核验后才入结果表。
+# 后续提交 batch 约定（2026-09-13）
+
+Arm F 2D MAE两臂：`slurm/orgslot/train/arm_f_mae.sbatch`，MAE_INIT_SCOPE为
+encoder或encoder_decoder；复用AutoPET checkpoint-final，初始化不加载optimizer。
+保留topk背景loss、BF16、clip1、ROI20、0.7/0.7/2、118800更新、seed0。
+每卡16/累积3/有效192；运行中无MAE F每卡8，需报告micro-batch差异，不称严格单变量。
+只迁移ViT以及可选重建decoder，不迁移F pixel/attention/slot模块。
+统一评估`slurm/orgslot/eval/arm_f_mae_unified.sbatch`：ckpt802，head固定0.5及
+训练集6000样本阈值校准、完整测试集head与reconstruction固定0.02。
+
+用户指定：后续四卡2D训练每卡batch16、累积3、有效batch192；
+四卡3D训练每卡batch6、累积2、有效batch48 slabs。Arm F共享环境入口已实现。
+其他实验专用脚本新提交前也须按此约定核对，不能沿用旧脚本的batch覆盖值。
+已运行或已归档任务保持原快照；资源不足时先报告，不静默改变有效batch。
+改变micro-batch可能改变阳性/阴性分组loss归约权重，不能称为严格梯度等价。
+## Collector attention alignment
+
+2026-09-21：以 **2D Arm E scratch** 为对照，新增轻量训练辅助损失，不新增参数、不改变推理与旧checkpoint结构。`--lambda_collector_attention` 默认0；本次探索值0.01（不是已优化超参）。只实现outside loss，不加coverage、diversity、gate或其他attention模块。
+
+- `A:[B,K,N]` 为现有Collector空间softmax；`M` 是增强/ROI后当前GT按真实patch格子max-pool得到的器官相交支持区。loss=`mean_valid_pairs(mean_tokens(sum_positions(A*(1-M))))`。
+- 只使用visible_masks中有标注、当前裁剪有前景、segmentation_keep和slot_compute_mask均为真的器官。排除background、空切片、缺标注和未计算slot。当前只支持2D joint训练，3D/head-only显式拒绝。
+- DDP每microstep对有效样本—器官数做全局归一化，局部可导分子乘world_size抵消DDP梯度平均。固定形状统计collective和固定日志键；无阳性rank保持零梯度路径。梯度累积平均的是microstep的全局均值，未改原采样/累积策略。
+- FP32计算辅助loss；记录raw/weighted loss、每器官count/foreground_mass/support_fraction/occupancy_mass。max-pool支持区不等于纯器官patch；注意力集中不等于解耦证明，也不保证token分工。
+- 模型保持arm_e_multiscale_query、20 tokens、TGEnc depth1、channels128；WORD07072、448/384、ROI概率0.2、seed0；scratch，无resume/MAE；small-organ参数全部不变、lambda_seg0.01；BF16、clip1、实际LR7.5e-5、warmup5940、118800 updates；4卡×batch16×accum3=192。
+- 对照为当前E scratch系列（SIP续训2965273；统一评估2965274）。历史对照中途由较小microbatch切到16，且发生过恢复；新实验从头batch16，不能宣称随机轨迹逐步一致。不要与E MAE初始化结果混为严格对照。后续若需严格归因，需匹配从头batch16的基线。
+- 评估复用`slurm/orgslot/eval/arm_e_mae_unified.sbatch`：训练集子集阈值校准、24病例6990切片head fixed/calibrated、原有recon阈值0.02及后处理；不在测试集选阈值。此脚本名称含MAE，但不要求MAE权重。
+- 启动脚本：`slurm/orgslot/train/arm_e_collector_align.sbatch`。继承按账号显式映射的数据/环境路径，不复用另一账号的目录；冻结最新origin/feature/orgslot源快照。
+- CPU核验：6项新增测试全部通过，包括实际Arm E前向不变/strict checkpoint加载、Collector梯度、小型定位拟合、两进程Gloo不均衡与空rank。另有23项回归通过；旧`test_small_organ_empty_slice_uses_topk_bce_and_weight`在未修改origin源码上同样失败（测试未显式传topk，而当前API默认mean）。本实验显式topk，不修改历史loss语义。GPU正式运行尚待调度验证。
+# WORD official96 protocol
+
+2026-09-30，独立于历史随机96/24协议，命名 `official_pool_96_26_24_seed42`。
+清单固定在 `configs/orgslot/word_official96_seed42.json`，按排序后的官方病例ID，分别以独立的 `random.Random(42).sample` 抽取96训练与24测试。训练池官方100例，剩4例不用；验证/测试候选池为官方20验证＋30测试，剩26例用于验证和完整阈值校准。只抽一次，不根据badcase或最终分数重抽。这不是官方100/20/30评估，也未复现PCDD划分。
+
+以旧划分85.358%的 E cross-attention＋AutoPET MAE encoder-only为配置来源。只加载原AutoPET MAE encoder，不加载任何旧WORD权重。2D、spacing0.7/0.7/2、448输入/384ROI、ROI概率0.2、20tokens、128channels、small-organ loss、lambda_seg0.01、retained监督、top-k background、legacy_batch TGR、seed0、AdamW lr7.5e-5/wd0.05、BF16、clip1均保持。4卡×每卡16×累积3＝192，118800 optimizer updates、5940 warmup updates；最终epoch由新切片数推导，不再硬编码802。
+
+准备脚本 `slurm/orgslot/train/arm_e_official96_prepare.sbatch` 仅对原未处理的官方30测试病例按相同流程预处理。训练/验证原病例重用无学习的既有逐病例JPEG/PNG（新目录软链接），生成新的完整CSV、summary和ROI索引，绝不覆盖旧数据。严格检查146病例互斥、来源、完整切片、ROI manifest hash。`NEW_DATA_ROOT`必须是不存在的新目录。准备CPU任务成功后才释放训练。
+
+训练 `slurm/orgslot/train/arm_e_crossattn_official96.sbatch`；评估 `slurm/orgslot/eval/arm_e_official96.sbatch`。使用 `EXPERIMENT_WORKDIR`固定源码、`NEW_DATA_ROOT`固定数据，评估还需 `TRAIN_JOB_ID`。训练完成后按日志中118800 updates取最终checkpoint，非测试集选优。26例验证完整阈值扫描0.1至0.9，测试24例同时报告固定0.5与验证校准结果；min_size20/opening1不变。reconstruction仍用0.02固定阈值与现有OWT路径。保存新的训练—评估afterok链；新旧结果分别汇报，不把新划分成绩变动归因为架构改进。
+# Stage2 shared spatial/readout ablation (2026-10-04)
+
+`--stage2_shared_segmentation train` (launcher environment
+`STAGE2_SHARED_SEGMENTATION=train`) unfreezes the existing entire
+`pixel_query_decoder`: image spatial stem, pixel projection/fusion blocks,
+query normalization/projection and P4 query cross-attention/FFN. No parameters
+are added. Default `frozen` retains the previous experiment behavior.
+
+Start fresh from the same completed Stage1, NOT the completed Stage2. ViT,
+old slots and reconstruction decoder remain frozen. New slots and the existing
+background separation policy remain trainable. Use unchanged 59400 updates,
+4 GPUs x batch16 x accumulation3 = 192, LR7.5e-5, lambda_seg0.01 and seed0.
+The old slot weights remain invariant but old segmentation outputs need not:
+shared spatial/readout updates can cause forgetting. No new distillation loss
+is added in this controlled ablation. Resume rejects a changed shared policy.
+
+Set `EVALUATE_RECONSTRUCTION=1` for the Stage2 evaluation job: validation-only
+head threshold selection, fixed/calibrated test heads, plus original direct and
+indirect reconstruction Dice at threshold0.02, min_size20/opening_radius1.
+Use the same official-pool 24 test cases; never select thresholds on test.
+# Offline split robustness: seeds0/1/42 (2026-10-06)
+
+Only dataset split seed changes. Each samples96 official training cases and24
+test cases from official Val+Ts; remaining26 holdout cases are validation.
+Plans are configs/orgslot/word_official96_seed{0,1,42}.json, generated before
+training without filtering bad cases. Model seed remains0. No WORD checkpoint
+transfer between splits: same AutoPET MAE encoder initialization,118800 updates,
+batch16 x4GPU xaccum3, ROI20, losses/LR unchanged.
+
+`tools.relink_word_official_split` reuses existing preprocessed pixels, rebuilds
+manifests and training ROI index, and validates disjoint cases and all files.
+Set SPLIT_PLAN and NEW_DATA_ROOT for both existing official96 train/eval scripts.
+SPLIT_GPU_PREFLIGHT=1 runs2 fresh DDP updates separately, then discards those
+weights and starts formal training from MAE. Evaluation:26-case validation-only
+threshold calibration,24-case test head fixed/calibrated and recon direct/indirect.
+Report all three splits, not just the best. Test sets overlap, so these are
+split-sensitivity runs, not three independent test cohorts or CV folds.
+# Stage2 SAM 私有交互叠加读出 adapter（可选，尚无训练结果）
+
+保持 `sam_soft_aux` / `slot_private` 不变，新增
+`--stage2_readout_adapter residual16`，默认 `none` 完全保留旧行为。
+在共享 SAM-tail 的最后 mask token 上计算：
+`w = frozen_mask_mlp(m) + stage_adapter(m)`，再与 tail 更新后的 pixels 点积。
+adapter 为 `Linear(128,16) -> GELU -> Linear(16,128)`，4240参数，
+四个新器官共享一套，只有食管、胰腺、肝、胃启用；旧四类及背景绕过。
+最后一层权重/偏置零初始化；不改变空间分支、soft prior、aux、重建和采样。
+共享tail参数冻结但保留输入梯度；原新slots、背景策略及私有交互照常训练。
+
+已配置本账号数据/环境和同一Stage1 checkpoint后，可使用：
+
+```bash
+INCREMENTAL_ARCHITECTURE=sam_soft_aux \
+STAGE2_SHARED_SEGMENTATION=slot_private \
+STAGE2_READOUT_ADAPTER=residual16 \
+bash scripts/orgslot/run_incremental44.sh stage2
+```
+
+基线将 `STAGE2_READOUT_ADAPTER` 设为 `none`，其余保持相同。
+仅支持Stage2、2D SAM `soft_prior_aux`、`slot_private`；E/Stage1拒绝开启。
+resume核验开关一致，不能将旧Stage2续训改成新实验；正式对照从同一Stage1开始。
+统一head/reconstruction evaluator依据checkpoint参数安装adapter并strict加载。
+旧checkpoint缺少此配置时按`none`处理。提交前仍须commit/push和不可变runtime检查；
+不得修改当前排队/运行的 `inc44_full_4656f1e` 源码。
+
+## 3D SAM-tail 两条主线（2026-10-08，尚未训练）
+
+复用现有3D Arm F空间路径：3D ViT输出按时间网格切片，浅层CNN及
+P16/P8/P4融合逐slice计算；随后展平T/H/W，使用t/y/x位置编码进行跨slab
+token交互及SAM-tail双向读取。不是新增3D卷积decoder，不改变Collector。
+输入4-slice、temp_stride=1；448输入时P4为[ B,128,4,112,112 ]。
+
+| 配置 | 先验位置 | 辅助监督 | 分割部分损失（lambda_seg=0.01） |
+|---|---|---|---|
+| `soft_prior_aux` | 每次P16/P8/P4读取前，log(0.2+0.8 sigmoid(coarse.detach()))加到attention logits；tail不加粗mask门控 | 三个prior logits FP32上采样至原GT，逐slice small-organ loss | .01*(Lfinal+.25*mean(L16,L8,L4)) |
+| `downsample_gt` | 多尺度读取后生成P4粗mask，sigmoid概率门控tail两次token→pixel的V；保留梯度 | GT最近邻仅缩小H/W，T保持4；粗/最终均逐slice small-organ loss | .01*(w*Lfinal+(1-w)*Lcoarse)，w=.6**(.990**epoch) |
+
+两阶段指同一次forward内的粗预测→tail细预测，不是分两次训练。
+重建及LPIPS保持不变。lost_positive_slices在3D按每个slice计数，统计缩小GT
+丢掉的阳性切片。拒绝temporal stride不为1及粗预测T不匹配；不混入3D
+M0-M3硬mask、P2或soft+两阶段组合实验。
+
+入口 `slurm/orgslot/train/arm_f_sam_tail_3d.sbatch`，分别指定：
+
+```bash
+export HSAM_SUPERVISION=soft_prior_aux  # 另一组为 downsample_gt
+# 在已分配4卡的环境中，并配置好EXPERIMENT_WORKDIR、ARM_F_TARGET、ARM_F_COMMIT：
+bash slurm/orgslot/train/arm_f_sam_tail_3d.sbatch
+```
+
+复用3D配方：每卡6×4卡×累积2=48 slabs（192 slices），118800 updates、
+ROI20、spacing .7/.7/2、BF16、clip1、small-organ loss不变。无MAE路径时
+为scratch；要做MAE对照必须显式给两组同一兼容3D `MAE_INIT_CHECKPOINT`，
+默认仅加载encoder，不隐式使用历史2D权重。
+
+3D checkpoint loader恢复hsam_supervision后严格加载；统一3D head/calibration/
+recon评估共用这个loader，不允许权重能加载但推理静默遗漏先验。
+CPU21项测试通过：全模型FP32有限反传、两种模式BF16 decoder反传、
+mixed slab/empty监督、lost-positive计数、checkpoint严格重载及2D回归。
+旧PyTorch的CPU BF16 GroupNorm不支持混合dtype，全模型CPU BF16未通过，
+没有为此更改现有空间分支；GPU未验证、未提交任务，不能宣称GPU通过。
+`````
+
+<a id="merge-e-crossattn-mae"></a>
+
+### docs/E_CROSSATTN_MAE.md
+
+来源：`feature/orgslot @ f198a191fe9460410c0e8ed32c3392564b165ae1`。原文完整保留。
+
+`````text
+# E cross-attention + MAE encoder
+
+Purpose: test existing E query_refinement=cross_attn with AutoPET MAE encoder initialization.
+Mean-pooled organ query reads P4, then dot-product mask; no F multi-scale token refinement or reverse attention.
+
+Recipe: slurm/orgslot/train/arm_e_crossattn_mae_encoder.sbatch.
+WORD07072, 448/384 ROI20, seed0, 20 tokens, channels128, small-organ loss lambda0.01,
+top-k background, 4 GPUs x microbatch16 x accumulation3 =192, lr7.5e-5,
+118800 updates, 5940 warmup, BF16, clip1.0. Decoder is randomly initialized.
+Same MAE checkpoint SHA as existing encoder-only experiments.
+
+Evaluation: arm_e_mae_unified.sbatch; training6000 threshold calibration, test6990/24 cases,
+fixed0.5 and calibrated head, reconstruction threshold0.02. Report eight classes separately.
+Historical E encoder 84.99 is a reference, not a perfectly controlled comparison:
+historical precision/microbatch/resume trajectory differ. Do not attribute all changes to cross-attention.
+No claim of exceeding85 before complete evaluation.
+`````
+
+<a id="merge-sam-soft-prior"></a>
+
+### docs/SAM_SOFT_PRIOR.md
+
+来源：`feature/orgslot @ f198a191fe9460410c0e8ed32c3392564b165ae1`。原文完整保留。
+
+`````text
+# SAM-tail + MAE encoder: soft prior ablation
+
+Modes: soft_prior (routing only), soft_prior_aux (same routing plus supervision).
+No P2, no tail modification, no added parameters. Before each P16/P8/P4 token
+read, mean current tokens, L2 normalize query/pixels, dot times sqrt(C).
+Use detached log(0.2+0.8*sigmoid(logits)) as additive attention bias shared by
+20 tokens and four heads. Tail itself receives no mask prior in these modes.
+
+Auxiliary logits retain gradients, are upsampled directly to GT resolution,
+and use existing small-organ loss. Average three scale losses, eta=0.25:
+L = L_reconstruction_related + 0.01*(L_final + 0.25*mean(L16,L8,L4)).
+Log each scale, average and weighted auxiliary loss. Retained supervision;
+background-only batches use zero auxiliary loss without skipping backward.
+Same seed0, WORD07072 ROI20, microbatch16 x4GPU xaccum3=192, 118800 updates,
+MAE encoder initialization; unified head calibration/test and recon evaluation.
+
+## Literature and scope
+
+Mask2Former official maskformer_model.py copies final loss weights to every
+auxiliary layer and sums terms. Its Cityscapes panoptic config uses class2,
+mask BCE5, Dice5. These are not relative auxiliary weights for our loss.
+https://github.com/facebookresearch/Mask2Former/blob/main/mask2former/maskformer_model.py
+https://github.com/facebookresearch/Mask2Former/blob/main/configs/cityscapes/panoptic-segmentation/maskformer2_R50_bs16_90k.yaml
+
+H-SAM official trainer.py uses w=0.6**(0.990**epoch), loss=(1-w)*coarse+w*final.
+Thus coarse/final starts0.4/0.6, then coarse decays. It does not use fixed0.25.
+https://github.com/Cccccczh404/H-SAM/blob/main/trainer.py
+
+Our fixed0.25 on the mean is an explicit adaptation to retain the established
+final segmentation/reconstruction balance, NOT an official paper parameter.
+Do not change it based on test results. Only one seed; no significance claim.
+CPU regression validation is separate from GPU/DDP validation.
+`````
+
+<a id="merge-sam-tail-hsam"></a>
+
+### docs/SAM_TAIL_HSAM.md
+
+来源：`feature/orgslot @ f198a191fe9460410c0e8ed32c3392564b165ae1`。原文完整保留。
+
+`````text
+# SAM-tail: differentiable coarse-mask guidance ablation
+
+Keep the existing MAE-encoder SAM-tail baseline. Add three runs:
+
+| Variant | HSAM_SUPERVISION | Coarse loss |
+|---|---|---|
+| H-SAM-inspired low resolution | downsample_gt | P4 logits vs nearest-resized GT |
+| Full-label supervision | upsample_logits | bilinear-upsampled P4 logits vs full GT |
+| M2F-style routing | m2f_hard | M0-M3 upsampled logits vs full GT |
+
+The third run uses a shared LayerNorm/3-layer mask MLP on mean organ tokens,
+with shared P4 pixel features. Predict M0 before P16, M1 after P16, M2 after
+P8, M3 after P4. Resize the preceding logits to each attention scale, threshold
+sigmoid at .5, detach boolean routing, and reset fully blocked rows to global
+attention. Keep SAM-tail unchanged without soft guidance. Use
+lambda_seg*(final_loss + L_M0 + L_M1 + L_M2 + L_M3), i.e. equal weights rather
+than H-SAM scheduling. This increases segmentation supervision strength versus
+the baseline; do not attribute differences solely to routing. It adapts the
+M2F mechanism, not instance matching or its original class/mask losses.
+
+All use the same MAE encoder (encoder only), seed, WORD07072 ROI20,
+microbatch16/accumulation3 on 4 GPUs (effective192), small-organ loss,
+lambda_seg=.01 and unchanged training update budget. No aux-only run.
+
+For the two H-SAM-inspired variants, after P16/P8/P4 refinement, mean-token cosine dot original P4 gives coarse
+logits. Their sigmoid probabilities modulate both token-to-pixel reads in
+SAM-tail. The gate multiplies projected V (equivalent to attention probability
+multiplication), with no detach, floor or renormalization. Reverse reads are
+unchanged. This is NOT a complete H-SAM reproduction (no CMAttn, SAM pretrained
+decoder, or hierarchical high-resolution decoder).
+
+For those two variants, final weight w(epoch)=0.6**(0.990**epoch), following the public H-SAM trainer,
+not the different schedule described in its paper. Total segmentation term:
+.01*((1-w)*coarse_loss+w*final_loss). Other losses unchanged. Coarse readout is
+uncalibrated; final readout retains existing calibration. Monitor both losses,
+final weight and lost positive slices after GT resizing.
+
+Use slurm/orgslot/train/arm_f_sam_tail_hsam.sbatch with each mode. Pin source
+and verify revision before submission.
+Evaluation restores hsam_supervision from checkpoint args; final-mask-only
+evaluation is the main protocol (no coarse/final ensemble). Existing checkpoint
+parameters remain compatible; omitting the mode defaults to the old behavior,
+so evaluation must explicitly verify it instead of silently using the default.
+
+## Submitted 2026-09-27 (Asia/Shanghai)
+
+### Background-only coarse-loss fix (2026-09-28)
+
+Job 2992278 failed when coarse predictions were empty. Legacy batch TGR can
+retain background alone; with no ROI focus and lambda_bg_seg=0, no head runs.
+This is legal: coarse loss is now zero and reconstruction backward continues.
+Missing predictions for any supervised slot still raise an error (including
+partially missing dictionaries). All three supervision modes share the fix.
+Five CPU tests pass, including real-model background-only finite backward;
+multi-rank GPU validation has not been run. Existing immutable runtime jobs
+do not inherit this fix: replace their snapshots and evaluation dependencies
+before claiming deployment. Keep retained supervision and original loss weights.
+
+Pinned code: `569582d41b9baf481ca7712e9e7cbf0f27aab16b`.
+Archive SHA256: `8e15cd5c166f9a79055fccca8a7e5e06621bfe03c016ecf539777047329a3499`.
+MAE SHA256: `0b3571a3e79095686a0b12649735a298aaeb8a0b3bb93a47f3484439ac4a1ec6`.
+
+| Mode | User/cluster | QoS | Training | afterok evaluation | Time limit |
+|---|---|---|---|---|---|
+| downsample_gt | bolinren19/SIP | 4a800 | 2992278 | 2992279 | 7 days |
+| upsample_logits | sifansong/XEC | 8gpus | 148892 | 148895 | 5 days |
+| m2f_hard | antengcai23/XEC | 4gpus | 148893 | 148896 | 7 days |
+
+All Slurm accounts are `sifansong`; this is distinct from the login username.
+Training: 4 A800, 20 CPU, 192 GB. Evaluation: 1 A800, 10 CPU, 128 GB.
+No automatic requeue (avoid existing-output restart failure). Queued, GPU
+validation not yet run. CPU: 9 existing-head regression tests and 3 new tests
+passed locally; 3 new tests passed in each XEC environment.
+
+Runtime paths (do not pull or edit under queued/running jobs):
+- SIP: `/gpfs/work/aac/bolinren19/OD_OWT/.worktrees/sam_guided_569582d`
+- sifansong/XEC: `/gpfs/work/aac/sifansong/worktrees/sam_guided_569582d`
+- antengcai23/XEC: `/gpfs/work/aac/antengcai23/worktrees/sam_guided_569582d`
+
+Train script: `slurm/orgslot/train/arm_f_sam_tail_hsam.sbatch`.
+Evaluation: `slurm/orgslot/eval/sam_tail_guided.sbatch`, validates saved mode,
+MAE scope and head, then runs 6000 training-calibration slices, full test head
+evaluation and reconstruction threshold .02 using the existing protocol.
+Training output: `Results/OrganSlotBank/Common8/WORD_2D/ArmF_2D_JOBID`.
+Check start logs for encoder-only load, microbatch16, accumulation3, finite
+coarse/final loss, lost-positive count and correct mode before trusting results.
+`````
+
+<a id="merge-sam-tail-all-seg"></a>
+
+### docs/SAM_TAIL_ALL_SEG.md
+
+来源：`feature/orgslot @ f198a191fe9460410c0e8ed32c3392564b165ae1`。原文完整保留。
+
+`````text
+# SAM-tail + MAE encoder: all-slot segmentation supervision
+
+Independent controlled ablation against SAM-tail + MAE encoder (no auxiliary
+mask supervision). Only intended change: seg_supervision retained -> all.
+
+Entry: slurm/orgslot/train/sam_tail_mae_all_seg.sbatch.
+Supply EXPERIMENT_WORKDIR, ARM_F_TARGET and MAE_INIT_CHECKPOINT as for the
+existing SAM-tail encoder launcher. Use a new immutable runtime/output job.
+Do not resume a retained-supervision run for the primary controlled comparison.
+
+Unchanged: WORD07072, input448, ROI384/probability0.2, 20tokens, channels128,
+SAM-tail architecture, MAE encoder initialization, microbatch16 x4GPU xaccum3
+=192, lambda_seg0.01, existing small-organ loss, optimizer/LR/update budget.
+Background weight remains0: all means all eight visible foreground organs,
+including empty-slice negative supervision, not a newly supervised background.
+
+Reconstruction still samples legacy_batch keep and forces the ROI focus slot
+to remain. Its target and canvas fusion use this unchanged keep. Segmentation
+uses all foreground head rows. Model computes slots using keep OR head_mask,
+so reconstruction-dropped organs receive real token features, not zero masks.
+Shared parameters still receive gradients from both branches; this is NOT
+gradient isolation. Loss values/scales and cost may change when more rows are
+supervised; lambda and loss reduction are deliberately unchanged for this test.
+
+Default ARM_F_SEG_SUPERVISION remains retained. Only this new entry sets all.
+Existing checkpoints and model implementation remain unchanged. Reuse the
+SAM-tail encoder unified evaluation protocol; report full24 cases/6990 slices,
+fixed and train-calibrated thresholds, recon, per-organ P/R and volume ratio.
+Existing seg_*_supervised_samples/positive_samples/negative_samples logs allow
+inspection of effective supervision; distinguish seg_* from unrelated zero
+positive_* auxiliary-loss counters. Incremental training must still obey label
+visibility; this launcher is for the fully labelled Common8 experiment only.
+
+CPU test verifies exact reconstruction invariance for the same keep, real
+dropped-slot computation and finite nonzero segmentation gradients. GPU memory,
+throughput and full training have not been validated or submitted by this change.
+`````
+
+<a id="merge-abcd-retirement"></a>
+
+### docs/ABCD_RETIREMENT.md
+
+来源：`feature/orgslot @ f198a191fe9460410c0e8ed32c3392564b165ae1`。原文完整保留。
+
+`````text
+# A/B/C/D retirement (2026-09-27)
+
+User authorized retiring A/B/C/D code, with results preserved.
+Removed 18 dedicated WORD07072 A-D training/smoke entrypoints from the current
+development tree. Recover any removed file from the remote tag
+`archive/20260927/abcd-before-retirement` (7b250c9).
+
+Checkpoints, experiment metrics, inference outputs, historical runtime worktrees,
+and all queued/running jobs are unchanged. No experiment data was deleted.
+
+Partial cleanup only: core head removal/default changes/test migration were
+blocked by approval review due to shared E/F dependencies. Those operations
+were NOT executed. A-D model implementations and evaluation compatibility
+remain pending explicit approval for that shared-path refactor. E/F still
+inherit SharedPixelQueryDecoder; never delete that class without preserving
+its initialization/state_dict behavior. Existing defaults are unchanged.
+
+Historical docs may name the deleted launchers; use the archive tag to reproduce
+those commands. This retirement is a maintenance choice, not a declaration
+that the scientific results were invalid.
+`````
+
+<a id="merge-cleanup-20260927"></a>
+
+### docs/CLEANUP_20260927.md
+
+来源：`feature/orgslot @ f198a191fe9460410c0e8ed32c3392564b165ae1`。原文完整保留。
+
+`````text
+# Repository cleanup — 2026-09-27
+
+Keep four development branches: main (OWT), feature/orgslot (all OrganSlot
+variants), experiment/psem and experiment/lossbalance (independent research).
+
+Retired branch names, locally and on origin:
+- experiment/orgslot-arm-f: code already integrated; unique tip only reorganizes
+  historical documentation. Recover from archive/20260927/orgslot-arm-f.
+- fix/arme-mae-ddp: ancestor of unified branch. Recover from
+  archive/20260927/arme-mae-ddp.
+
+Removed obsolete fixed-batch smoke tools and their two launchers:
+tools/smoke_arm_f_2d_batch8.py and tools/smoke_arm_f_batch4.py, plus the
+corresponding slurm/orgslot/smoke/arm_f_2d_batch8.sbatch and arm_f_batch4.sbatch.
+These had no other executable callers. Current recipes use 2D16 and 3D6.
+The removed tools are recoverable from archive/20260927/orgslot-before-cleanup.
+This does not imply that batch8 scientific results are invalid.
+
+Do NOT delete low-scoring scientific controls just for being below SOTA.
+Keep A-F model paths for checkpoint loading, negative results and ablation.
+Keep all checkpoints, results, data and original worktrees. Detached old
+worktrees are historical runtime snapshots, not extra development branches.
+Unrelated dirty root docs/FORMAL_EXPERIMENT_REGISTRY.md was untouched.
+
+Protected active/queued jobs at cleanup: SIP 2965316/2965317 and
+2992278/2992279; XEC 148830/148831, 148833/148834, 148892/148895,
+148893/148896. Their runtime snapshots are unchanged.
+No scientific experiment was classified as invalid without supporting evidence.
+`````
+
+<a id="owt-results"></a>
+
+### main:docs/RESULTS.md
+
+来源：`main @ db349d9b66de953ed21dc088b0c2ca723644fb43`。原文完整保留。
+
+`````text
+> 原始OWT实验账本，历史快照；不是最新OrganSlot状态。
+
+# OWT Experiment Summary
+
+Last updated: 2026-07-19
+
+This document is the primary experiment ledger for this repository. CSV files are
+kept as machine-readable raw results, while experiment settings, conclusions, and
+comparisons are maintained here.
+
+## 1. Current Experiment Scope
+
+The completed experiments are **joint full-class OWT reconstruction baselines**.
+They are not class-incremental experiments.
+
+Current training protocol:
+
+```text
+All class labels are available simultaneously
+-> train OWT reconstruction model
+-> inspect token-conditioned reconstruction (Step 2)
+-> derive pseudo-segmentation from reconstruction signals (Step 3)
+```
+
+The following components have not yet been implemented or evaluated:
+
+- old/new class splits during training;
+- sequential 4-4, 4-2, or 2-2 stages;
+- hiding old-class labels in later stages;
+- frozen previous model;
+- knowledge distillation;
+- prototype-based incremental constraints;
+- Old/New/All incremental metrics.
+
+### Experiment objectives
+
+1. Establish a non-incremental full-class reference for the existing OWT code.
+2. Test whether organ tokens contain class-specific reconstruction information.
+3. Evaluate reconstruction-derived pseudo-segmentation on AbdAutoPet, WORD, and BTCV.
+4. Compare 2D OWT with Fixfr4 OWT.
+5. Diagnose complete misses and instability on small organs.
+
+## 2. Datasets
+
+| Dataset | Classes | Train cases | Test cases | Train samples | Test slices | Notes |
+|---|---:|---:|---:|---:|---:|---|
+| AbdAutoPet | 4 | 700 | 200 | 78,400 slices | 22,400 | Original OWT-formatted JPG/PNG data; 112 slices per case |
+| WORD Common8 | 8 | 96 | 24 | 19,078 slices | 4,665 | Paper-aligned 8:2 split, seed 42 |
+| BTCV Common8 | 8 | 24 | 6 | 3,588 slices | 938 | Paper-aligned 8:2 split, seed 42 |
+
+Common8 class order:
+
+| ID | Class |
+|---:|---|
+| 1 | spleen |
+| 2 | right kidney |
+| 3 | left kidney |
+| 4 | gallbladder |
+| 5 | esophagus |
+| 6 | pancreas |
+| 7 | liver |
+| 8 | stomach |
+
+The AbdAutoPet files contain labels 1-4, but the repository does not contain a
+reliable label-ID-to-organ-name mapping. AbdAutoPet results therefore retain the
+names `label_1` through `label_4`.
+
+## 3. Preprocessing
+
+### WORD and BTCV Common8
+
+```text
+NIfTI image and mask
+-> canonical RAS orientation
+-> resample to 1 x 1 x 3 mm^3
+-> image: linear interpolation
+-> mask: nearest-neighbor interpolation
+-> HU clipping [-175, 250]
+-> fixed normalization to [0, 1]
+-> center crop/pad to 512 x 512 without foreground loss
+-> resize to 224 x 224
+-> image: JPEG quality 95
+-> mask: lossless uint8 PNG
+```
+
+Training uses `--intensity_norm fixed_255`, so the saved HU-windowed image is
+divided by 255 without a second per-slice min-max normalization.
+
+### Preprocessing integrity audit
+
+The 512-to-224 resize did not remove any positive test slices and preserved the
+expected area after correcting for the spatial scale factor.
+
+| Dataset | Class | Positive slices before resize | Positive slices after resize | Lost slices |
+|---|---|---:|---:|---:|
+| WORD | gallbladder | 243 | 243 | 0 |
+| WORD | esophagus | 570 | 570 | 0 |
+| BTCV | gallbladder | 113 | 113 | 0 |
+| BTCV | esophagus | 160 | 160 | 0 |
+
+The labels are therefore not disappearing during preprocessing. However, the
+full-field resize reduces the effective in-plane resolution to approximately
+2.286 mm per pixel. At 224 x 224, the average foreground area per positive WORD
+slice is only about 68 pixels for gallbladder and 39 pixels for esophagus. Both
+are substantially smaller than one 16 x 16 ViT patch (256 pixels), which can
+weaken their feature representation.
+
+## 4. Model and Training Settings
+
+### Architecture
+
+Current `v11` models use the ViT branch in `OWT_models.py`:
+
+```text
+PatchEmbed / PatchEmbed3Dfix
+-> six BlockLA image-encoding blocks
+-> OrganCollector / OrganCollector3D
+-> organ token groups
+-> six shared BlockLA token-group blocks
+-> AHER spatial recovery
+-> eight BlockLA reconstruction-decoder blocks
+-> patch prediction and image reconstruction
+```
+
+This is a custom MAE-ViT with Linear Attention. It is not the 3D hierarchical
+Swin UNETR used by the incremental-segmentation reference paper.
+
+### Shared hyperparameters
+
+| Parameter | Value |
+|---|---|
+| Architecture version | `v11` |
+| Model | ViT-Base, patch size 16, Linear Attention |
+| Input size | 224 x 224 |
+| Embedding dimension | 768 |
+| Transformer depth | 6 image blocks + 6 token-group blocks |
+| Decoder | AHER + 8 reconstruction blocks |
+| Token factor | 20 tokens per class group |
+| Base learning rate | `1e-4` |
+| Weight decay | `0.05` |
+| Epochs | 1,200 |
+| Warm-up epochs | 60 |
+| Mask ratio argument | `1.0` |
+| Loss | full-image L2 + LPIPS |
+| GPUs | 2 |
+
+The 8-class Common8 model has 180 tokens: 20 background tokens plus 8 x 20
+organ tokens. The 4-class AbdAutoPet model has 100 tokens.
+
+### Experiment-specific settings
+
+| Experiment | Input | Batch size | Normalization | Checkpoint |
+|---|---|---:|---|---|
+| AbdAutoPet 2D | 1 x 224 x 224, repeated to RGB | 96 | per-sample min-max | epoch 1199 |
+| WORD 2D | 1 x 224 x 224, RGB | 32 | fixed `/255` | epoch 1199 |
+| WORD 3D | 4 x 224 x 224, Fixfr4, TS1 | 32 | fixed `/255` | epoch 1199 |
+| BTCV 2D | 1 x 224 x 224, RGB | 48 | fixed `/255` | epoch 1199 |
+| BTCV 3D | 4 x 224 x 224, Fixfr4, TS1 | 32 | fixed `/255` | epoch 1199 |
+
+Final epoch global training losses:
+
+| Experiment | L2 (`train_loss`) | LPIPS (`train_p_loss`) | Approx. optimized sum |
+|---|---:|---:|---:|
+| WORD 2D | 0.000730 | 0.016920 | 0.017650 |
+| WORD 3D | 0.000694 | 0.016783 | 0.017477 |
+| BTCV 2D | 0.004199 | 0.061805 | 0.066003 |
+| BTCV 3D | 0.003873 | 0.059084 | 0.062957 |
+
+These are global full-image losses. The current training code does not log a
+separate loss for each organ.
+
+## 5. Evaluation Protocol
+
+### Step 2: Token-conditioned reconstruction
+
+Step 2 produces normalized CT reconstruction signals, not class probabilities.
+
+| Mode | Tokens retained | Reconstruction target |
+|---|---|---|
+| `whole` | background and all organ tokens | complete CT image |
+| `background_only` | background tokens | background CT with organs zeroed |
+| `organs_only` | all organ tokens | organ CT with background zeroed |
+| `class_c_only` | only class-c tokens | class-c CT region with all other pixels zeroed |
+
+Reported metrics are L1, L2, LPIPS, PSNR, and SSIM. Thresholded variants first
+set reconstruction values below 0.02 to zero.
+
+Important limitation: class-only targets are extremely sparse, but current L1,
+L2, PSNR, and SSIM are averaged over the complete volume. A nearly zero output
+can therefore receive apparently excellent metrics while failing to reconstruct
+the organ. Class-only full-volume metrics must not be interpreted as organ ROI
+reconstruction quality.
+
+### Step 3: Reconstruction-derived pseudo-segmentation
+
+Two score maps are evaluated:
+
+```text
+Direct(c)   = reconstruction using only class-c tokens
+Indirect(c) = max(input - reconstruction without class-c tokens, 0)
+```
+
+The score map is thresholded at 0.15. Common8 uses a minimum connected-component
+size of 100 voxels; AbdAutoPet uses 20. Reported segmentation metrics are Dice,
+NSD, and HD95 before and after morphology-based postprocessing.
+
+This is not a learned softmax segmentation head.
+
+## 6. Step 2 Reconstruction Results
+
+### Whole-image reconstruction
+
+| Dataset | Model | L1 | L2 | LPIPS | PSNR | SSIM |
+|---|---|---:|---:|---:|---:|---:|
+| WORD | 2D | 0.00691 | 0.000314 | 0.01358 | 35.31 | 0.9660 |
+| WORD | 3D Fixfr4 | 0.00722 | 0.000321 | 0.01692 | 35.25 | 0.9535 |
+| BTCV | 2D | 0.03318 | 0.006261 | 0.10914 | 22.32 | 0.7195 |
+| BTCV | 3D Fixfr4 | 0.03363 | 0.006260 | 0.15078 | 22.26 | 0.6977 |
+| AbdAutoPet | 2D | 0.00686 | 0.000157 | not evaluated | 38.42 | 0.9196 |
+
+WORD whole-image reconstruction is substantially better than BTCV. Fixfr4 does
+not improve whole-image reconstruction over 2D in the current checkpoints.
+
+### Organs-only reconstruction
+
+| Dataset | Model | L1 | L2 | LPIPS | PSNR | SSIM |
+|---|---|---:|---:|---:|---:|---:|
+| WORD | 2D | 0.00247 | 0.000679 | 0.01299 | 55.25 | 0.9848 |
+| WORD | 3D Fixfr4 | 0.00224 | 0.000592 | 0.01364 | 59.44 | 0.9852 |
+| BTCV | 2D | 0.00999 | 0.003361 | 0.03830 | 38.50 | 0.9037 |
+| BTCV | 3D Fixfr4 | 0.00816 | 0.002694 | 0.04017 | 42.95 | 0.9271 |
+| AbdAutoPet | 2D | 0.00600 | 0.001322 | not evaluated | 32.66 | 0.9115 |
+
+Fixfr4 improves the aggregated organs-only L1/L2, PSNR, and SSIM for WORD and
+BTCV, indicating that short through-plane context helps overall organ-region
+reconstruction.
+
+### Small-organ class-only reconstruction
+
+| Dataset | Model | Class | L1 | L2 | LPIPS | PSNR | SSIM |
+|---|---|---|---:|---:|---:|---:|---:|
+| WORD | 3D | gallbladder | 0.000161 | 0.0000167 | 0.00217 | 75.40 | 0.9996 |
+| WORD | 3D | esophagus | 0.000165 | 0.0000195 | 0.00459 | 72.84 | 0.9994 |
+| BTCV | 3D | gallbladder | 0.001022 | 0.0000870 | 0.00576 | 57.97 | 0.9918 |
+| BTCV | 3D | esophagus | 0.000932 | 0.0000277 | 0.00637 | 57.21 | 0.9916 |
+
+These high PSNR/SSIM values are dominated by the zero background and are not
+evidence of successful small-organ reconstruction. All four corresponding Direct
+Dice values are zero in Step 3.
+
+## 7. Step 3 Pseudo-segmentation Results
+
+### Macro Dice
+
+Postprocessed class-macro Dice over all target classes:
+
+| Dataset | Model | Direct | Indirect | Better extraction mode |
+|---|---|---:|---:|---|
+| AbdAutoPet | 2D | 89.94 | 90.39 | Indirect |
+| WORD | 2D | 55.07 | 58.31 | Indirect |
+| WORD | 3D Fixfr4 | 59.93 | 60.94 | Indirect |
+| BTCV | 2D | 10.39 | 10.43 | Neither is reliable |
+| BTCV | 3D Fixfr4 | 34.16 | 12.24 | Direct |
+
+### WORD per-class Dice
+
+| Class | 2D Direct | 2D Indirect | 3D Direct | 3D Indirect |
+|---|---:|---:|---:|---:|
+| spleen | 86.00 | 88.31 | 89.24 | 89.92 |
+| right kidney | 79.30 | 86.83 | 89.49 | 89.05 |
+| left kidney | 79.98 | 85.55 | 88.25 | 87.87 |
+| gallbladder | 0.00 | 0.00 | 0.00 | 0.00 |
+| esophagus | 0.00 | 0.00 | 0.00 | 0.00 |
+| pancreas | 38.43 | 43.73 | 47.61 | 54.12 |
+| liver | 91.02 | 92.28 | 92.02 | 93.15 |
+| stomach | 65.84 | 69.78 | 72.81 | 73.44 |
+
+WORD learns the large organs well. Fixfr4 improves kidney, pancreas, and stomach
+performance, but gallbladder and esophagus remain completely unresolved.
+
+### BTCV per-class Dice
+
+| Class | 2D Direct | 2D Indirect | 3D Direct | 3D Indirect |
+|---|---:|---:|---:|---:|
+| spleen | 0.00 | 8.27 | 60.07 | 14.05 |
+| right kidney | 0.00 | 6.82 | 34.68 | 8.85 |
+| left kidney | 0.00 | 6.68 | 37.24 | 8.67 |
+| gallbladder | 0.00 | 0.25 | 0.00 | 0.27 |
+| esophagus | 0.00 | 0.39 | 0.00 | 0.27 |
+| pancreas | 0.00 | 0.90 | 8.59 | 0.77 |
+| liver | 83.11 | 51.48 | 85.07 | 50.81 |
+| stomach | 0.00 | 8.68 | 47.61 | 14.20 |
+
+BTCV 2D collapses primarily to liver. Fixfr4 partially recovers spleen, kidneys,
+pancreas, and stomach in Direct mode, but performance remains far below a usable
+segmentation baseline.
+
+### AbdAutoPet per-class Dice
+
+| Class | Direct mean Dice | Indirect mean Dice | Direct median | Indirect median |
+|---|---:|---:|---:|---:|
+| label 1 | 96.45 | 96.51 | 96.70 | 96.76 |
+| label 2 | 92.69 | 92.93 | 93.24 | 93.51 |
+| label 3 | 92.94 | 93.04 | 94.67 | 94.72 |
+| label 4 | 77.66 | 79.06 | 80.66 | 81.97 |
+
+For the smallest AbdAutoPet class (`label_4`):
+
+- no positive case produced an entirely empty prediction;
+- Direct had 8/200 cases with Dice below 0.5;
+- Indirect had 6/200 cases with Dice below 0.5;
+- worst Dice was approximately 0.22;
+- small-organ instability is present, but systematic complete misses are not.
+
+## 8. Small-organ Failure Analysis
+
+### Observed complete misses
+
+| Dataset/model | Mode | Observation |
+|---|---|---|
+| WORD 2D | Direct | gallbladder and esophagus raw predictions empty in 24/24 cases |
+| WORD 3D | Direct | gallbladder and esophagus raw predictions empty in 24/24 cases |
+| WORD 2D | Indirect | postprocessing empties gallbladder in 23/24 and esophagus in 22/24 cases |
+| WORD 3D | Indirect | postprocessing empties both classes in 23/24 cases |
+| BTCV 2D | Direct | all classes except liver raw-empty in 6/6 cases |
+| BTCV 3D | Direct | gallbladder and esophagus raw-empty in 6/6 cases |
+| AbdAutoPet 2D | Direct/Indirect | no empty prediction in any GT-positive case |
+
+WORD Indirect produces non-empty raw signals, but they are spatially incorrect:
+raw Dice is approximately 0.0003 for gallbladder and 0.008 for esophagus. The
+100-voxel component filter exposes rather than creates the underlying failure.
+
+### Likely causes, ordered by current evidence
+
+1. **Global reconstruction-loss imbalance.** Small organs contribute only a tiny
+   fraction of the full-image L2 and LPIPS objectives.
+2. **Low effective spatial resolution.** Full-field 224 x 224 input followed by
+   16 x 16 patches makes small organs sub-patch structures.
+3. **No small-organ foreground sampling.** Most slices do not contain the target
+   organ, and the loader samples all slices/windows uniformly.
+4. **Weak token identifiability.** OrganCollector has no direct mask-alignment
+   supervision, so small-organ information may leak into background or other
+   organ token groups.
+5. **Shared TGEnc and AHER.** All classes share token processing and spatial
+   recovery, allowing large classes to dominate optimization.
+6. **Fixed reconstruction threshold.** The 0.15 score threshold is not a calibrated
+   class probability and may suppress weak class-specific signals.
+7. **Postprocessing.** The 100-voxel filter removes scattered Indirect artifacts,
+   but it is not the root cause of Direct raw-empty predictions.
+
+## 9. Relationship to the Incremental-Segmentation Paper
+
+The reference paper uses a supervised 3D Swin UNETR segmentation network with
+96 x 96 x 96 training crops, voxel-wise class logits, and explicit incremental
+training stages. Current OWT uses a short Fixfr4 MAE-ViT reconstruction model and
+derives segmentation from reconstruction amplitudes.
+
+The current results must therefore not be reported as 4-4 or 2-2 incremental
+results. Even comparison with the paper's Offline result is only an external
+scale reference, not a controlled architecture comparison.
+
+| Dataset | Current best 3D OWT macro Dice | Paper Offline Dice | Uncontrolled gap |
+|---|---:|---:|---:|
+| BTCV | 34.16 | 90.75 | -56.59 points |
+| WORD | 60.94 | 85.47 | -24.53 points |
+
+## 10. Current Conclusions
+
+1. WORD OWT reconstructs complete CT images reasonably well and learns large
+   organs, but does not form usable gallbladder or esophagus token signals.
+2. BTCV is limited by only 24 training cases and shows broad class collapse,
+   especially in 2D.
+3. Fixfr4 improves aggregate organ reconstruction and several medium/large-organ
+   Dice scores, but four slices are insufficient to solve the smallest classes.
+4. AbdAutoPet demonstrates that reconstruction-based organ tokens can produce
+   useful pseudo-segmentation when classes are larger, frequent, and supported by
+   substantially more training data.
+5. Current class-only PSNR/SSIM metrics are biased by zero background and should
+   not be used as evidence of small-organ reconstruction quality.
+6. No claim about incremental-learning performance is supported yet.
+
+## 11. Required Next Evaluations
+
+- Add foreground-only ROI-L1 and ROI-L2 for class-only reconstruction.
+- Add positive-slice and organ-bounding-box PSNR/SSIM.
+- Measure reconstruction energy recovered inside the organ and leakage outside it.
+- Sweep class-specific reconstruction thresholds before changing the model.
+- Inspect OrganCollector attention overlap with ground-truth masks.
+- Run a small-organ-positive subset overfit test to separate optimization failure
+  from dataset-scale imbalance.
+- Establish a supervised segmentation reference under the same preprocessing.
+- Only after validating the joint baseline, implement and evaluate matched 4-4
+  and 2-2 incremental protocols.
+
+### Small-organ and low-data intervention plan
+
+Increasing the spatial grid from 14 x 14 (196 tokens) to 16 x 16 (256 tokens) is a valid minimal ablation, but it is not expected to solve the current complete misses by itself. With full-field preprocessing, this changes the physical patch width only from approximately 36.6 mm to 32 mm and increases small-organ pixels by about 1.31 times. The global reconstruction-loss imbalance remains unchanged.
+
+Two implementations must be distinguished:
+
+1. Resizing the existing 224 JPG files to 256 in the DataLoader creates no new anatomical information and is not a valid high-resolution experiment.
+2. Regenerating 256 x 256 images directly from the 512 x 512 resampled NIfTI data, then training with input size 256 and patch size 16, is the valid 256-token ablation.
+
+Recommended priority:
+
+1. Replace full-field downscaling with native-resolution foreground-centered 224 x 224 crops. This retains the same 196-token cost while reducing physical patch width to approximately 16 mm. Use sliding-window aggregation at test time.
+   Do not replace each volume with one fixed crop. Mix low-resolution global views with dynamically jittered native-resolution foreground and random crops, supervise only classes present in each local crop, and ensure whole-volume coverage across epochs. A 224 mm field of view retains local context but not the entire abdomen.
+   Generate crops on the fly rather than materializing many duplicate files. For 2D, apply exactly the same crop and geometric transform to the image and mask. For Fixfr4/3D, use one shared XY crop across every slice in the window and crop image/mask with identical XYZ coordinates. These crops are correlated views of the same case, not additional independent patients, so dataset splits and cross-validation must remain case-wise.
+2. Add class-balanced ROI reconstruction loss, averaged independently inside each present organ rather than over the complete image.
+3. Use class-uniform positive-slice/window sampling, with explicit oversampling of gallbladder, esophagus, and pancreas.
+4. Add an OrganCollector attention-alignment loss or an organ-level binary head so that each token group is explicitly tied to its class mask.
+5. Run the regenerated 256 x 256, patch-16 experiment as a controlled resolution ablation; evaluate patch-8 or a high-resolution branch only after the loss and sampling problems are addressed.
+6. For BTCV, initialize from the WORD Common8 checkpoint and fine-tune with a lower learning rate, or train on WORD and BTCV jointly with dataset-balanced sampling.
+7. Report BTCV results with cross-validation because the current six-case test split has high variance.
+
+The resolution ablation must retain the same split, model depth, token factor, loss, epochs, and evaluation protocol so that any improvement can be attributed to spatial resolution rather than a simultaneous training change.
+
+## 12. Result Artifacts
+
+- AbdAutoPet evaluation: `Results/AbdAutoPet_Eval/2D/OWT-Joint-C4-Recon_ckpt1199/`
+- WORD 2D evaluation: `Results/Common8_Eval/WORD_2D/OWT-Joint-C8-Recon_ckpt1199/`
+- WORD 3D evaluation: `Results/Common8_Eval/WORD_3D_Fixfr4/OWT-Joint-C8-Recon3D_ckpt1199/`
+- BTCV 2D evaluation: `Results/Common8_Eval/BTCV_2D/OWT-Joint-C8-Recon_ckpt1199/`
+- BTCV 3D evaluation: `Results/Common8_Eval/BTCV_3D_Fixfr4/OWT-Joint-C8-Recon3D_ckpt1199/`
+
+The per-case CSV files remain raw evidence. Future experiment interpretation and
+status updates should be added to this document.
+
+## 13. CropMix-v1 Small-Organ Experiment
+
+### Purpose
+
+Test whether preserving native in-plane detail and increasing the frequency of
+small-organ-positive views improves WORD gallbladder, esophagus, and pancreas
+reconstruction/segmentation without changing the OWT architecture or test input.
+
+### Training intervention
+
+- Source data: WORD resampled to 1 x 1 x 3 mm, HU clipped to [-175, 250],
+  mapped to [0, 1], and stored on a 512 x 512 canvas.
+- Model input remains 224 x 224; patch size remains 16 and the grid remains
+  14 x 14 = 196 patches.
+- View mixture: 50% complete 512 x 512 images resized to 224 x 224 and 50%
+  native-resolution 224 x 224 XY crops.
+- Crop center: a present organ, with priority given to Common8 classes 4, 5,
+  and 6 (gallbladder, esophagus, pancreas) and up to 32-pixel XY jitter.
+- Focus sampling: 80% of local-crop requests are redirected to a slice/window
+  containing at least one focus class.
+- 3D geometry: all four Fixfr4 slices and their masks use one shared XY crop.
+- A local crop's focus class is forced into that iteration's reconstructed
+  organ-token set; at least one class always remains visible.
+- Intensity handling: complete-view resizing is clipped to [0, 1] after cubic
+  interpolation but is not per-sample min-max normalized.
+
+This is a combined intervention (resolution-preserving crop, focused sampling,
+and focus-token selection), not a single-factor crop ablation.
+
+### Controlled settings
+
+The Common8 mapping, case split, model architecture, token factor 20, learning
+rate 1e-4, 1200 epochs, full 224 x 224 test input, thresholds, and Step2/Step3
+evaluation code remain matched to the existing WORD baseline.
+
+### Slurm chain submitted 2026-07-20
+
+| Stage | 2D Job | 3D Job | Dependency |
+|---|---:|---:|---|
+| HR512 preprocessing | 1552981 | shared | none |
+| 1-epoch smoke | 1552982 | 1552983 | preprocessing success |
+| 1200-epoch full training | 1552984 | 1552985 | corresponding smoke success |
+| Step2/Step3 evaluation | 1554939 | 1554940 | corresponding full training success |
+
+At submission time, Slurm accepted five jobs and then reached
+`QOSMaxSubmitJobPerUserLimit`. The evaluation jobs were submitted after the
+smoke jobs released their slots.
+
+Progress check on 2026-07-20 at approximately 21:31 CST:
+
+- preprocessing and both 1-epoch smoke jobs completed successfully;
+- 2D full training was in epoch 326/1200 with L2 0.0052, LPIPS 0.0851,
+  crop fraction 0.492, and focus-crop fraction 0.432;
+- 3D full training was in epoch 225/1200 with L2 0.0057, LPIPS 0.0956,
+  crop fraction 0.499, and focus-crop fraction 0.437;
+- both Slurm error logs were empty, with no observed OOM or NaN;
+- estimated remaining time was about 39 hours for 2D and 49-55 hours for 3D,
+  subject to epoch-time variation and checkpoint I/O.
+
+## 14. LossBalance-v1 Reconstruction-Loss Variant
+
+### Isolation boundary
+
+LossBalance-v1 is implemented as a separate training version. It does not edit
+or import-switch the legacy `main_pretrain.py`, `engine_pretrain.py`, or
+`OWT_models.py` pipeline. The model subclass adds no parameters, so its state
+dictionary remains architecture-compatible with legacy OWT checkpoints.
+
+### Loss
+
+```text
+L_total = L_global_L2
+        + lambda_roi * L_per_sample_per_organ_ROI_L2
+        + lambda_lpips * L_LPIPS
+```
+
+For each sample, squared reconstruction error is averaged independently inside
+each present foreground-organ mask. Those organ losses are averaged so organ
+area does not determine gradient weight. Samples with no foreground organ skip
+the ROI term. Background is excluded by default (`background_weight = 0`).
+No Dice, BCE, CE, classification head, or segmentation head is added.
+
+Default ablation settings are `lambda_roi = 1.0`, `lambda_lpips = 1.0`, and
+`background_weight = 0.0`. The loss-only Slurm scripts use the original 224 x
+224 WORD data and disable CropMix, isolating loss accounting from resolution
+and sampling changes.
+
+### Files
+
+- `util/organ_balanced_loss.py`: vectorized 2D/3D organ-balanced ROI-L2.
+- `OWT_models_lossbalance.py`: parameter-free subclass overriding loss/forward.
+- `engine_pretrain_lossbalance.py`: passes masks and logs ROI accounting.
+- `main_pretrain_lossbalance.py`: independent entry point and loss arguments.
+- `tests/test_organ_balanced_loss.py`: area-invariance and Fixfr4 tests.
+- `slurm/pretrain_lossbalance_word_2d.sbatch`: isolated WORD 2D run.
+- `slurm/pretrain_lossbalance_word_3d.sbatch`: isolated WORD Fixfr4 run.
+
+Synthetic verification produced global L2 0.4444, organ-balanced ROI-L2 2.5,
+and total reconstruction loss 2.9444 for a hand-computable example. Both 2D
+and 3D tests pass with finite gradients. Slurm training has not yet been
+submitted because the four CropMix GPU jobs occupy the current QOS submission
+limit.
+`````
+
+<a id="psem-results"></a>
+
+### experiment/psem:docs/RESULTS.md
+
+来源：`experiment/psem @ e8ecb1a1fc25f45c5ff93682cf69db4cb00d2fe3`。原文完整保留。
+
+`````text
+> 合并自既有分支 README；本次未重新计算指标。文中“当前”限定于原记录时点。
+
+# PSEM 实验总览
+
+本分支统一保存 Per-Sample Exhaustive/Structured Masking（PSEM）系列实现与实验记录。本文只对**相同数据集、相同测试病例和相同正式评估协议**下的结果排序；不同数据集之间不比较绝对数值。
+
+## 结论摘要
+
+- **AbdAutoPET 2D：** PSEM-v1 Indirect 仍是当前 PSEM 系列最优，4 类 post Dice 为 **90.512%**。PSEM-v3 Triplet+Loss3 的 Indirect 为 **89.938%**，与 PSEM-v2a Indirect 基本持平，但没有超过 v1。
+- **WORD 2D：** PSEM-v3 同时取得当前 PSEM 系列最优 Direct（**68.353%**）和 Indirect（**68.244%**）。Triplet 的主要收益是修复 Indirect 查询分解，而不是显著提高 Direct。
+- **AbdAutoPET 3D Fixfr4：** 目前只有 PSEM-v1 完成正式评估，尚不能判断 v2/v3 在 3D 上是否更好。
+- **数值稳定性：** PSEM-v3 AutoPET 原 FP16 路线在约 epoch 500 附近出现 NaN。修复版本采用 BF16、LPIPS FP32、非有限值诊断和梯度裁剪，最终训练 Job `121484` 与 200 病例评估 Job `124936` 均正常完成。
+
+## 统一指标口径
+
+- 排名主指标：`all_cases`、类别等权宏平均 `post Dice`，数值越高越好。
+- 辅助指标：`post NSD` 越高越好，`post HD95` 越低越好。
+- Direct：只保留目标类别 token 的重建响应。
+- Indirect：`input/full reconstruction - without-class reconstruction` 的差分响应。
+- 分割结果来自重建响应阈值化及统一后处理，不是额外训练的 segmentation head。
+- AutoPET 2D/3D 均为 200 个测试病例、4 个前景类；WORD 2D 为 24 个测试病例、8 个前景类。
+- AutoPET 的可靠器官名称映射尚未确认，因此只使用 `label_1`–`label_4`；WORD 类别顺序为脾脏、右肾、左肾、胆囊、食管、胰腺、肝脏、胃。
+
+## AbdAutoPET 2D 排名
+
+相同 200 病例、224 输入、`per_sample` 归一化、固定阈值 0.15 和最小连通域 20。表内类别 Dice 顺序为 `label_1/label_2/label_3/label_4`。
+
+| 排名 | 实验 | 读出 | post Dice | post NSD | post HD95 (mm) | 4 类 post Dice |
+|---:|---|---|---:|---:|---:|---|
+| 1 | PSEM-v1 | Indirect | **90.512%** | **89.981%** | 7.004 | 96.55 / 93.09 / 93.05 / 79.36 |
+| 2 | 原始 OWT（对照） | Indirect | 90.386% | 89.616% | inf\* | 96.51 / 92.93 / 93.04 / 79.06 |
+| 3 | PSEM-v1 | Direct | 90.110% | 89.118% | 10.277 | 96.53 / 92.95 / 91.89 / 79.06 |
+| 4 | PSEM-v2a Query20 | Direct | 90.063% | 88.731% | **5.932** | 96.41 / 92.73 / 92.85 / 78.27 |
+| 5 | PSEM-v3 Triplet+Loss3 | Indirect | 89.938% | 87.639% | 8.074 | 96.36 / 92.56 / 92.69 / 78.15 |
+| 6 | 原始 OWT（对照） | Direct | 89.938% | 88.687% | inf\* | 96.45 / 92.69 / 92.94 / 77.66 |
+| 7 | PSEM-v2a Query20 | Indirect | 89.888% | 88.421% | 6.904 | 96.38 / 92.70 / 92.70 / 77.77 |
+| 8 | PSEM-v3 Triplet+Loss3 | Direct | 88.783% | 83.172% | 7.055 | 96.12 / 91.64 / 91.70 / 75.67 |
+| 9 | PSEM+LossBalance-v2 | Indirect | 84.673% | 68.029% | 13.022 | 95.17 / 88.21 / 88.05 / 67.26 |
+| 10 | LossBalance-v1（对照） | Direct | 84.186% | 66.665% | 9.672 | 94.82 / 87.68 / 88.01 / 66.23 |
+| 11 | LossBalance-v1（对照） | Indirect | 83.299% | 64.387% | 14.753 | 94.64 / 87.17 / 86.98 / 64.40 |
+| 12 | PSEM+LossBalance-v2 | Direct | 79.728% | 63.051% | 62.247 | 94.83 / 86.18 / 79.13 / 58.77 |
+
+\* 原 OWT 合并汇总的每种读出各含 1 个无穷 HD95，因此正式宏平均记为 `inf`；Dice/NSD 从完整 200 病例逐病例文件恢复。
+
+### PSEM-v3 的病例配对分析
+
+以下为 10,000 次病例 bootstrap 的“PSEM-v3 减对照”宏平均 Dice 差值；置信区间只反映测试病例抽样，不包含不同训练 seed 的方差。
+
+| 读出 | 对照 | 差值（百分点） | 95% CI | 结论 |
+|---|---|---:|---|---|
+| Direct | PSEM-v1 Direct | -1.326 | [-1.597, -0.988] | 明确下降 |
+| Direct | 原始 OWT Direct | -1.154 | [-1.329, -0.972] | 明确下降 |
+| Direct | PSEM-v2a Direct | -1.279 | [-1.436, -1.115] | 明确下降 |
+| Direct | PSEM+LossBalance-v2 Direct | +9.056 | [8.675, 9.471] | 明确改善 |
+| Indirect | PSEM-v1 Indirect | -0.574 | [-0.718, -0.410] | 明确下降 |
+| Indirect | 原始 OWT Indirect | -0.448 | [-0.580, -0.307] | 明确下降 |
+| Indirect | PSEM-v2a Indirect | +0.049 | [-0.107, 0.224] | 无法区分，视为持平 |
+| Indirect | PSEM+LossBalance-v2 Indirect | +5.265 | [4.978, 5.610] | 明确改善 |
+
+PSEM-v3 的 Indirect 比自身 Direct 高 1.155 个百分点，说明 Triplet/Delta 目标相对更偏向保留 Indirect；但由于 Direct 本身下降更大，这个差值不能单独证明分解质量改善。它没有提升 AutoPET 的总体上限，主要退化来自 `label_4`：Direct 75.67%，比 v1 Direct 低 3.39 个百分点。Direct HD95 从 v1 的 10.277 mm 降到 7.055 mm，但 Dice 和 NSD 同时下降，因此只能说极端边界误差改善，不能说总体分割更好。
+
+
+## AbdAutoPET 2D 重建指标
+
+按 Whole L2 从低到高排序。L2/LPIPS 越低越好，PSNR/SSIM 越高越好；`label_4-only L2` 用于检查本次最明显退化类别的重建质量。
+
+| 排名 | 实验 | Whole L2 | Whole LPIPS | Whole PSNR | Whole SSIM | label_4-only L2 |
+|---:|---|---:|---:|---:|---:|---:|
+| 1 | PSEM-v1 | **0.00015039** | **0.01907** | **38.624** | 0.91971 | 0.00019494 |
+| 2 | PSEM-v3 Triplet+Loss3 | 0.00017368 | 0.02313 | 37.979 | 0.90798 | 0.00025977 |
+| 3 | PSEM-v2a Query20 | 0.00017749 | 0.02356 | 37.908 | 0.92126 | **0.00019280** |
+| 4 | PSEM+LossBalance-v2 | 0.00026088 | 0.03334 | 36.373 | **0.92377** | 0.00058690 |
+
+PSEM-v3 的 Whole L2 比 v1 高 15.49%，但比 v2a 低 2.15%，说明总体像素误差与 v2a 接近、仍不如 v1。更关键的是 `label_4-only L2` 比 v1/v2a 分别高 33.25%/34.73%，与 `label_4` Direct Dice 的下降方向一致。另一方面，SSIM 与 Dice 并不单调一致：LossBalance-v2 的 Whole SSIM 最高但分割最差，因此不能用单个重建指标替代类别分解评估。
+
+## AbdAutoPET 3D Fixfr4 排名
+
+目前只有 PSEM-v1 完成同协议 200 病例评估。类别顺序为 `label_1/label_2/label_3/label_4`。
+
+| 排名 | 实验 | 读出 | post Dice | post NSD | post HD95 (mm) | 4 类 post Dice |
+|---:|---|---|---:|---:|---:|---|
+| 1 | PSEM-v1 | Direct | **87.583%** | 82.450% | 16.677 | 94.54 / 91.71 / 90.33 / 73.75 |
+| 2 | PSEM-v1 | Indirect | 87.519% | **83.100%** | **12.238** | 94.99 / 90.77 / 91.90 / 72.41 |
+
+该表不支持“3D 不如 2D”的方法结论，因为 Fixfr4 的输入、训练和空间评估协议与 2D 不同；它只记录当前已完成结果。
+
+## WORD 2D 排名
+
+相同 24 病例、224 输入和 Common8 正式评估。类别顺序为脾脏/右肾/左肾/胆囊/食管/胰腺/肝脏/胃。
+
+| 排名 | 实验 | 读出 | post Dice | post NSD | post HD95 (mm) | 8 类 post Dice |
+|---:|---|---|---:|---:|---:|---|
+| 1 | PSEM-v3 Triplet+Loss3 | Direct | **68.353%** | 57.516% | 15.133 | 87.84 / 87.39 / 86.65 / 25.11 / 46.65 / 52.98 / 91.49 / 68.72 |
+| 2 | PSEM-v3 Triplet+Loss3 | Indirect | **68.244%** | **58.851%** | 26.001 | 86.89 / 85.06 / 82.67 / 32.13 / 41.86 / 56.38 / 91.59 / 69.37 |
+| 3 | LossBalance-v3a（对照） | Direct | 68.216% | 55.495% | **15.079** | 87.25 / 86.55 / 85.15 / 24.94 / 46.42 / 53.18 / 91.29 / 70.94 |
+| 4 | PSEM-v2 LossBalance-v3 | Direct | 67.209% | 54.177% | 15.080 | 86.79 / 85.38 / 84.09 / 24.11 / 47.05 / 51.20 / 90.58 / 68.46 |
+| 5 | LossBalance-v1（对照） | Direct | 64.990% | 47.560% | 16.598 | 85.63 / 82.81 / 82.27 / 24.64 / 33.86 / 53.27 / 89.23 / 68.21 |
+| 6 | 原始 OWT（对照） | Indirect | 58.309% | 49.866% | 80.962 | 88.31 / 86.83 / 85.55 / 0.00 / 0.00 / 43.73 / 92.28 / 69.78 |
+| 7 | LossBalance-v3a（对照） | Indirect | 56.796% | 47.752% | 69.545 | 86.80 / 86.24 / 83.68 / 0.00 / 0.16 / 40.75 / 91.66 / 65.08 |
+| 8 | 原始 OWT（对照） | Direct | 55.072% | 44.279% | inf | 86.00 / 79.30 / 79.98 / 0.00 / 0.00 / 38.43 / 91.02 / 65.84 |
+| 9 | PSEM-v2a Query20 | Direct | 52.311% | 40.155% | inf | 83.56 / 66.20 / 79.83 / 0.00 / 2.72 / 31.95 / 90.36 / 63.86 |
+| 10 | PSEM-v2 LossBalance-v3 | Indirect | 52.216% | 41.632% | 84.054 | 84.49 / 81.76 / 79.66 / 0.00 / 0.00 / 21.16 / 90.36 / 60.30 |
+| 11 | PSEM-v2a Query20 | Indirect | 49.889% | 38.862% | 91.771 | 84.74 / 79.90 / 79.25 / 0.00 / 0.00 / 0.41 / 90.99 / 63.83 |
+| 12 | LossBalance-v1（对照） | Indirect | 41.575% | 18.809% | 372.641 | 57.08 / 48.45 / 50.05 / 5.79 / 8.84 / 27.99 / 81.56 / 52.85 |
+| 13 | PSEM-v1 | Direct | 36.266% | 29.127% | 319.094 | 37.75 / 43.57 / 45.11 / 10.83 / 9.89 / 45.87 / 46.97 / 50.13 |
+| 14 | PSEM-v1 | Indirect | 34.866% | 17.367% | 355.002 | 48.66 / 40.81 / 42.65 / 0.78 / 0.74 / 18.28 / 79.73 / 47.28 |
+| 15 | PSEM+LossBalance-v2 | Indirect | 21.129% | 7.103% | 375.216 | 28.79 / 20.57 / 21.84 / 1.49 / 0.18 / 1.17 / 63.60 / 31.39 |
+| 16 | PSEM+LossBalance-v2 | Direct | 8.880% | 6.992% | 424.928 | 8.26 / 6.75 / 7.16 / 0.41 / 2.22 / 2.70 / 31.17 / 12.36 |
+
+PSEM-v3 在 WORD 上相对 PSEM-v2+LossBalance-v3 的 Direct 增益为 1.14 个百分点，相对独立 LossBalance-v3a 的 Direct 增益仅 0.14 个百分点；关键变化是 Indirect 从 52.22% 提高到 68.24%（相对独立 LossBalance-v3a 也提高 11.45 点），并与 Direct 只差 0.11 个百分点。这直接支持 Triplet 的设计目标：让 Direct、Context、Plus 在同一源样本上成对训练，使 `Plus - Context` 与目标器官响应一致。Indirect 仍明显依赖后处理，因此报告时必须同时保留 raw/post，而不能把全部提升归因于网络。
+
+## 已完成实验登记
+
+| 版本 | 核心改动 | 数据集与正式评估 | 当前判断 |
+|---|---|---|---|
+| PSEM-v1 | 只允许 GT-present 类进入逐样本穷举删除日程；保持原 L2+LPIPS | AutoPET 2D、AutoPET 3D Fixfr4、WORD 2D | AutoPET 2D 当前最优；WORD 存在训练/推理查询状态错配 |
+| PSEM-v2a Query20 | 20-slot 全 token-bank 查询日程，包含正/负 Direct、leave-one-out、whole、background、organs 和随机子集 | AutoPET 2D、WORD 2D | AutoPET 与 v1 接近；WORD 大器官恢复，但小器官仍严重失败 |
+| PSEM+LossBalance-v2 | PSEM-v1 加按样本频率加权的 ROI 损失 | AutoPET 2D、WORD 2D | 两个数据集均明显退化，判定该组合无效 |
+| PSEM-v2 LossBalance-v3 | Query20 加只优化 present-and-kept 正 ROI 的 Loss3 | WORD 2D | Direct 提升到 67.21%，但 Indirect 仍只有 52.22% |
+| PSEM-v3 Triplet+Loss3 | 每个源样本构造 Direct/Context/Plus，优化三分支 Loss3 与 `0.1 × Delta loss` | WORD 2D；AutoPET 2D | WORD 修复 Indirect；AutoPET 与 v2a 持平、低于 v1，收益不具跨数据集一致性 |
+
+### PSEM-v3 正式运行
+
+| 数据集 | 训练 | 评估 | 资源/规模 | 状态 |
+|---|---|---|---|---|
+| WORD 2D | XEC Job `114767` | XEC Job `114768` | 2×A800；1200 epochs；24 病例评估 | 完成 |
+| AbdAutoPET 2D | sifansong/XEC Job `121484` | sifansong/XEC Job `124936` | 4×A800；有效 source batch 192；1200 epochs；200 病例评估 | 完成；BF16/LPIPS-FP32 数值修复版本 |
+
+AutoPET 原 FP16 训练链曾在约 epoch 500 附近出现非有限值。最终有效版本保留模型、数据、Triplet/Loss3 定义和优化预算，只修改数值执行策略：BF16 autocast、LPIPS FP32、梯度裁剪与逐分量有限值检查。该变化必须随 checkpoint 一起记录，不能把最终模型描述成未经修复的原 FP16 运行。
+
+## 结果文件与详细记录
+
+- PSEM-v1：`archive/HISTORY.md`
+- PSEM-v2a：`archive/HISTORY.md`
+- PSEM-v3：`archive/HISTORY.md`
+- 正式结果以各实验目录的 `step3_segmentation_summary.csv`、`step3_segmentation_per_case.csv` 和 `protocol.json` 为准。
+
+## 下一步
+
+1. PSEM-v3 AutoPET 至少补 2 个 seed；当前病例 bootstrap 不包含训练随机性，不能据单 seed 宣称稳定差异。
+2. 优先分析 AutoPET `label_4` 的 false negative、预测体积比和 Direct/Indirect 差分图，确认 Direct 回退来自类 token 读出还是 Triplet 的预算分配。
+3. 若要判断 PSEM-v3 是否适用于 3D，需要在 AutoPET 3D Fixfr4 上补同协议 v3 对照；不能拿 2D 与 3D 的当前单次结果直接排名。
+4. WORD 继续报告 raw/post 两套结果，并做固定后处理的消融，量化 Indirect 提升中模型与后处理各自的贡献。
+`````
+
+<a id="lossbalance-experiments"></a>
+
+### experiment/lossbalance:docs/EXPERIMENTS.md
+
+来源：`experiment/lossbalance @ 144b427c79737257406e86ea3e94d2a33e8fae7e`。原文完整保留。
+
+`````text
+# LossBalance 合并说明
+
+v2只改变ROI重建损失：按阳性样本频率N_c^(-alpha)加权，alpha=.5、ratio cap4，
+归一化使期望前景权重质量为1；lambda_roi=1。背景不参与，batch分母固定。
+v3a仅优化present且kept器官的positive ROI，lambda_positive=.25；removed仅监控，
+仍受global L2+LPIPS监督。保持原OWT架构与mask日程；不加PSEM或Delta。
+这两者不是OrganSlot的Tversky/BalancedFocal分割损失。
+
+WORD224控制配置：20 tokens/class、有效batch64、blr1e-4、1200epochs。
+记录指标必须包括Direct/Indirect raw/post、precision、recall、volume ratio、重建误差。
+v2源记录的训练1586123完成，3D full1586124启动前取消；v3源记录停留旧pending，
+不能当作今天状态。本分支原docs不含完整正式八类结果，不凭其他协议补排名。
+跨版本已汇总结果见experiment/psem分支RESULTS；需要汇报时回到对应原始结果核验。
+
+公式推导、样本频率/权重表、单元测试和历史任务完整保存在
+[历史原文](archive/HISTORY.md)。不因归档删除数据、权重或实验可追溯性。
+`````
+
+
 来源提交：`43cad3025610c37d28f8395802157a87ec3d9b7b`。
 原文逐字保留；所有状态、指令和路径仅反映各自历史时点。
 不要默认读取本文件；先读 ../README.md。

@@ -162,6 +162,8 @@ COMMAND=(
   --slot_head_channels "${SLOT_HEAD_CHANNELS}"
   --pixel_pe "${PIXEL_PE:-none}"
   --query_refinement "${QUERY_REFINEMENT:-none}"
+  --backbone "${BACKBONE:-vit}"
+  --cnn_init_checkpoint "${CNN_INIT_CHECKPOINT:-}"
   --segmentation_unit "${SEGMENTATION_UNIT:-slab}"
   --hsam_supervision "${HSAM_SUPERVISION:-none}"
   --fusion_mode "${FUSION_MODE}"

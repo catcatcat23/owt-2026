@@ -72,6 +72,8 @@ def get_args_parser():
     parser.add_argument("--slot_head_channels", default=128, type=int)
     parser.add_argument("--query_refinement", default="none",
                         choices=("none", "cross_attn"))
+    parser.add_argument("--backbone", default="vit",
+                        choices=("vit", "nnunet_resenc_s16", "mednext_b_s16"))
     parser.add_argument("--segmentation_unit", default="slab", choices=["slab", "slice"])
     parser.add_argument("--pixel_pe", default="none", choices=["none", "spatial", "temporal", "spatiotemporal"])
     parser.add_argument(
@@ -87,6 +89,7 @@ def get_args_parser():
     )
     parser.add_argument("--init_checkpoint", default="")
     parser.add_argument("--mae_init_checkpoint", default="")
+    parser.add_argument("--cnn_init_checkpoint", default="")
     parser.add_argument(
         "--mae_init_scope",
         choices=("encoder", "encoder_decoder"),
@@ -485,6 +488,12 @@ def main(args):
         raise ValueError(
             "--init_checkpoint and --mae_init_checkpoint are mutually exclusive"
         )
+    if args.backbone != "vit" and (args.mae_init_checkpoint or args.init_checkpoint):
+        raise ValueError("Use --cnn_init_checkpoint for CNN pretraining, not ViT MAE init")
+    if args.cnn_init_checkpoint and (
+        args.backbone == "vit" or args.mae_init_checkpoint or args.init_checkpoint or args.resume
+    ):
+        raise ValueError("CNN initialization is exclusive with other initialization/resume")
     if args.training_scope == "head_only" and args.mae_init_checkpoint:
         raise ValueError("head_only does not support partial MAE initialization")
     if args.disable_train_augmentation and args.organ_roi_aug:
@@ -637,9 +646,14 @@ def main(args):
         slot_head_channels=args.slot_head_channels,
         pixel_pe=args.pixel_pe,
         query_refinement=args.query_refinement,
+        backbone=args.backbone,
     )
     initial_checkpoint_report = None
     mae_checkpoint_report = None
+    cnn_checkpoint_report = None
+    if args.cnn_init_checkpoint:
+        from models_cnn_mim import load_cnn_encoder_checkpoint
+        cnn_checkpoint_report = load_cnn_encoder_checkpoint(model, args.cnn_init_checkpoint)
     if args.init_checkpoint:
         initial_checkpoint_report = _load_initial_checkpoint(
             model, args.init_checkpoint, args
@@ -783,6 +797,9 @@ def main(args):
                 encoding="utf-8",
             ) as handle:
                 json.dump(mae_checkpoint_report, handle, indent=2, sort_keys=True)
+        if cnn_checkpoint_report is not None:
+            with open(output_dir / "cnn_initial_checkpoint_load.json", "w") as handle:
+                json.dump(cnn_checkpoint_report, handle, indent=2, sort_keys=True)
 
     log_writer = None
     if misc.is_main_process() and args.log_dir is not None:

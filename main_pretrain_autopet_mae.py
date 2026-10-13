@@ -33,6 +33,8 @@ def get_args_parser():
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--input_size", default=224, type=int)
     parser.add_argument("--dimension", choices=("2D", "3D"), default="2D")
+    parser.add_argument("--backbone", default="vit",
+                        choices=("vit", "nnunet_resenc_s16", "mednext_b_s16"))
     parser.add_argument("--frames", default=4, type=int)
     parser.add_argument("--temporal_patch_size", default=1, type=int)
     parser.add_argument("--mask_ratio", default=0.75, type=float)
@@ -139,10 +141,20 @@ def _save_checkpoint(path, model, optimizer, epoch, updates, args):
         "decoder_dim": 768,
         "args": args,
     }
-    torch.save(payload, path)
+    payload["backbone"] = getattr(args, "backbone", "vit")
+    payload["pretraining_complete"] = updates >= args.max_optimizer_updates
+    if payload["backbone"] != "vit":
+        for key in ("encoder_depth", "decoder_depth", "decoder_dim"):
+            payload.pop(key)
+        payload["objective"] = "input_masked_pixel_mse"
+    temporary = path.with_suffix(".tmp")
+    torch.save(payload, temporary)
+    os.replace(temporary, path)
 
 
 def main(args):
+    if args.backbone != "vit" and (args.dimension != "2D" or args.norm_pix_loss):
+        raise ValueError("CNN MIM requires 2D and raw pixel MSE")
     misc.init_distributed_mode(args)
     rank = misc.get_rank()
     seed = args.seed + rank
@@ -237,9 +249,13 @@ def main(args):
         if args.dimension == "3D"
         else mae_transfer_base_patch16
     )
-    model = model_factory(
-        img_size=args.input_size, norm_pix_loss=args.norm_pix_loss
-    ).to(device)
+    if args.backbone == "vit":
+        model = model_factory(
+            img_size=args.input_size, norm_pix_loss=args.norm_pix_loss
+        ).to(device)
+    else:
+        from models_cnn_mim import CNNMaskedImageModel
+        model = CNNMaskedImageModel(args.backbone, args.input_size).to(device)
     model_without_ddp = model
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(

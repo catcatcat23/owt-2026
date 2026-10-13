@@ -48,7 +48,18 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         slot_head_channels=128,
         pixel_pe="none",
         query_refinement="none",
+        backbone="vit",
     ):
+        if backbone not in ("vit", "nnunet_resenc_s16", "mednext_b_s16"):
+            raise ValueError("unknown backbone")
+        if backbone != "vit" and (
+            model_args.dataset_type != "2D" or patch_size != 16
+            or not (
+                (slot_head_type == "arm_e_multiscale_query" and query_refinement == "cross_attn")
+                or (slot_head_type == "arm_f_sam_tail" and query_refinement == "none")
+            )
+        ):
+            raise ValueError("CNN ablation requires 2D patch16 E cross-attention or SAM-tail")
         if slot_specs is None:
             raise ValueError("slot_specs are required")
         if query_refinement not in ("none", "cross_attn"):
@@ -173,6 +184,15 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             for parameter in self.fusion_norm.parameters():
                 parameter.requires_grad = False
 
+        # Install after downstream initialization, preserving same-seed initial
+        # Collector/decoder weights across the controlled backbone comparison.
+        self.backbone = backbone
+        if backbone != "vit":
+            from CNNBackbone import CNNTokenEncoder2D
+            self.patch_embed = CNNTokenEncoder2D(backbone, img_size, in_chans, embed_dim)
+            del self.blocks1
+            del self.cls_token
+
     @property
     def slot_names(self):
         return self.slot_bank.names()
@@ -207,6 +227,10 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
 
     def forward_encoder(self, x):
         x = self.patch_embed(x)
+        if self.backbone != "vit":
+            x = self.encoder_norm(x + self.pos_embed[:, 1:])
+            # Callers use the spatial tokens; preserve the two-item interface.
+            return x, x.mean(dim=1, keepdim=True)
         if self.model_args.dataset_type == "3D":
             pos_embed = self.pos_embed_spatial.repeat(
                 1, self.patch_embed.grid_size[0], 1
@@ -577,6 +601,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             "fusion_reference_count": self.fusion_reference_count,
             "slot_head_type": self._slot_factory["head_type"],
             "slot_head_channels": self._slot_factory["head_channels"],
+            "backbone": self.backbone,
             "per_slot": per_slot,
         }
 

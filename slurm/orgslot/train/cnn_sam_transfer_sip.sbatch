@@ -7,13 +7,13 @@ cd "$EXPERIMENT_WORKDIR"
 test "$(git rev-parse HEAD)" = "$EXPERIMENT_COMMIT"
 export OUTPUT_DIR="$EXPERIMENT_WORKDIR/Results/OrganSlotBank/Common8/WORD_2D/$RUN_NAME"
 test ! -e "$OUTPUT_DIR"
-export PYTHON=/gpfs/work/aac/bolinren19/.conda/envs/abdpet/bin/python
+export PYTHON=${CNN_PYTHON:-/gpfs/work/aac/bolinren19/.conda/envs/abdpet/bin/python}
 export PATH="$(dirname "$PYTHON"):$PATH" PYTHONNOUSERSITE=1 OMP_NUM_THREADS=1
 export LD_LIBRARY_PATH="$(dirname "$PYTHON")/../lib:${LD_LIBRARY_PATH:-}"
-export PROCESSED_ROOT=/gpfs/work/aac/bolinren19/2026-07/DATA/processed/OWT_Common8_07072_NATIVE/WORD
+export PROCESSED_ROOT=${CNN_WORD_ROOT:-/gpfs/work/aac/bolinren19/2026-07/DATA/processed/OWT_Common8_07072_NATIVE/WORD}
 export MANIFEST_TAG=native07072 EXPECTED_SPACING="0.7 0.7 2"
-export ROI_INDEX="$PROCESSED_ROOT/metadata/small_organ_roi_index.json"
-export LPIPS_STATE=/gpfs/work/aac/bolinren19/OD_OWT_orgslot/Results/OrganSlotBank/_assets/owt_lpips_vgg16.pth
+export ROI_INDEX=${CNN_ROI_INDEX:-$PROCESSED_ROOT/metadata/small_organ_roi_index.json}
+export LPIPS_STATE=${CNN_LPIPS_STATE:-/gpfs/work/aac/bolinren19/OD_OWT_orgslot/Results/OrganSlotBank/_assets/owt_lpips_vgg16.pth}
 export SLOT_HEAD_TYPE=arm_f_sam_tail SLOT_HEAD_CHANNELS=128 QUERY_REFINEMENT=none PIXEL_PE=none
 export DIMENSION=2D FUSION_MODE=linear_sqrt FUSION_REFERENCE_COUNT=9
 export LAMBDA_SEG=.01 LAMBDA_BG_SEG=0 SEG_SUPERVISION=retained SEG_LOSS_TYPE=small_organ

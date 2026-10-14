@@ -1,5 +1,22 @@
 # 实验状态快照
 
+## 2026-10-14：CNN编码器原生S8/S4跳接替换
+
+新下游使用cnn_skip_source=encoder，移除独立浅层stem；S8/S4来自同一次编码器前向。
+12项CPU回归通过，旧ViT路径及旧CNN stem checkpoint兼容保留；GPU尚未启动。
+固定SHA6f9a8541ba2b99cef06d0b5b01da553471c669a1，SIP/XEC运行树cnn_skips_6f9a854，
+提交前两端revision guard通过。因为原预训练/下游均未启动，统一重建明确输出路径的新链。
+
+| 编码器/账号集群 | 预训练 | soft_prior_aux训练/评估 | downsample_gt训练/评估 |
+|---|---|---|---|
+| ResEnc / bolinren19 SIP | 3052380 | 3052381 / 3052382 | 3052383 / 3052384 |
+| MedNeXt / sifansong XEC | 163397 | 163398 / 163399 | 163400 / 163401 |
+
+提交状态：预训练Priority；下游afterok预训练；评估afterok下游，尚无性能结果。
+旧SIP3048464–3048468、XEC162141–162145取消；取消前均PENDING，旧snapshot保留。
+MIM仍100000更新，WORD118800更新、每卡16×4×累积3=192，loss/数据/seed不变。
+SIP训练7天、XEC8gpus训练5天；评估1GPU/1天。其它任务不变。
+
 ## 2026-10-14：SAM组合aux失败后恢复链
 
 - 原157059于13:07 FAILED：epoch480附近ALLREDUCE SeqNum7003207超时1800秒。

@@ -603,6 +603,12 @@ Training scripts: `slurm/orgslot/train/cnn_mim_sip.sbatch` and
 
 ### Submitted job chains
 
+以下10月13日提交已于10月14日取消替换（全部未启动）。新编码器原生S8/S4链：
+ResEnc3052380 → 3052381/3052383 → 3052382/3052384；
+MedNeXt163397 → 163398/163400 → 163399/163401。
+新固定runtime为各账号cnn_skips_6f9a854，SHA6f9a8541ba2b99cef06d0b5b01da553471c669a1。
+soft_prior_aux/downsample_gt各一组，原预训练预算/参数保留，只有下游跳接来源改变。
+
 | Encoder | Cluster / user | Pretrain | soft prior+aux train / eval | downsample GT train / eval |
 |---|---|---|---|---|
 | nnU-Net ResEnc | SIP / bolinren19 | 3048464 | 3048465 / 3048467 | 3048466 / 3048468 |

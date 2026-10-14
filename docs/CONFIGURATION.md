@@ -1,5 +1,18 @@
 # 统一配置与部署契约
 
+## SAM组合aux续训：2026-10-14
+
+157059在epoch480/step320后因NCCL ALLREDUCE超时1800秒失败，序号7003207；
+rank1/2/3均等待同一操作，Python堆栈位于DDP前向buffer广播。没有更早异常证实
+NaN、指标schema失配或具体I/O/硬件根因；前一天间歇性停顿属于相关观察而非因果证明。
+checkpoint470模型/优化器CPU有限值核验通过，optimizer step69708，恢复epoch471。
+入口 `slurm/orgslot/train/sam_combo_aux_resume.sbatch` 保持batch16×4×accum3、
+118800总更新、MAE encoder来源、组合loss、seed及采样不变，恢复optimizer/scaler。
+仅启用已有 `no_ddp_buffer_broadcast`：训练器只允许LPIPS常量shift/scale buffers，
+发现其它buffer即拒绝。梯度同步保持；这是针对报错路径的缓解，不宣称底层根因已修复。
+采用最新origin/feature/orgslot的新固定runtime，旧157061依赖必须替换。
+本轮不另跑GPU smoke；CPU加载/语法验证与正式GPU运行状态分别报告。
+
 ## 2026-10-07：缩小GT与soft prior的组合对照
 
 基线是旧24病例协议的SAM-tail＋MAE encoder＋`downsample_gt`（不是增量实验）。

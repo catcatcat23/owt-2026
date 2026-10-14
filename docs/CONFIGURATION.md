@@ -13,6 +13,10 @@ checkpoint470模型/优化器CPU有限值核验通过，optimizer step69708，�
 采用最新origin/feature/orgslot的新固定runtime，旧157061依赖必须替换。
 本轮不另跑GPU smoke；CPU加载/语法验证与正式GPU运行状态分别报告。
 
+新链163200→163201（sifansong/XEC）：训练4A800/4gpus/7天，评估1RTX4090/1天。
+运行树sam_combo_resume_1f2b0e1，SHA1f2b0e169b7d454d355ba331a8a308db65ab92ed。
+提交后训练Priority、评估afterok:163200；旧失效157061取消，原checkpoint保留。
+
 ## 2026-10-07：缩小GT与soft prior的组合对照
 
 基线是旧24病例协议的SAM-tail＋MAE encoder＋`downsample_gt`（不是增量实验）。

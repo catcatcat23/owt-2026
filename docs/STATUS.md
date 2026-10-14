@@ -1,5 +1,19 @@
 # 实验状态快照
 
+## 2026-10-14：SAM组合aux失败后恢复链
+
+- 原157059于13:07 FAILED：epoch480附近ALLREDUCE SeqNum7003207超时1800秒。
+- checkpoint470：CPU模型/优化器有限；69708更新；最新代码strict exact加载通过。
+- 新训练163200，sifansong/XEC，4A800/20CPU/192GB、4gpus/7天，PENDING(Priority)。
+- 新评估163201，1RTX4090/10CPU/128GB、4gpus/1天，afterok:163200，PENDING(Dependency)。
+- 从epoch471恢复optimizer/scaler，总预算118800；仅启用已有常量LPIPS buffer广播关闭保护。
+- 固定runtime `/gpfs/work/aac/sifansong/worktrees/sam_combo_resume_1f2b0e1`，
+  SHA `1f2b0e169b7d454d355ba331a8a308db65ab92ed`，提交前revision guard通过。
+- 旧失效评估157061已取消；原模型/日志保留。不运行额外GPU smoke；正式GPU尚未启动。
+- 其它更新：157058约epoch769、157119约434；157599今天13:07启动、约epoch6。
+
+以下保留10月13日检查快照，157059状态以本节为准；估计启动时间须重新查Slurm。
+
 时间口径：2026-10-13 Asia/Shanghai。
 队列/runtime本次整理约22:19前后只读核查；epoch来自21:04日志快照，**不是实时epoch**。
 本次只整理文档，未提交、取消、迁移或修改任何任务。

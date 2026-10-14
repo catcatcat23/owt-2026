@@ -479,7 +479,8 @@ class MultiScalePixelQueryDecoder2D(SharedPixelQueryDecoder):
             with torch.random.fork_rng(devices=[]):
                 self.query_cross_attention = QueryCrossAttention(self.channels)
 
-    def forward_pixels(self, images, z, return_intermediates=False, return_p2=False):
+    def forward_pixels(self, images, z, return_intermediates=False, return_p2=False,
+                       encoder_features=None):
         if images.ndim != 4:
             raise ValueError("Arm E spatial stem requires BCHW images")
         batch_size, patch_count, _ = z.shape
@@ -489,7 +490,18 @@ class MultiScalePixelQueryDecoder2D(SharedPixelQueryDecoder):
         if images.shape[0] != batch_size:
             raise ValueError("images and encoder features must share a batch size")
 
-        if return_p2:
+        if encoder_features is not None:
+            if return_p2:
+                raise ValueError("encoder skips currently support P4 readout only")
+            p4_raw, p8_raw = encoder_features['s4'], encoder_features['s8']
+            for feature, projection, stride in (
+                (p4_raw, self.p4_proj, 4), (p8_raw, self.p8_proj, 8)
+            ):
+                expected = (batch_size, projection.in_channels,
+                            images.shape[-2] // stride, images.shape[-1] // stride)
+                if tuple(feature.shape) != expected:
+                    raise ValueError("CNN skip shape {} != {}".format(feature.shape, expected))
+        elif return_p2:
             p2_raw, p4_raw, p8_raw = self.spatial_stem(images, return_p2=True)
         else:
             p4_raw, p8_raw = self.spatial_stem(images)

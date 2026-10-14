@@ -490,12 +490,13 @@ are unchanged. The abandoned ResNet-18 prototype is not supported.
 | S8 | 56 x 56 | 256 | 6 | 2 / 4 |
 | S16 | 28 x 28 | 512 | 6 | 2 / 4 |
 
-Both export only S16 through a 1x1 projection (512 -> 768 for the base model),
+Both export S16 through a 1x1 projection (512 -> 768 for the base model),
 flatten to [B,784,768], add the existing spatial positional embedding, and use
 the existing encoder LayerNorm. This tensor feeds the original Collector and
-the original E pixel decoder. CNN S1/S2/S4/S8 are NOT new decoder skips.
-The existing image spatial stem, query cross-attention, AHER, reconstruction
-decoder, token count and losses are unchanged. ViT encoder blocks and its
+the E pixel decoder. Since 2026-10-14, CNN S4 (128 channels) and S8 (256 channels)
+directly supply lateral skips, replacing the separate image spatial stem.
+1x1 projections map both to mask channels (128 in production). Query cross-attention,
+AHER, reconstruction decoder, token count and losses are unchanged. ViT blocks and its
 unused CLS parameter are removed only in CNN models.
 
 ### nnunet_resenc_s16
@@ -566,7 +567,11 @@ export HSAM_SUPERVISION=soft_prior_aux  # or downsample_gt
 `QUERY_REFINEMENT=none` disables the E-only option, NOT SAM-tail refinement.
 The original P16 -> P8 -> P4 token refinement, reverse attention, mask token,
 final token-to-pixel attention and mask readout remain in ArmFDecoder unchanged.
-CNN contributes only its S16 grid; its shallow features are not new skips.
+CNN now contributes S16 tokens and S8/S4 skips computed in the same encoder pass.
+No detached features or second encoder pass: segmentation gradients reach S8/S4.
+`--cnn_skip_source encoder` is the new default. `stem` preserves the old CNN
+implementation for checkpoint compatibility; old checkpoints lacking this argument
+are reconstructed as `stem` by evaluation. Existing ViT models retain their stem.
 Both original soft-prior auxiliary loss and downsampled-GT two-stage loss are
 retained; reuse their existing loss weights/schedules. No MAE encoder transfer
 from ViT is implemented for these CNNs. Compare against scratch SAM-tail to isolate

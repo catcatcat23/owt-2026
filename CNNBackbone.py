@@ -1,7 +1,7 @@
 """Encoder-only 2D adaptations for the OrganSlot E backbone ablation.
 
 References: nnU-Net ResEnc BasicBlockD and MedNeXt-v1 B. These are not full
-segmentation models. See docs/CNN_BACKBONES.md for sources and deviations.
+segmentation models. See docs/CONFIGURATION.md for sources and deviations.
 No pretrained weight download or new package dependency is required.
 """
 
@@ -61,7 +61,7 @@ class MedNeXtBlock2D(nn.Module):
 
 
 class CNNTokenEncoder2D(nn.Module):
-    """Final-grid-only encoder, retaining metadata used by reconstruction."""
+    """S16 tokens with optional S4/S8 skips; metadata retained for reconstruction."""
 
     channels = (32, 64, 128, 256, 512)
 
@@ -114,10 +114,14 @@ class CNNTokenEncoder2D(nn.Module):
                 if isinstance(module, ResEncBlock2D):
                     nn.init.zeros_(module.main[-1].weight)
 
-    def forward(self, images):
+    def forward(self, images, return_features=False):
         if images.ndim != 4 or tuple(images.shape[-2:]) != self.img_size:
             raise ValueError("CNN input must match the configured 2D image grid")
         x = self.stem(images)
-        for stage in self.stages:
+        features = {}
+        for i, stage in enumerate(self.stages):
             x = stage(x)
-        return self.proj(x).flatten(2).transpose(1, 2)
+            if return_features and i in (2, 3):
+                features['s4' if i == 2 else 's8'] = x
+        tokens = self.proj(x).flatten(2).transpose(1, 2)
+        return (tokens, features) if return_features else tokens

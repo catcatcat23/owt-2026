@@ -230,7 +230,8 @@ SAM direct recon75.28、indirect6.10；不能用低重建loss证明解耦成功�
 ## 8. CNN最新路线与证据缺口
 
 ResEnc风格/MedNeXt-B 2D输出S16替换ViT，保留原Collector和SAM解码；
-不是完整nnU-Net/MedNeXt，CNN浅层未新增为decoder skips。
+不是完整nnU-Net/MedNeXt；2026-10-14将跳接来源由独立浅层CNN替换为编码器S8/S4，
+预训练结构/权重接口保持，旧S16-only实现记录保留在历史档案。本配置尚无Dice。
 AutoPET masked reconstruction预训练 → encoder-only迁移 → SAM soft_aux/downsample两组。
 CPU实现核验不等于GPU性能，当前无Dice。精确接口、参数量、100k预训练预算、
 迁移key和提交链见 [配置](CONFIGURATION.md)；当前任务见 [状态](STATUS.md)。

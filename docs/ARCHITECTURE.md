@@ -79,7 +79,7 @@ downsample_gt_soft_prior / downsample_gt_soft_prior_aux，属于独立消融，�
 - **3D**：F/SAM逐slice空间CNN+跨slab attention及t/y/x PE；不是新增3×3×3卷积decoder。
   slice-wise、PE、temporal conv、overlap fusion必须拆开；不能用后续改善倒推唯一根因。
 - **CNN**：nnU-Net ResEnc风格或MedNeXt-B 2D输出S16，经512→768投影接原接口。
-  保留现有浅层CNN分支，不额外使用backbone的S2/S4/S8跳接；不是完整官方分割系统。
+  当前直接使用backbone的S8/S4替代独立浅层CNN，经1×1投影到128通道；不是完整官方分割系统。
 
 所有支线结果（包括无收益和待核验）见 [RESULTS](RESULTS.md)；
 完整旧设计、参数、提交/取消链见 [历史读出消融](archive/HISTORY.md#merge-query-readout-ablation)。

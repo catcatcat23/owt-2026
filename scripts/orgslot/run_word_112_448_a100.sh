@@ -200,6 +200,7 @@ COMMAND=(
   --log_dir "${OUTPUT_DIR}"
   --save_freq "${SAVE_FREQ}"
   --num_workers "${WORKERS}"
+  --cnn_skip_source "${CNN_SKIP_SOURCE:-encoder}"
   --print_freq 20
   --seed 0
 )

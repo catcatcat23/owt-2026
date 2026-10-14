@@ -49,6 +49,7 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         pixel_pe="none",
         query_refinement="none",
         backbone="vit",
+        cnn_skip_source="encoder",
     ):
         if backbone not in ("vit", "nnunet_resenc_s16", "mednext_b_s16"):
             raise ValueError("unknown backbone")
@@ -187,11 +188,22 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         # Install after downstream initialization, preserving same-seed initial
         # Collector/decoder weights across the controlled backbone comparison.
         self.backbone = backbone
+        if cnn_skip_source not in ("encoder", "stem"):
+            raise ValueError("unknown CNN skip source")
+        self.cnn_skip_source = cnn_skip_source
         if backbone != "vit":
             from CNNBackbone import CNNTokenEncoder2D
             self.patch_embed = CNNTokenEncoder2D(backbone, img_size, in_chans, embed_dim)
             del self.blocks1
             del self.cls_token
+            if cnn_skip_source == "encoder":
+                pixels = getattr(self.pixel_query_decoder, "pixels", self.pixel_query_decoder)
+                # Encoder S4/S8 replace the separate image stem. Preserve all
+                # other initialized modules and checkpoint keys.
+                pixels.spatial_stem = None
+                with torch.random.fork_rng(devices=[]):
+                    pixels.p8_proj = nn.Conv2d(256, slot_head_channels, 1, bias=False)
+                    pixels.p4_proj = nn.Conv2d(128, slot_head_channels, 1, bias=False)
 
     @property
     def slot_names(self):
@@ -225,12 +237,17 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                 raise RuntimeError(f"appending slot modified existing tensor {key}")
         return slot
 
-    def forward_encoder(self, x):
-        x = self.patch_embed(x)
+    def forward_encoder(self, x, return_pyramid=False):
+        pyramid = None
+        if self.backbone != "vit" and return_pyramid:
+            x, pyramid = self.patch_embed(x, return_features=True)
+        else:
+            x = self.patch_embed(x)
         if self.backbone != "vit":
             x = self.encoder_norm(x + self.pos_embed[:, 1:])
             # Callers use the spatial tokens; preserve the two-item interface.
-            return x, x.mean(dim=1, keepdim=True)
+            result = (x, x.mean(dim=1, keepdim=True))
+            return (*result, pyramid) if return_pyramid else result
         if self.model_args.dataset_type == "3D":
             pos_embed = self.pos_embed_spatial.repeat(
                 1, self.patch_embed.grid_size[0], 1
@@ -472,14 +489,21 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         head_compute_mask=None,
         decode_heads=True,
     ):
-        z, _ = self.forward_encoder(images)
+        encoder_features = None
+        if self.backbone != "vit" and self.cnn_skip_source == "encoder" and decode_heads:
+            z, _, encoder_features = self.forward_encoder(images, return_pyramid=True)
+        else:
+            z, _ = self.forward_encoder(images)
         output_size = tuple(images.shape[2:])
         pixel_features = None
         if decode_heads and self.pixel_query_decoder is not None:
             if self._slot_factory["head_type"] in ("arm_e_multiscale_query", "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_f_reverse_dot_p2", "arm_f_reverse_dot_p2_softmask", "arm_f_sam_tail", "arm_e_multiscale_query_3d"):
-                pixel_features = self.pixel_query_decoder.forward_pixels(
-                    images, z
-                )
+                if encoder_features is not None:
+                    pixel_features = self.pixel_query_decoder.forward_pixels(
+                        images, z, encoder_features=encoder_features
+                    )
+                else:
+                    pixel_features = self.pixel_query_decoder.forward_pixels(images, z)
             else:
                 pixel_features = self.pixel_query_decoder.forward_pixels(z)
         slot_output = self.forward_slots(

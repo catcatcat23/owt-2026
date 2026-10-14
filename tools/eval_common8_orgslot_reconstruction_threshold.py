@@ -192,6 +192,7 @@ def build_model(
             pixel_pe=checkpoint_value(checkpoint, "pixel_pe", "none"),
             query_refinement=checkpoint_value(checkpoint, "query_refinement", "none"),
             backbone=checkpoint_value(checkpoint, "backbone", "vit"),
+            cnn_skip_source=checkpoint_value(checkpoint, "cnn_skip_source", "stem"),
         )
     else:
         model = OWT_models.mae_vit_base_patch16(

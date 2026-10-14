@@ -9,6 +9,36 @@ from hsam_supervision import coarse_segmentation_loss
 
 
 class CNNBackboneTests(unittest.TestCase):
+    def test_encoder_skips_are_used_once_and_receive_head_gradients(self):
+        for kind in CNN_BACKBONES:
+            with self.subTest(backbone=kind):
+                model = tiny_model(backbone=kind, slot_head_type="arm_f_sam_tail",
+                                   slot_head_channels=16)
+                self.assertIsNone(model.pixel_query_decoder.pixels.spatial_stem)
+                captured = {}
+                calls = {2: 0, 3: 0}
+                def capture(index):
+                    def hook(module, inputs, output):
+                        calls[index] += 1
+                        output.retain_grad()
+                        captured[index] = output
+                    return hook
+                handles = [model.patch_embed.stages[i].register_forward_hook(capture(i))
+                           for i in (2, 3)]
+                out = model(torch.randn(1, 3, 32, 32), decode_reconstruction=False)
+                sum(v.square().mean() for v in out['slot_logits'].values()).backward()
+                for handle in handles:
+                    handle.remove()
+                self.assertEqual(calls, {2: 1, 3: 1})
+                self.assertEqual(tuple(captured[2].shape), (1, 128, 8, 8))
+                self.assertEqual(tuple(captured[3].shape), (1, 256, 4, 4))
+                for feature in captured.values():
+                    self.assertTrue(torch.isfinite(feature.grad).all())
+                    self.assertGreater(feature.grad.abs().sum().item(), 0)
+                for projection in (model.pixel_query_decoder.pixels.p4_proj,
+                                   model.pixel_query_decoder.pixels.p8_proj):
+                    self.assertGreater(projection.weight.grad.abs().sum().item(), 0)
+
     def test_sam_tail_supervision_and_roundtrip(self):
         for kind in CNN_BACKBONES:
             for mode in ("soft_prior_aux", "downsample_gt"):
@@ -97,7 +127,7 @@ class CNNBackboneTests(unittest.TestCase):
         baseline = tiny_model(**kwargs).state_dict()
         for kind in CNN_BACKBONES:
             torch.manual_seed(42)
-            candidate = tiny_model(backbone=kind, **kwargs).state_dict()
+            candidate = tiny_model(backbone=kind, cnn_skip_source="stem", **kwargs).state_dict()
             for name, value in baseline.items():
                 if not name.startswith(("patch_embed.", "blocks1.", "cls_token")):
                     torch.testing.assert_close(value, candidate[name], rtol=0, atol=0)

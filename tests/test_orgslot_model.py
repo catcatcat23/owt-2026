@@ -42,6 +42,7 @@ def tiny_model(
     slot_head_channels=128,
     query_refinement="none",
     backbone="vit",
+    cnn_skip_source="encoder",
 ):
     if specs is None:
         specs = [
@@ -70,6 +71,7 @@ def tiny_model(
         slot_head_channels=slot_head_channels,
         query_refinement=query_refinement,
         backbone=backbone,
+        cnn_skip_source=cnn_skip_source,
     )
 
 

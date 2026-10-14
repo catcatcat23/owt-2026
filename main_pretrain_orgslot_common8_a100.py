@@ -72,6 +72,7 @@ def get_args_parser():
     parser.add_argument("--slot_head_channels", default=128, type=int)
     parser.add_argument("--query_refinement", default="none",
                         choices=("none", "cross_attn"))
+    parser.add_argument("--cnn_skip_source", default="encoder", choices=("encoder", "stem"))
     parser.add_argument("--backbone", default="vit",
                         choices=("vit", "nnunet_resenc_s16", "mednext_b_s16"))
     parser.add_argument("--segmentation_unit", default="slab", choices=["slab", "slice"])
@@ -647,6 +648,7 @@ def main(args):
         pixel_pe=args.pixel_pe,
         query_refinement=args.query_refinement,
         backbone=args.backbone,
+        cnn_skip_source=args.cnn_skip_source,
     )
     initial_checkpoint_report = None
     mae_checkpoint_report = None

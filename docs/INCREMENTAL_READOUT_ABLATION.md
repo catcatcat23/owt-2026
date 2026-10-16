@@ -1,5 +1,24 @@
 # Stage2: shared vs stage-private query readout
 
+## New4 shared spatial + interaction ablation (2026-10-16)
+
+Implemented opt-in `STAGE2_PIXEL_DECODER=new4` with
+`INCREMENTAL_ARCHITECTURE=sam_soft_aux`, `STAGE2_SHARED_SEGMENTATION=slot_private`,
+`STAGE2_READOUT_ADAPTER=none`. New4 share ONE copied pixel decoder (including
+spatial stem, excluding unused query projections) and ONE copied token projection
++ P16/P8/P4 interaction stack. Organ Collectors/TGEnc remain independent.
+Both copies initialize from Stage1; old/background use original frozen spatial
+features and frozen interactions. ViT, shared SAM-tail and reconstruction decoder
+remain frozen; existing background separation policy remains unchanged.
+
+This differs from the per-slot private baseline in TWO respects: trainable new4
+spatial features and stage-shared rather than per-organ new4 interaction weights.
+It must not be presented as an isolated pixel-only ablation against that baseline.
+Train from the same Stage1 with 118800 Stage2 updates, not from a trained Stage2.
+Old checkpoints default to shared frozen pixels. New checkpoints reconstruct the
+new4 branches before strict loading; resume rejects a changed pixel policy.
+No GPU run or performance result is established by this implementation record.
+
 ## 阅读顺序与当前冻结矩阵（2026-10-13整理）
 
 先读本节与下方Formal SAM结果；Historical design以下是有日期的设计原文，不是当前队列。

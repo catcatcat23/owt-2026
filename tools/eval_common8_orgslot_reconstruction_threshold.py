@@ -215,6 +215,16 @@ def build_model(
         if method != "orgslot":
             raise ValueError("Readout adapter requires OrganSlot")
         install_stage_mask_adapter(model)
+    pixel_policy = checkpoint_value(checkpoint, "stage2_pixel_decoder", "shared")
+    if pixel_policy not in ("shared", "new4"):
+        raise ValueError("Unknown Stage2 pixel policy")
+    if pixel_policy == "new4":
+        if (method != "orgslot" or checkpoint_value(checkpoint, "incremental_stage") != "stage2"
+                or checkpoint_value(checkpoint, "stage2_shared_segmentation") != "slot_private"
+                or adapter_mode != "none"):
+            raise ValueError("Private pixels require Stage2 SAM private interaction without adapter")
+        from util.orgslot_incremental44 import install_stage_pixels
+        install_stage_pixels(model)
     full_state = checkpoint["model"]
     state = {
         key: value

@@ -28,6 +28,7 @@ else
     extra+=(--stage1_checkpoint "$STAGE1_CHECKPOINT" --background_policy "${BACKGROUND_POLICY:-separation}")
     extra+=(--stage2_shared_segmentation "${STAGE2_SHARED_SEGMENTATION:-frozen}")
     extra+=(--stage2_readout_adapter "${STAGE2_READOUT_ADAPTER:-none}")
+    extra+=(--stage2_pixel_decoder "${STAGE2_PIXEL_DECODER:-shared}")
 fi
 exec "$PYTHON_BIN" -m torch.distributed.run --standalone --nnodes=1 --nproc_per_node=4 \
     main_pretrain_orgslot_incremental44.py \

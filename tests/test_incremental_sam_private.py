@@ -43,7 +43,10 @@ class PrivateInteractionTests(unittest.TestCase):
     def test_readout_adapter_gradients_old_invariance_and_evaluator(self):
         self.check_stage2("residual16")
 
-    def check_stage2(self, adapter_mode):
+    def test_private_pixels_gradients_old_invariance_and_evaluator(self):
+        self.check_stage2("none", "new4")
+
+    def check_stage2(self, adapter_mode, pixel_policy="shared"):
         torch.manual_seed(6)
         net = model().eval()
         image = torch.rand(2, 3, 32, 32)
@@ -55,7 +58,7 @@ class PrivateInteractionTests(unittest.TestCase):
         with torch.no_grad():
             original = shared(image, decode_reconstruction=False)
         rng = torch.get_rng_state().clone()
-        configure_stage2(net, "separation", "slot_private", adapter_mode)
+        configure_stage2(net, "separation", "slot_private", adapter_mode, pixel_policy)
         self.assertTrue(torch.equal(rng, torch.get_rng_state()))
         if adapter_mode == "residual16":
             self.assertEqual(net.new_stage_mask_adapter_slots, NEW)
@@ -77,7 +80,7 @@ class PrivateInteractionTests(unittest.TestCase):
             for a, b in zip(original["coarse_logits"][n], migrated["coarse_logits"][n]):
                 torch.testing.assert_close(a, b, atol=0, rtol=0)
         copies = [net.slot_bank.get_slot(n).interaction.input_proj.weight for n in OLD + NEW]
-        self.assertEqual(len({p.data_ptr() for p in copies}), 8)
+        self.assertEqual(len({p.data_ptr() for p in copies}), 5 if pixel_policy == "new4" else 8)
         frozen = {n: p.detach().clone() for n, p in net.named_parameters() if not p.requires_grad}
         masks = {n: torch.zeros(2, 1, 32, 32) for n in NEW}
         for i, n in enumerate(NEW):
@@ -89,6 +92,12 @@ class PrivateInteractionTests(unittest.TestCase):
         torch.testing.assert_close(loss.detach(), stats["reconstruction"] + .01 *
             stats["segmentation"] + stats["weighted_coarse_segmentation"] + .1 * stats["background_separation"])
         loss.backward()
+        if pixel_policy == "new4":
+            grads = [p.grad for p in net.new_stage_pixels.parameters() if p.grad is not None]
+            self.assertTrue(grads)
+            self.assertTrue(all(torch.isfinite(g).all() for g in grads))
+            self.assertGreater(sum(float(g.abs().sum()) for g in grads), 0)
+            self.assertTrue(net.new_stage_pixels.training)
         if adapter_mode == "residual16":
             self.assertGreater(float(net.new_stage_mask_adapter[-1].weight.grad.abs().sum()), 0)
         for n in NEW:
@@ -140,6 +149,7 @@ class PrivateInteractionTests(unittest.TestCase):
                 "input_size": 32, "incremental_stage": "stage2",
                 "slot_head_type": "arm_f_sam_tail", "hsam_supervision": "soft_prior_aux",
                 "stage2_shared_segmentation": "slot_private",
+                "stage2_pixel_decoder": pixel_policy,
                 **({"stage2_readout_adapter": adapter_mode} if adapter_mode != "none" else {})}}, path)
             with patch("tools.eval_common8_orgslot_reconstruction_threshold.build_orgslot", return_value=shared):
                 restored, report = build_model("orgslot", path, [], 32, "linear_sqrt")

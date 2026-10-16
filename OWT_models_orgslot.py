@@ -400,11 +400,13 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                             raise RuntimeError(
                                 "query_dot requires shared pixel features"
                             )
+                        slot_pixels = (pixel_features["new"] if name in getattr(self, "new_stage_pixel_slots", ())
+                                       else pixel_features["old"]) if isinstance(pixel_features, dict) else pixel_features
                         head_result = slot.forward_query_head(
                             tokens.index_select(0, active_head_rows),
-                            ([p.index_select(0, active_head_rows) for p in pixel_features]
-                             if isinstance(pixel_features, list) else
-                             pixel_features.index_select(0, active_head_rows)),
+                            ([p.index_select(0, active_head_rows) for p in slot_pixels]
+                             if isinstance(slot_pixels, list) else
+                             slot_pixels.index_select(0, active_head_rows)),
                             (self.new_stage_readout
                              if name in getattr(self, "new_stage_readout_slots", ())
                              else self.pixel_query_decoder),
@@ -506,6 +508,9 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                     pixel_features = self.pixel_query_decoder.forward_pixels(images, z)
             else:
                 pixel_features = self.pixel_query_decoder.forward_pixels(z)
+        if decode_heads and hasattr(self, "new_stage_pixels"):
+            pixel_features = {"old": pixel_features, "new": self.pixel_query_decoder.forward_pixels(
+                images, z, encoder_features=encoder_features, pixel_decoder=self.new_stage_pixels)}
         slot_output = self.forward_slots(
             z,
             output_size,

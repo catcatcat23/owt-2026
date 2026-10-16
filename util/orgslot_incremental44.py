@@ -101,8 +101,31 @@ def install_stage_mask_adapter(model):
     model.new_stage_mask_adapter_slots = NEW
 
 
+def install_stage_pixels(model):
+    """New4 share spatial weights copied from Stage1; no query/tail copy."""
+    if model.pixel_query_decoder.readout != "sam_tail":
+        raise ValueError("Private pixels require SAM-tail")
+    model.new_stage_pixels = copy.deepcopy(model.pixel_query_decoder.pixels)
+    # These inherited query modules are not part of the spatial forward.
+    for name in ("query_norm", "query_proj"):
+        if hasattr(model.new_stage_pixels, name):
+            delattr(model.new_stage_pixels, name)
+    # New4 share one freshly copied interaction; old/background paths are untouched.
+    interaction = copy.deepcopy(model.slot_bank.get_slot(NEW[0]).interaction)
+    for name in NEW:
+        model.slot_bank.get_slot(name).interaction = interaction
+    model.new_stage_pixel_slots = NEW
+
+
 def configure_stage2(model, background_policy, shared_segmentation="frozen",
-                     readout_adapter="none"):
+                     readout_adapter="none", pixel_decoder="shared"):
+    if pixel_decoder not in ("shared", "new4"):
+        raise ValueError("Unknown Stage2 pixel decoder policy")
+    if pixel_decoder == "new4":
+        if shared_segmentation != "slot_private" or readout_adapter != "none":
+            raise ValueError("Private pixels ablation requires slot_private without adapter")
+    elif hasattr(model, "new_stage_pixels"):
+        raise ValueError("Cannot disable installed private pixels")
     if shared_segmentation not in ("frozen", "train", "query_shared", "query_split", "slot_private"):
         raise ValueError("invalid shared segmentation policy")
     if background_policy not in ("frozen", "composition", "separation"):
@@ -118,6 +141,8 @@ def configure_stage2(model, background_policy, shared_segmentation="frozen",
             install_slot_interactions(model)
     elif any(hasattr(model.slot_bank.get_slot(n), "interaction") for n in model.slot_names):
         raise ValueError("Private interactions require slot_private policy")
+    if pixel_decoder == "new4" and not hasattr(model, "new_stage_pixels"):
+        install_stage_pixels(model)
     if shared_segmentation == "query_split" and not hasattr(model, "new_stage_readout"):
         install_stage_readout(model)
     if shared_segmentation != "query_split" and hasattr(model, "new_stage_readout"):
@@ -127,6 +152,8 @@ def configure_stage2(model, background_policy, shared_segmentation="frozen",
     if readout_adapter == "none" and hasattr(model, "new_stage_mask_adapter"):
         raise ValueError("Cannot disable an installed readout adapter")
     model.requires_grad_(False)
+    if pixel_decoder == "new4":
+        model.new_stage_pixels.requires_grad_(True)
     if readout_adapter == "residual16":
         model.new_stage_mask_adapter.requires_grad_(True)
     if shared_segmentation == "train":
@@ -193,6 +220,8 @@ class Incremental44Objective(nn.Module):
         super().train(False)
         # Keep old/shared paths in eval mode as well as freezing parameters.
         if mode:
+            if hasattr(self.student, "new_stage_pixels"):
+                self.student.new_stage_pixels.train(True)
             if hasattr(self.student, "new_stage_mask_adapter"):
                 self.student.new_stage_mask_adapter.train(True)
             if getattr(self.args, "stage2_shared_segmentation", "frozen") == "train":

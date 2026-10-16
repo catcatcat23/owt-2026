@@ -188,7 +188,7 @@ class ArmFDecoder(nn.Module):
         return blocked[:, None].expand(-1, heads, -1, -1).reshape(
             -1, token_count, blocked.shape[-1])
 
-    def forward_pixels(self, images, z, encoder_features=None):
+    def forward_pixels(self, images, z, encoder_features=None, pixel_decoder=None):
         if images.ndim == 5:
             batch, cin, time, height, width = images.shape
             # Encoder temporal patch stride can differ from input slice count.
@@ -197,7 +197,8 @@ class ArmFDecoder(nn.Module):
                 time = self.grid_size[0]
             images = images.permute(0, 2, 1, 3, 4).reshape(batch * time, cin, height, width)
             z = z.reshape(batch * time, -1, z.shape[-1])
-        _, features = self.pixels.forward_pixels(
+        pixels = self.pixels if pixel_decoder is None else pixel_decoder
+        _, features = pixels.forward_pixels(
             images, z, return_intermediates=True,
             return_p2=getattr(self, "readout", None) == "reverse_dot_p2",
             encoder_features=encoder_features)

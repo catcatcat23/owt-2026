@@ -30,7 +30,15 @@ else
     extra+=(--stage2_readout_adapter "${STAGE2_READOUT_ADAPTER:-none}")
     extra+=(--stage2_pixel_decoder "${STAGE2_PIXEL_DECODER:-shared}")
 fi
-exec "$PYTHON_BIN" -m torch.distributed.run --standalone --nnodes=1 --nproc_per_node=4 \
+nproc=${INCREMENTAL_NPROC_PER_NODE:-4}
+micro_batch=${ARM_F_MICRO_BATCH:-16}
+accum_iter=${ARM_F_ACCUM_ITER:-3}
+[[ "$nproc" =~ ^[1-9][0-9]*$ && "$micro_batch" =~ ^[1-9][0-9]*$ && "$accum_iter" =~ ^[1-9][0-9]*$ ]] || exit 2
+if (( nproc * micro_batch * accum_iter != 192 )); then
+    echo 'Incremental training requires effective batch 192' >&2
+    exit 2
+fi
+exec "$PYTHON_BIN" -m torch.distributed.run --standalone --nnodes=1 --nproc_per_node="$nproc" \
     main_pretrain_orgslot_incremental44.py \
     --incremental_stage "$stage" \
     --data_path "$WORD_ROOT/csv/WORD_Training_2D_native07072.csv" \
@@ -38,4 +46,4 @@ exec "$PYTHON_BIN" -m torch.distributed.run --standalone --nnodes=1 --nproc_per_
     --test_data_path "$WORD_ROOT/csv/WORD_Test_2D_native07072.csv" \
     --preprocess_summary "$WORD_ROOT/metadata/preprocess_summary.json" \
     --roi_index "$WORD_ROOT/metadata/small_organ_roi_index.json" \
-    --output_dir "$OUTPUT_DIR" "${extra[@]}" "$@"
+    --output_dir "$OUTPUT_DIR" --batch_size "$micro_batch" --accum_iter "$accum_iter" "${extra[@]}" "$@"

@@ -1,5 +1,21 @@
 # Stage2: shared vs stage-private query readout
 
+## Spatial adapter32 controlled ablation (2026-10-25)
+
+Opt-in `STAGE2_PIXEL_DECODER=adapter32`, SAM `slot_private`, readout adapter `none`.
+Unlike `new4`, all new-organ interaction stacks remain independent. Frozen
+P16/P8/P4 are preserved for old/background heads. New4 share three residual
+adapters using fused maps, a shared 768->32 Z projection, and pre-fusion S4/S8.
+Each scale uses a 128->32 projection, depthwise3x3, GroupNorm(8), GELU and
+zero-initialized 32->128 output. Exactly 58,400 added parameters at C=128,D=768.
+Local FP32 computation; output maps retain original dtype. ViT, original pixels,
+old slots, shared SAM-tail and recon decoder freeze; frozen tail preserves input
+gradients. Background separation and existing segmentation/aux losses unchanged.
+Resume policy is checked; evaluator reconstructs adapter before strict loading.
+Initialize from the same SAM Stage1, not a Stage2 checkpoint; 118800 updates,
+batch16/GPU, effective192, original official-pool split and validation calibration.
+This is a proposed spatial adaptation test, not an established performance gain.
+
 ## New4 shared spatial + interaction ablation (2026-10-16)
 
 Implemented opt-in `STAGE2_PIXEL_DECODER=new4` with

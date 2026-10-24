@@ -38,7 +38,7 @@ def parser():
     p.add_argument("--stage1_checkpoint", default="")
     p.add_argument("--test_data_path", required=True, help="Only checked for case leakage; never read for training")
     p.add_argument("--background_policy", choices=("frozen", "composition", "separation"), default="separation")
-    p.add_argument("--stage2_pixel_decoder", choices=("shared", "new4"), default="shared")
+    p.add_argument("--stage2_pixel_decoder", choices=("shared", "new4", "adapter32"), default="shared")
     p.add_argument("--stage2_readout_adapter", choices=("none", "residual16"), default="none",
                    help="Stage2 SAM slot_private only: stage-shared residual mask-weight adapter")
     p.add_argument("--stage2_shared_segmentation", choices=("frozen", "train", "query_shared", "query_split", "slot_private"), default="frozen",

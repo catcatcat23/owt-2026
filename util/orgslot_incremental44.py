@@ -101,6 +101,18 @@ def install_stage_mask_adapter(model):
     model.new_stage_mask_adapter_slots = NEW
 
 
+def install_spatial_adapter(model):
+    from SpatialAdapter import NewStageSpatialAdapter
+    decoder = model.pixel_query_decoder
+    if (model.backbone != "vit" or decoder.readout != "sam_tail"
+            or len(decoder.grid_size) != 2):
+        raise ValueError("Spatial adapter requires 2D ViT SAM-tail")
+    with torch.random.fork_rng(devices=[]):
+        model.new_stage_spatial_adapter = NewStageSpatialAdapter(
+            decoder.input_proj.in_features, decoder.channels)
+    model.new_stage_pixel_slots = NEW
+
+
 def install_stage_pixels(model):
     """New4 share spatial weights copied from Stage1; no query/tail copy."""
     if model.pixel_query_decoder.readout != "sam_tail":
@@ -119,13 +131,17 @@ def install_stage_pixels(model):
 
 def configure_stage2(model, background_policy, shared_segmentation="frozen",
                      readout_adapter="none", pixel_decoder="shared"):
-    if pixel_decoder not in ("shared", "new4"):
+    if pixel_decoder not in ("shared", "new4", "adapter32"):
         raise ValueError("Unknown Stage2 pixel decoder policy")
-    if pixel_decoder == "new4":
+    if pixel_decoder in ("new4", "adapter32"):
         if shared_segmentation != "slot_private" or readout_adapter != "none":
             raise ValueError("Private pixels ablation requires slot_private without adapter")
     elif hasattr(model, "new_stage_pixels"):
         raise ValueError("Cannot disable installed private pixels")
+    if hasattr(model, "new_stage_spatial_adapter") and pixel_decoder != "adapter32":
+        raise ValueError("Cannot disable installed spatial adapter")
+    if hasattr(model, "new_stage_pixels") and pixel_decoder != "new4":
+        raise ValueError("Cannot mix private pixels with spatial adapter")
     if shared_segmentation not in ("frozen", "train", "query_shared", "query_split", "slot_private"):
         raise ValueError("invalid shared segmentation policy")
     if background_policy not in ("frozen", "composition", "separation"):
@@ -143,6 +159,8 @@ def configure_stage2(model, background_policy, shared_segmentation="frozen",
         raise ValueError("Private interactions require slot_private policy")
     if pixel_decoder == "new4" and not hasattr(model, "new_stage_pixels"):
         install_stage_pixels(model)
+    if pixel_decoder == "adapter32" and not hasattr(model, "new_stage_spatial_adapter"):
+        install_spatial_adapter(model)
     if shared_segmentation == "query_split" and not hasattr(model, "new_stage_readout"):
         install_stage_readout(model)
     if shared_segmentation != "query_split" and hasattr(model, "new_stage_readout"):
@@ -152,6 +170,8 @@ def configure_stage2(model, background_policy, shared_segmentation="frozen",
     if readout_adapter == "none" and hasattr(model, "new_stage_mask_adapter"):
         raise ValueError("Cannot disable an installed readout adapter")
     model.requires_grad_(False)
+    if pixel_decoder == "adapter32":
+        model.new_stage_spatial_adapter.requires_grad_(True)
     if pixel_decoder == "new4":
         model.new_stage_pixels.requires_grad_(True)
     if readout_adapter == "residual16":
@@ -220,6 +240,8 @@ class Incremental44Objective(nn.Module):
         super().train(False)
         # Keep old/shared paths in eval mode as well as freezing parameters.
         if mode:
+            if hasattr(self.student, "new_stage_spatial_adapter"):
+                self.student.new_stage_spatial_adapter.train(True)
             if hasattr(self.student, "new_stage_pixels"):
                 self.student.new_stage_pixels.train(True)
             if hasattr(self.student, "new_stage_mask_adapter"):

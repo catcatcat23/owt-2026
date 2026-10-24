@@ -498,7 +498,11 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
             z, _ = self.forward_encoder(images)
         output_size = tuple(images.shape[2:])
         pixel_features = None
-        if decode_heads and self.pixel_query_decoder is not None:
+        if decode_heads and hasattr(self, "new_stage_spatial_adapter"):
+            maps, lateral = self.pixel_query_decoder.forward_pixels(
+                images, z, return_intermediates=True)
+            pixel_features = {"old": maps, "new": self.new_stage_spatial_adapter(maps, z, lateral)}
+        elif decode_heads and self.pixel_query_decoder is not None:
             if self._slot_factory["head_type"] in ("arm_e_multiscale_query", "arm_f_attention", "arm_f_linear", "arm_f_query_dot", "arm_f_reverse_dot", "arm_f_reverse_dot_p2", "arm_f_reverse_dot_p2_softmask", "arm_f_sam_tail", "arm_e_multiscale_query_3d"):
                 if encoder_features is not None:
                     pixel_features = self.pixel_query_decoder.forward_pixels(

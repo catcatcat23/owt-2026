@@ -188,7 +188,8 @@ class ArmFDecoder(nn.Module):
         return blocked[:, None].expand(-1, heads, -1, -1).reshape(
             -1, token_count, blocked.shape[-1])
 
-    def forward_pixels(self, images, z, encoder_features=None, pixel_decoder=None):
+    def forward_pixels(self, images, z, encoder_features=None, pixel_decoder=None,
+                       return_intermediates=False):
         if images.ndim == 5:
             batch, cin, time, height, width = images.shape
             # Encoder temporal patch stride can differ from input slice count.
@@ -207,7 +208,7 @@ class ArmFDecoder(nn.Module):
             maps.append(features["p2_raw"])
         if len(self.grid_size) == 3:
             maps = [p.reshape(batch, time, self.channels, *p.shape[-2:]).permute(0, 2, 1, 3, 4) for p in maps]
-        return maps
+        return (maps, features) if return_intermediates else maps
 
     def forward_mask(self, maps, tokens, slot_identity, output_size, interaction=None,
                      readout_adapter=None):

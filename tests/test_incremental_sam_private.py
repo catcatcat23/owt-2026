@@ -46,6 +46,9 @@ class PrivateInteractionTests(unittest.TestCase):
     def test_private_pixels_gradients_old_invariance_and_evaluator(self):
         self.check_stage2("none", "new4")
 
+    def test_spatial_adapter_gradients_old_invariance_and_evaluator(self):
+        self.check_stage2("none", "adapter32")
+
     def check_stage2(self, adapter_mode, pixel_policy="shared"):
         torch.manual_seed(6)
         net = model().eval()
@@ -92,6 +95,10 @@ class PrivateInteractionTests(unittest.TestCase):
         torch.testing.assert_close(loss.detach(), stats["reconstruction"] + .01 *
             stats["segmentation"] + stats["weighted_coarse_segmentation"] + .1 * stats["background_separation"])
         loss.backward()
+        if pixel_policy == "adapter32":
+            grads = [b.up.weight.grad for b in net.new_stage_spatial_adapter.scales]
+            self.assertTrue(all(g is not None and torch.isfinite(g).all() for g in grads))
+            self.assertGreater(sum(float(g.abs().sum()) for g in grads), 0)
         if pixel_policy == "new4":
             grads = [p.grad for p in net.new_stage_pixels.parameters() if p.grad is not None]
             self.assertTrue(grads)
@@ -122,6 +129,10 @@ class PrivateInteractionTests(unittest.TestCase):
         final_output = net(image, decode_reconstruction=False)
         final_output["slot_logits"][NEW[0]].square().mean().backward()
         grad = net.slot_bank.get_slot(NEW[0]).interaction.input_proj.weight.grad
+        if pixel_policy == "adapter32":
+            for p in net.new_stage_spatial_adapter.parameters():
+                self.assertIsNotNone(p.grad)
+                self.assertTrue(torch.isfinite(p.grad).all())
         self.assertIsNotNone(grad)
         self.assertTrue(torch.isfinite(grad).all())
         self.assertGreater(float(grad.abs().sum()), 0)

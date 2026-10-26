@@ -225,6 +225,14 @@ def build_model(
             raise ValueError("Private pixels require Stage2 SAM private interaction without adapter")
         from util.orgslot_incremental44 import install_stage_pixels, install_spatial_adapter
         (install_stage_pixels if pixel_policy == "new4" else install_spatial_adapter)(model)
+    tail_policy = checkpoint_value(checkpoint, "stage2_tail", "shared")
+    if tail_policy not in ("shared", "new4"):
+        raise ValueError("Unknown Stage2 tail policy")
+    if tail_policy == "new4":
+        if pixel_policy != "new4":
+            raise ValueError("New4 tail requires new4 pixels")
+        from util.orgslot_incremental44 import install_stage_tail
+        install_stage_tail(model)
     full_state = checkpoint["model"]
     state = {
         key: value

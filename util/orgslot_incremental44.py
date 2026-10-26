@@ -129,8 +129,21 @@ def install_stage_pixels(model):
     model.new_stage_pixel_slots = NEW
 
 
+def install_stage_tail(model):
+    """Copy the complete Stage1 tail into the New4-shared interaction only."""
+    if not hasattr(model, "new_stage_pixels"):
+        raise ValueError("New4 tail requires new4 pixel decoder")
+    interaction = model.slot_bank.get_slot(NEW[0]).interaction
+    if any(model.slot_bank.get_slot(n).interaction is not interaction for n in NEW):
+        raise ValueError("New4 tail requires shared New4 interaction")
+    if not hasattr(interaction, "sam_tail"):
+        interaction.sam_tail = copy.deepcopy(model.pixel_query_decoder.sam_tail)
+
+
 def configure_stage2(model, background_policy, shared_segmentation="frozen",
-                     readout_adapter="none", pixel_decoder="shared"):
+                     readout_adapter="none", pixel_decoder="shared", tail_policy="shared"):
+    if tail_policy not in ("shared", "new4") or (tail_policy == "new4" and pixel_decoder != "new4"):
+        raise ValueError("New4 tail requires new4 pixels")
     if pixel_decoder not in ("shared", "new4", "adapter32"):
         raise ValueError("Unknown Stage2 pixel decoder policy")
     if pixel_decoder in ("new4", "adapter32"):
@@ -169,6 +182,10 @@ def configure_stage2(model, background_policy, shared_segmentation="frozen",
         install_stage_mask_adapter(model)
     if readout_adapter == "none" and hasattr(model, "new_stage_mask_adapter"):
         raise ValueError("Cannot disable an installed readout adapter")
+    if tail_policy == "new4":
+        install_stage_tail(model)
+    elif any(hasattr(model.slot_bank.get_slot(n).interaction, "sam_tail") for n in NEW if hasattr(model.slot_bank.get_slot(n), "interaction")):
+        raise ValueError("Cannot disable installed New4 tail")
     model.requires_grad_(False)
     if pixel_decoder == "adapter32":
         model.new_stage_spatial_adapter.requires_grad_(True)

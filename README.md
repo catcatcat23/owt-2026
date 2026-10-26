@@ -418,3 +418,15 @@ main、experiment/lossbalance、experiment/psem固定版本入口及文件映射
 历史与当前状态不要混读：59400/阶段是早期增量预算，当前全预算118800/阶段；
 3D F已显著改善早期过分割，不继续把loss视为已确认根因。
 PSEM-v3主要改善WORD Indirect而非跨数据集全面提升。
+
+### 新四类专用SAM-tail对照（2026-10-27）
+
+在167611的新四类pixel decoder＋共享交互基础上，仅新增`STAGE2_TAIL=new4`。
+完整复制Stage1 SAM-tail到新四类共享交互中，包含mask token、双向attention、FFN、
+归一化和mask权重MLP；新四类共同训练这套tail，旧类仍走原冻结tail。
+默认`shared`保持历史行为。Stage2从相同Stage1 checkpoint重新开始，118800更新，
+2卡×每卡16×累积6，有效batch192；其余损失、数据与优化器保持167611配置。
+目的：隔离冻结tail对New4适配的限制。尚无实验结果，不能声明有效。
+训练入口仍为`scripts/orgslot/run_incremental44.sh stage2`，同时设
+`STAGE2_PIXEL_DECODER=new4`、`STAGE2_SHARED_SEGMENTATION=slot_private`、
+`STAGE2_READOUT_ADAPTER=none`。严格评估根据checkpoint中的`stage2_tail`恢复结构。

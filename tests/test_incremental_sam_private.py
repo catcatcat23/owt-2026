@@ -49,7 +49,10 @@ class PrivateInteractionTests(unittest.TestCase):
     def test_spatial_adapter_gradients_old_invariance_and_evaluator(self):
         self.check_stage2("none", "adapter32")
 
-    def check_stage2(self, adapter_mode, pixel_policy="shared"):
+    def test_new4_tail_gradients_old_invariance_and_evaluator(self):
+        self.check_stage2("none", "new4", "new4")
+
+    def check_stage2(self, adapter_mode, pixel_policy="shared", tail_policy="shared"):
         torch.manual_seed(6)
         net = model().eval()
         image = torch.rand(2, 3, 32, 32)
@@ -61,7 +64,7 @@ class PrivateInteractionTests(unittest.TestCase):
         with torch.no_grad():
             original = shared(image, decode_reconstruction=False)
         rng = torch.get_rng_state().clone()
-        configure_stage2(net, "separation", "slot_private", adapter_mode, pixel_policy)
+        configure_stage2(net, "separation", "slot_private", adapter_mode, pixel_policy, tail_policy)
         self.assertTrue(torch.equal(rng, torch.get_rng_state()))
         if adapter_mode == "residual16":
             self.assertEqual(net.new_stage_mask_adapter_slots, NEW)
@@ -114,6 +117,13 @@ class PrivateInteractionTests(unittest.TestCase):
                 self.assertTrue(grads)
                 self.assertTrue(all(torch.isfinite(g).all() for g in grads))
                 self.assertGreater(sum(float(g.abs().sum()) for g in grads), 0)
+        if tail_policy == "new4":
+            tails = [net.slot_bank.get_slot(n).interaction.sam_tail for n in NEW]
+            self.assertTrue(all(t is tails[0] for t in tails))
+            grads = [p.grad for p in tails[0].parameters() if p.grad is not None]
+            self.assertTrue(grads)
+            self.assertGreater(sum(float(g.abs().sum()) for g in grads), 0)
+            self.assertTrue(all(torch.isfinite(g).all() for g in grads))
         optimizer.step()
         for n, p in net.named_parameters():
             if n in frozen:
@@ -161,6 +171,7 @@ class PrivateInteractionTests(unittest.TestCase):
                 "slot_head_type": "arm_f_sam_tail", "hsam_supervision": "soft_prior_aux",
                 "stage2_shared_segmentation": "slot_private",
                 "stage2_pixel_decoder": pixel_policy,
+                "stage2_tail": tail_policy,
                 **({"stage2_readout_adapter": adapter_mode} if adapter_mode != "none" else {})}}, path)
             with patch("tools.eval_common8_orgslot_reconstruction_threshold.build_orgslot", return_value=shared):
                 restored, report = build_model("orgslot", path, [], 32, "linear_sqrt")
@@ -243,7 +254,14 @@ class PrivateInteractionTests(unittest.TestCase):
             loss, _ = objective(image, masks, probs, keep)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(net.parameters(), 1., error_if_nonfinite=True)
-            optimizer.step()
+            if tail_policy == "new4":
+            tails = [net.slot_bank.get_slot(n).interaction.sam_tail for n in NEW]
+            self.assertTrue(all(t is tails[0] for t in tails))
+            grads = [p.grad for p in tails[0].parameters() if p.grad is not None]
+            self.assertTrue(grads)
+            self.assertGreater(sum(float(g.abs().sum()) for g in grads), 0)
+            self.assertTrue(all(torch.isfinite(g).all() for g in grads))
+        optimizer.step()
             losses.append(float(loss))
         self.assertLess(sum(losses[-3:]) / 3, sum(losses[:3]) / 3, losses)
 

@@ -214,8 +214,8 @@ class ArmFDecoder(nn.Module):
                      readout_adapter=None):
         if readout_adapter is not None and self.readout != "sam_tail":
             raise ValueError("Readout adapter requires SAM-tail")
-        # Only token projection/refinement may be slot-private. Pixels and tail
-        # remain owned once by this decoder (including the final mask MLP).
+        # New4 may carry a copied tail on its shared interaction; old heads
+        # continue to use the original decoder tail.
         if interaction is not None and (self.readout != "sam_tail" or
                 getattr(self, "hsam_supervision", "none") != "soft_prior_aux"):
             raise ValueError("Private interaction requires SAM-tail soft_prior_aux")
@@ -274,7 +274,8 @@ class ArmFDecoder(nn.Module):
                 coarse = None
                 if combined or getattr(self, "hsam_supervision", "none") in ("downsample_gt", "upsample_logits"):
                     coarse = self.dot_readout(p, x)
-                logits = self.sam_tail(x, p, pe,
+                tail = getattr(interaction, "sam_tail", self.sam_tail)
+                logits = tail(x, p, pe,
                     prior=None if coarse is None else coarse.sigmoid(),
                     readout_adapter=readout_adapter)
             elif self.readout == "query_dot":

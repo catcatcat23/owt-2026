@@ -28,6 +28,7 @@ else
     extra+=(--stage1_checkpoint "$STAGE1_CHECKPOINT" --background_policy "${BACKGROUND_POLICY:-separation}")
     extra+=(--stage2_shared_segmentation "${STAGE2_SHARED_SEGMENTATION:-frozen}")
     extra+=(--stage2_readout_adapter "${STAGE2_READOUT_ADAPTER:-none}")
+    extra+=(--stage2_tail "${STAGE2_TAIL:-shared}")
     extra+=(--stage2_pixel_decoder "${STAGE2_PIXEL_DECODER:-shared}")
 fi
 nproc=${INCREMENTAL_NPROC_PER_NODE:-4}

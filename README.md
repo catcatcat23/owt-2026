@@ -25,28 +25,15 @@ Stage1使用AutoPET MAE encoder初始化ViT，训练旧四类与背景；Stage2�
 `156536/checkpoint-802.pth`初始化，保留冻结teacher，加入新四类slots。
 旧类为脾脏、右肾、左肾、胆囊；新类为食管、胰腺、肝脏、胃。共8个器官slot＋背景slot。
 
-```mermaid
-flowchart TD
-    I[CT 448 x 448] --> V[Frozen ViT encoder]
-    I --> OP[Old pixel decoder - frozen]
-    V --> OP
-    I --> NP[New4 pixel decoder - trainable]
-    V --> NP
-    V --> OS[Old organ slots - frozen]
-    V --> NS[New organ slots - trainable]
-    OS --> OX[Old private interactions - frozen]
-    OP --> OX
-    NS --> NX[One interaction stack shared by New4 - trainable]
-    NP --> NX
-    OX --> OT[Shared frozen SAM-tail]
-    OP --> OT
-    NX --> NT[Same frozen SAM-tail weights]
-    NP --> NT
-    OT --> OM[Old masks]
-    NT --> NM[New masks]
-```
+![SAM soft-prior增量架构：新增、冻结与训练模块](docs/figures/architecture_incremental_sam_new4.png)
 
-图中省略重建与背景路径，冻结矩阵如下。新空间分支从Stage1复制，含空间解码器内部
+基于下方原始SAM soft prior＋aux图重绘。蓝色/锁表示冻结，桃色表示训练，绿色NEW表示
+Stage2新增。图中两处SAM-tail使用同一套冻结权重；P16/P8/P4标注为对应pixel decoder
+的输入引用，省略跨面板长连线。背景与重建模块为概略表示，完整训练范围见下表。
+本图使用内置imagegen生成；工具未提供具体模型版本选择，不能确认image2版本。
+
+
+图中下方补充重建与背景路径，冻结矩阵如下。新空间分支从Stage1复制，含空间解码器内部
 浅层CNN和多尺度融合；输出P16/P8/P4。新类共享一套复制的投影与三层交互，依次读取
 P16→P8→P4；各器官独立产生soft prior并接受coarse aux监督。
 最后仍经共享冻结SAM-tail生成mask权重并与对应P4点积。

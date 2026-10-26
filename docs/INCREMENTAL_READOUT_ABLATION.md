@@ -1,3 +1,17 @@
+## 2026-10-26 当前结果更新
+
+当前完成的SAM新四类独立pixel decoder＋共享新交互：167611/167612，
+固定0.5后处理Old4/New4/All8为86.776017/80.677357/83.726687；
+验证集校准后为87.116398/81.067890/84.092144。
+相对156538/156539：New4提升4.50、All8提升2.25个百分点。
+源码365dc78d2185a8e36161b99a3d49977919db7768；2×4090，每卡16、累积6、有效batch192，
+118800 updates，checkpoint802；冻结审计match=true。
+注意同时改变新空间分支、交互共享方式及microbatch组合，不能解释为纯pixel decoder单因素收益。
+
+完整冻结矩阵、配置、消融表、PCDD/Offline对照及产物路径统一维护在
+[主README增量章节](../README.md)。
+下文按历史时间保留；旧“未提交/等待”状态以本节最新结果为准，其他实验状态不可类推。
+
 # Stage2: shared vs stage-private query readout
 
 ## Spatial adapter32 controlled ablation (2026-10-25)

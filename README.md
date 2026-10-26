@@ -430,3 +430,11 @@ PSEM-v3主要改善WORD Indirect而非跨数据集全面提升。
 训练入口仍为`scripts/orgslot/run_incremental44.sh stage2`，同时设
 `STAGE2_PIXEL_DECODER=new4`、`STAGE2_SHARED_SEGMENTATION=slot_private`、
 `STAGE2_READOUT_ADAPTER=none`。严格评估根据checkpoint中的`stage2_tail`恢复结构。
+
+本对照已提交：sifansong/XEC，QoS8gpus；训练174375（2×4090/12CPU/192GB/5天），
+评估174376（1×4090/10CPU/128GB/1天，afterok:174375，含重建）。
+2026-10-27 00:14提交时训练PENDING(Priority)，评估PENDING(Dependency)。
+实际源码ea8780adb46e2f6aa682dd0169a1277c4e3b4406，runtime
+`/gpfs/work/aac/sifansong/worktrees/inc44_newtail_ea8780a`；产物
+`/gpfs/work/aac/sifansong/artifacts/inc44_newtail_20261027/`。
+CPU新tail梯度/共享性、旧类输出不变、原配置兼容及严格评估加载检查通过；未运行GPU冒烟。

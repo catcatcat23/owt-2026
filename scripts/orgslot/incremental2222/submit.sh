@@ -25,6 +25,6 @@ for stage in 1 2 3 4; do
  printf 'stage%s_continuation=%s afterany=%s\n' "$stage" "$continuation" "$train" >&3
  evaluation=$(sbatch "${common[@]}" --dependency="afterok:$continuation" --partition=gpu4090,gpu40901t --gres=gpu:4090:1 --cpus-per-task=10 --mem=128G --time=1-00:00:00 --job-name="SAM2222_S${stage}_eval" scripts/orgslot/incremental2222/eval.sh "$stage")
  printf 'stage%s_eval=%s afterok=%s script=scripts/orgslot/incremental2222/eval.sh\n' "$stage" "$evaluation" "$continuation" >&3
- scontrol show job "$train" "$continuation" "$evaluation"
+ for job in "$train" "$continuation" "$evaluation"; do scontrol show job "$job"; done
  previous=$continuation
 done

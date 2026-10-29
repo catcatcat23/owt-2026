@@ -79,7 +79,7 @@ coarse logits上采样后接受GT监督。本配置不是缩小GT监督组合。
 同时，本次将新类交互由每slot独立改为新四类共享。因此下面是路线对照，
 不能把提升全部归因于“仅新增pixel decoder”。
 
-已准备 [PCDD顺序2+2+2+2四阶段任务](docs/INCREMENTAL_READOUT_ABLATION.md#2222pcdd类别顺序antengxec任务准备2026-10-29)：脾脏/右肾 → 左肾/胆囊 → 食管/胰腺 → 肝脏/胃；尚未提交。
+已准备 [PCDD顺序2+2+2+2四阶段任务](docs/INCREMENTAL_READOUT_ABLATION.md#2222pcdd类别顺序antengxec任务准备2026-10-29)：脾脏/右肾 → 左肾/胆囊 → 食管/胰腺 → 肝脏/胃；已于2026-10-29提交anteng/XEC，Stage1为180496。
 
 #### 增量消融与PCDD参考
 

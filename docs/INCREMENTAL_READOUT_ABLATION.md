@@ -310,7 +310,7 @@ GPU preflight and full training are NOT yet submitted for this new recipe.
 
 ## 2+2+2+2：PCDD类别顺序，anteng/XEC任务准备（2026-10-29）
 
-状态：实现及任务链已准备；尚未提交Slurm，无训练指标。
+状态：2026-10-29 21:18 CST已提交anteng/XEC；Stage1排队Priority，其余等待依赖，无训练指标。
 基线为已完成4+4的SAM soft-prior+aux、每阶段独立pixel decoder和共享新类交互、
 冻结共享SAM-tail；不混入尚未完成的可训练tail或adapter实验。
 
@@ -359,3 +359,20 @@ anteng/XEC任务目录：`/gpfs/work/aac/antengcai23/artifacts/inc2222_20261029`
 验证：CPU覆盖PCDD顺序/标签可见性、三次增量后的旧类logits不变、新空间分支非零有限梯度、
 无保留新slot时日志schema一致、完整checkpoint经正式评估器严格加载；原4+4私有pixel回归通过。
 未执行GPU冒烟测试，未宣称GPU正式训练验证通过。
+
+### 四阶段提交回执（2026-10-29 21:18 CST）
+
+源码`7557764b9801fd539c5f1cc6b327a3bac5a99bb1`，固定运行目录
+`/gpfs/work/aac/antengcai23/worktrees/inc2222_7557764`。
+源码归档SHA256：`87bfbdbfdbec88f53bd594133b07b0b5148d51761b39e8d66a6f3155d8a413fd`。
+账号、资源及依赖经scontrol核验；CPU回归此前3项通过，GPU尚未启动，未做GPU冒烟。
+
+| 阶段 | 训练 | 续训/完成检查 | 4090评估 |
+|---|---|---|---|
+| S1 脾脏/右肾 | 180496 | 180497 | 180498 |
+| S2 左肾/胆囊 | 180499 | 180500 | 180501 |
+| S3 食管/胰腺 | 180502 | 180503 | 180504 |
+| S4 肝脏/胃 | 180505 | 180506 | 180507 |
+
+续训afterany对应训练；评估afterok对应续训，后续阶段afterok上一阶段续训。
+回执：`/gpfs/work/aac/antengcai23/artifacts/inc2222_20261029/runs/jobs.txt`。

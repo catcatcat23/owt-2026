@@ -400,8 +400,11 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
                             raise RuntimeError(
                                 "query_dot requires shared pixel features"
                             )
-                        slot_pixels = (pixel_features["new"] if name in getattr(self, "new_stage_pixel_slots", ())
-                                       else pixel_features["old"]) if isinstance(pixel_features, dict) else pixel_features
+                        if hasattr(self, "slot_pixel_groups"):
+                            slot_pixels = pixel_features[self.slot_pixel_groups.get(name, "base")]
+                        else:
+                            slot_pixels = (pixel_features["new"] if name in getattr(self, "new_stage_pixel_slots", ())
+                                           else pixel_features["old"]) if isinstance(pixel_features, dict) else pixel_features
                         head_result = slot.forward_query_head(
                             tokens.index_select(0, active_head_rows),
                             ([p.index_select(0, active_head_rows) for p in slot_pixels]
@@ -515,6 +518,16 @@ class OrganSlotMaskedAutoencoderViT(OWT_models.MaskedAutoencoderViT):
         if decode_heads and hasattr(self, "new_stage_pixels"):
             pixel_features = {"old": pixel_features, "new": self.pixel_query_decoder.forward_pixels(
                 images, z, encoder_features=encoder_features, pixel_decoder=self.new_stage_pixels)}
+        if decode_heads and hasattr(self, "stage_pixel_decoders"):
+            grouped_pixels = {"base": pixel_features}
+            for group, decoder in self.stage_pixel_decoders.items():
+                names = [n for n, g in self.slot_pixel_groups.items() if g == group]
+                # Avoid evaluating frozen spatial branches when only new heads are requested.
+                if any(head_compute_mask is None or head_compute_mask[:, self.slot_names.index(n)].any()
+                       for n in names):
+                    grouped_pixels[group] = self.pixel_query_decoder.forward_pixels(
+                        images, z, encoder_features=encoder_features, pixel_decoder=decoder)
+            pixel_features = grouped_pixels
         slot_output = self.forward_slots(
             z,
             output_size,

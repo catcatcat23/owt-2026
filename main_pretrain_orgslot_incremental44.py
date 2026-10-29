@@ -97,14 +97,14 @@ def train_stage2(model, teacher, loader, optimizer, device, epoch, scaler, args)
             _adjust_learning_rate(optimizer, updates, args)
         image = batch["image"].to(device, non_blocking=True)
         masks = {n: v.to(device, non_blocking=True) for n, v in batch["visible_masks"].items()}
-        keep = _slot_keep_mask(args, batch, epoch, 9, device)
+        keep = _slot_keep_mask(args, batch, epoch, len(net.slot_names), device)
         keep, _ = _force_focus_slots(net, batch, keep, device)
         with torch.no_grad(), _autocast_context(device, args.amp_dtype):
-            heads = torch.ones((image.shape[0], 5), dtype=torch.bool, device=device)
+            heads = torch.ones((image.shape[0], len(teacher.slot_names)), dtype=torch.bool, device=device)
             heads[:, 0] = False
             pred = teacher(image, head_compute_mask=heads, decode_reconstruction=False)
             # Stage1 optimizes calibrated_logits; use that same decision scale.
-            probabilities = {n: pred["calibrated_logits"][n].float().sigmoid() for n in OLD}
+            probabilities = {n: pred["calibrated_logits"][n].float().sigmoid() for n in getattr(net, "incremental_old_names", OLD)}
         with _autocast_context(device, args.amp_dtype):
             loss, stats = model(image, masks, probabilities, keep)
         _check_finite({"loss": loss}, device, f"stage2 {epoch}/{step}")

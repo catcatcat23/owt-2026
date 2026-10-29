@@ -214,7 +214,8 @@ def configure_stage2(model, background_policy, shared_segmentation="frozen",
     # In particular, the unused background head/calibration remain frozen.
 
 
-def teacher_regions(new_masks, old_probabilities, low=0.1, high=0.9):
+def teacher_regions(new_masks, old_probabilities, low=0.1, high=0.9, old_names=OLD, new_names=NEW):
+    OLD, NEW = tuple(old_names), tuple(new_names)
     """Disjoint pseudo partition; only new GT is accepted at this boundary."""
     if set(new_masks) != set(NEW) or set(old_probabilities) != set(OLD):
         raise ValueError("stage2 accepts only new4 GT and old4 teacher probabilities")
@@ -252,11 +253,16 @@ class Incremental44Objective(nn.Module):
         super().__init__()
         self.student = student
         self.args = args
+        self.old_names = tuple(getattr(student, "incremental_old_names", OLD))
+        self.new_names = tuple(getattr(student, "incremental_new_names", NEW))
 
     def train(self, mode=True):
+        NEW = self.new_names
         super().train(False)
         # Keep old/shared paths in eval mode as well as freezing parameters.
         if mode:
+            if hasattr(self.student, "stage_pixel_decoders"):
+                self.student.stage_pixel_decoders[self.student.current_pixel_group].train(True)
             if hasattr(self.student, "new_stage_spatial_adapter"):
                 self.student.new_stage_spatial_adapter.train(True)
             if hasattr(self.student, "new_stage_pixels"):
@@ -281,18 +287,20 @@ class Incremental44Objective(nn.Module):
 
     def forward(self, image, masks, old_probs, keep):
         args, net = self.args, self.student
-        regions, valid = teacher_regions(masks, old_probs, args.teacher_low, args.teacher_high)
+        OLD, NEW = self.old_names, self.new_names
+        new_start = 1 + len(OLD)
+        regions, valid = teacher_regions(masks, old_probs, args.teacher_low, args.teacher_high, OLD, NEW)
         # Compute all canvases once, then use the actual TGR mask for composition.
         all_keep = torch.ones_like(keep)
         head_keep = torch.zeros_like(keep)
-        head_keep[:, 5:] = True
+        head_keep[:, new_start:] = True
         out = net(image, all_keep, head_compute_mask=head_keep,
                   return_diagnostics=True, decode_reconstruction=False)
         canvases = out["slot_canvases"]
         reconstruction = net.forward_decoder(net.fuse_canvases(canvases, keep, net.slot_names))
         target = composition_target(image, regions, keep, net.slot_names)
         recon = region_mse(reconstruction, target, valid)
-        seg_keep = keep[:, 5:] if args.seg_supervision == "retained" else all_keep[:, 5:]
+        seg_keep = keep[:, new_start:] if args.seg_supervision == "retained" else all_keep[:, new_start:]
         seg, per_slot = base_segmentation_loss(
             {n: out["slot_logits"][n] for n in NEW}, masks, NEW, seg_keep,
             background_weight=0, loss_type="small_organ",

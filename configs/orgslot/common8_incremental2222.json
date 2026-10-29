@@ -1,0 +1,84 @@
+{
+  "classes": [
+    {
+      "name": "background",
+      "raw_id": 0,
+      "is_background": true
+    },
+    {
+      "name": "spleen",
+      "raw_id": 1
+    },
+    {
+      "name": "right_kidney",
+      "raw_id": 2
+    },
+    {
+      "name": "left_kidney",
+      "raw_id": 3
+    },
+    {
+      "name": "gallbladder",
+      "raw_id": 4
+    },
+    {
+      "name": "esophagus",
+      "raw_id": 5
+    },
+    {
+      "name": "pancreas",
+      "raw_id": 6
+    },
+    {
+      "name": "liver",
+      "raw_id": 7
+    },
+    {
+      "name": "stomach",
+      "raw_id": 8
+    }
+  ],
+  "stages": {
+    "stage1": {
+      "stage": "base",
+      "visible_slots": [
+        "background",
+        "spleen",
+        "right_kidney"
+      ]
+    },
+    "stage2": {
+      "stage": "incremental",
+      "visible_slots": [
+        "left_kidney",
+        "gallbladder"
+      ],
+      "new_slots": [
+        "left_kidney",
+        "gallbladder"
+      ]
+    },
+    "stage3": {
+      "stage": "incremental",
+      "visible_slots": [
+        "esophagus",
+        "pancreas"
+      ],
+      "new_slots": [
+        "esophagus",
+        "pancreas"
+      ]
+    },
+    "stage4": {
+      "stage": "incremental",
+      "visible_slots": [
+        "liver",
+        "stomach"
+      ],
+      "new_slots": [
+        "liver",
+        "stomach"
+      ]
+    }
+  }
+}

@@ -307,3 +307,55 @@ Includes final-mask gradients through frozen tail, old-logit invariance, strict
 evaluator reload, fixed empty-rank metric schema and tiny-batch loss descent
 (not a full overfit or GPU-validation claim). CLI and shell syntax checks pass.
 GPU preflight and full training are NOT yet submitted for this new recipe.
+
+## 2+2+2+2：PCDD类别顺序，anteng/XEC任务准备（2026-10-29）
+
+状态：实现及任务链已准备；尚未提交Slurm，无训练指标。
+基线为已完成4+4的SAM soft-prior+aux、每阶段独立pixel decoder和共享新类交互、
+冻结共享SAM-tail；不混入尚未完成的可训练tail或adapter实验。
+
+PCDD正文Experimental Setup明确列出类别顺序，2-2为四阶段；最终Old指初始类别，
+New指所有后续新增类别，不是仅最后两类。
+来源：[AAAI论文p.6，Dataset/Protocols/Evaluation Metrics及Table2](https://ojs.aaai.org/index.php/AAAI/article/download/38406/42368)。
+
+| 阶段 | 本阶段可见前景GT | 累计器官slot（另有1个背景slot） | 训练模块 |
+|---|---|---|---|
+| Stage1 | 脾脏、右肾 | 2 | MAE encoder初始化后联合训练基础模型 |
+| Stage2 | 左肾、胆囊 | 4 | 新2个slot、该组pixel decoder、共享该组的token交互、背景子模块 |
+| Stage3 | 食管、胰腺 | 6 | 新2个slot、新的一组pixel decoder和token交互、背景子模块 |
+| Stage4 | 肝脏、胃 | 8 | 新2个slot、新的一组pixel decoder和token交互、背景子模块 |
+
+Stage2–4冻结ViT、基础pixel decoder、共享SAM-tail、共享reconstruction decoder及
+所有历史器官slot/空间分支/交互。新组空间及交互从冻结Stage1模块复制；slot从当前
+背景slot初始化。背景仅Collector/TGEnc/token_norm/AHER更新，LR乘0.1；
+分割不读取旧类GT，旧类重建区域用上一阶段完整冻结teacher的概率构建。
+历史分组用持久化`stage_pixel_decoders.stage2/3/4`路由，后续阶段不覆盖旧分支。
+
+- 划分：现有官方池seed42的96训练/26验证/24测试；模型seed0。
+- 2D，448输入，spacing0.7/0.7/2mm；融合reference_count恒为9。
+- 每阶段118800 optimizer updates、warmup5940；总预算475200，不等于4+4总预算。
+- 每阶段4×A800，micro batch16、accum3、effective batch192；AdamW，LR7.5e-5，wd0.05，bf16，clip1。
+- 损失沿用small-organ分割0.01、soft-prior辅助系数0.25、背景separation0.1、背景保留项0.1。
+- ROI只使用当前阶段可见小器官：S2胆囊，S3食管/胰腺，概率0.2。
+  S1/S4没有这三种小器官的可见GT，关闭定向ROI；不利用未来/旧类GT定向采样。
+- 保留retained-slot监督和原TGR策略；不加入全部器官监督。
+- 每阶段保存严格预算完成checkpoint，下一阶段只能加载相邻阶段完成结果。
+- 评估单4090、1天；每阶段均完成validation阈值校准、test固定0.5/校准、raw/post、recon direct/indirect。
+- 最终主表Old2/New6/All8；另输出每个两类分组。PCDD WORD 2-2参考90.17/65.97/72.02，
+  Offline参考94.43/82.49/85.47。仅类别分组与统计定义对齐，病例划分、预处理、架构、预算仍不同。
+
+实现入口：`main_pretrain_orgslot_incremental2222.py`；
+配置：`configs/orgslot/common8_incremental2222.json`；
+模块：`util/orgslot_incremental2222.py`；
+提交：`scripts/orgslot/incremental2222/submit.sh`，训练/评估脚本同目录；
+报告：`tools/report_incremental2222.py`。
+
+anteng/XEC任务目录：`/gpfs/work/aac/antengcai23/artifacts/inc2222_20261029`。
+训练QoS8gpus、Slurm account=sifansong、Unix user=antengcai23；
+每阶段5天主任务+一次5天afterany续训，下一阶段afterok续训任务，评估同样afterok。
+如果主任务已完成，续训只验证最终checkpoint后退出；若无有效恢复点或续训仍未完成，
+不会放行下一阶段。评估不参与模型选择，也不阻塞下一阶段训练。
+
+验证：CPU覆盖PCDD顺序/标签可见性、三次增量后的旧类logits不变、新空间分支非零有限梯度、
+无保留新slot时日志schema一致、完整checkpoint经正式评估器严格加载；原4+4私有pixel回归通过。
+未执行GPU冒烟测试，未宣称GPU正式训练验证通过。

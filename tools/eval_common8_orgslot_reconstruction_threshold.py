@@ -106,7 +106,15 @@ def parse_class_configuration(path, stage_name="base"):
         for item in classes
         if item.name in stage.visible_slots
     }
-    expected_ids = list(range(5)) if stage_name == "stage1" else list(range(9))
+    config = json.loads(Path(path).read_text())
+    if config.get("incremental_protocol") == "2222":
+        from util.orgslot_incremental2222 import seen
+        names = seen(int(config["stage_index"]))
+        if tuple(stage.visible_slots) != names:
+            raise ValueError("2222 evaluation class order mismatch")
+        expected_ids = list(range(len(names)))
+    else:
+        expected_ids = list(range(5)) if stage_name == "stage1" else list(range(9))
     if sorted(class_names) != expected_ids:
         raise ValueError("Unexpected evaluation class IDs for " + stage_name)
     return slot_specs, class_names
@@ -233,6 +241,9 @@ def build_model(
             raise ValueError("New4 tail requires new4 pixels")
         from util.orgslot_incremental44 import install_stage_tail
         install_stage_tail(model)
+    if checkpoint_value(checkpoint, "incremental_protocol") == "2222":
+        from util.orgslot_incremental2222 import restore_groups
+        restore_groups(model, int(checkpoint_value(checkpoint, "stage_index")))
     full_state = checkpoint["model"]
     state = {
         key: value

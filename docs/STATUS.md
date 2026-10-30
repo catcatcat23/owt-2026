@@ -1,3 +1,14 @@
+## 2026-10-30 23:07 CST — BTCV Offline submitted
+
+- SAM-tail soft prior + aux, AutoPET MAE encoder only, eight foreground organs + background; all modules train.
+- sifansong / XEC / QoS8gpus: train **182515** RUNNING on xgpua800n5, start23:07:13; continuation **182516** afterany:182515; head + reconstruction evaluation **182517** afterok:182516 on one4090.
+- Source `60c289eb60232b0ec098d0497b65af6f827baf65`, immutable runtime `/gpfs/work/aac/sifansong/worktrees/btcv_offline_60c289e`; source archive SHA256 `40ac0b93b59e48a7b36a2d974fc9d122519009200dc2cd8627b9dff2d517dc96`.
+- Artifacts `/gpfs/work/aac/sifansong/artifacts/btcv_offline_20261030`; runs/jobs.txt, data/BTCV/metadata/full_field_audit.json and small_organ_roi_index.json are evidence.
+- Fixed seed42 split24/6, 5372 training / 1403 test slices. Spacing **0.7x0.7x2 mm**, cubic image / nearest label interpolation matches current WORD. Superseded1x1x3mm data not used.
+- Full-field square-pad/resize448 instead of legacy WORD center crop. Audit: eight classes have zero positive slices lost during deterministic native-to448 label resize in both train and test. This does not prove boundary/voxel preservation or absence of losses during source resampling/augmentation. Focus4/5/6 bounding boxes fit384 before augmentation; ROI may clip non-focus organs.
+- Two A800, batch16/GPU, accumulation6, effective192;118800updates; training5days + continuation5days; evaluation1day. Explicit no-validation-set mode; threshold tuning uses training cases only and is labelled accordingly, fixed0.5 raw/post retained.
+- CPU geometry regression4/4 + syntax checks passed; no GPU smoke. At submission verification, Slurm allocation/start confirmed, not yet a completed training epoch or performance result.
+
 # 实验状态快照
 
 ## 2026-10-14：CNN编码器原生S8/S4跳接替换

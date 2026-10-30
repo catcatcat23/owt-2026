@@ -39,6 +39,7 @@ def parse_args():
         required=True,
     )
     parser.add_argument("--input-size", type=int, default=448)
+    parser.add_argument("--full-field", action="store_true")
     parser.add_argument("--global-crop-size", type=int, default=448)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--workers", type=int, default=8)
@@ -208,6 +209,8 @@ def main():
         args.input_size,
         args.fusion_mode,
     )
+    if bool(load_report.get("full_field", False)) != args.full_field:
+        raise ValueError("checkpoint and evaluation full-field geometry differ")
     model.to(device).eval()
     atomic_json(output_dir / "checkpoint_load.json", load_report)
     dataset = build_dataset(
@@ -215,6 +218,7 @@ def main():
         args.input_size,
         args.global_crop_size,
         max_samples=args.max_samples,
+        full_field=args.full_field,
     )
     loader = DataLoader(
         dataset,

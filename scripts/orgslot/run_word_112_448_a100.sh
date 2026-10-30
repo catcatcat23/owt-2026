@@ -237,6 +237,9 @@ fi
 if [[ "${NO_DDP_BUFFER_BROADCAST:-0}" == 1 ]]; then
   COMMAND+=(--no_ddp_buffer_broadcast)
 fi
+if [[ "${FULL_FIELD:-0}" == "1" ]]; then
+  COMMAND+=(--full_field)
+fi
 if [[ "${NO_SAVE}" == "1" ]]; then
   COMMAND+=(--no_save)
 fi

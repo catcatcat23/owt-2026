@@ -1,0 +1,41 @@
+{
+  "dataset": "BTCV",
+  "seed": 42,
+  "provenance": "Existing local OWT split, NOT verified as PCDD author split",
+  "splits": {
+    "Training": [
+      "img0001",
+      "img0002",
+      "img0003",
+      "img0004",
+      "img0005",
+      "img0006",
+      "img0008",
+      "img0009",
+      "img0010",
+      "img0022",
+      "img0023",
+      "img0024",
+      "img0026",
+      "img0027",
+      "img0028",
+      "img0029",
+      "img0031",
+      "img0032",
+      "img0034",
+      "img0035",
+      "img0036",
+      "img0038",
+      "img0039",
+      "img0040"
+    ],
+    "Test": [
+      "img0007",
+      "img0021",
+      "img0025",
+      "img0030",
+      "img0033",
+      "img0037"
+    ]
+  }
+}

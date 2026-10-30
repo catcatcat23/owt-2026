@@ -647,3 +647,19 @@ This is a pipeline check, not a GPU memory test or a generalization result.
 
 Architecture references checked 2026-10-13. Implemented locally without importing
 or installing upstream packages; benchmark claims require separate evaluation.
+
+### BTCV Common8 Offline SAM soft prior + aux (2026-10-30)
+
+New isolated entry: `scripts/orgslot/btcv_offline/submit.sh`; architecture is 2D ViT SAM-tail + soft prior + aux, AutoPET MAE **encoder only**, all eight organs visible (background plus eight slots), historical retained-slot loss. All modules train. No WORD fine-tuning checkpoint is used.
+
+- Split: `configs/orgslot/btcv_offline_seed42.json`, existing 24 train / 6 test scans; author PCDD case IDs are unavailable. No held-out validation set. Training diagnostic manifest uses training cases only. Evaluation reports fixed 0.5 raw/post and separately **training-set-calibrated** raw/post, plus reconstruction at 0.02. Test labels never tune thresholds.
+- BTCV raw IDs 1,2,3,4,5,11,6,7 map to spleen/right kidney/left kidney/gallbladder/esophagus/pancreas/liver/stomach, IDs1..8. Other raw IDs map to background.
+- From raw NIfTI: RAS, linear image / nearest label resampling to 1x1x3 mm, HU [-175,250], fixed [0,1], native slice export JPEG95/PNG. All z slices are retained.
+- Explicit `full_field` geometry: preserve entire XY field, square pad (minimum384), resize448. Training rotations expand the canvas. Existing WORD default remains centered crop448. Inference uses the same full-field geometry; evaluators reject checkpoint/geometry mismatches. Metrics are evaluated on the transformed448 grid, **not a claimed native-space PCDD reproduction**. Resampling/nearest resize can still remove tiny labels; inspect `metadata/full_field_audit.json`.
+- ROI: probability0.2; sample class4/5/6 uniformly from training positive slices; bounded-jitter384 crop retains the focus bounding box, then resize448. Other organs may be clipped. Rebuilt ROI manifest checksum; no test ROI.
+- Seed0; 118800 optimizer updates, warmup5940; AdamW lr7.5e-5 wd0.05; bf16, clip1; 2 A800 x batch16 x accumulation6 = effective192. Compared to 4GPU/acc3, retained-mask sampling frequency differs. Save every500 epochs plus final.
+- Loss: segmentation0.01, small-organ focal/Tversky, soft-prior aux weight0.25; reconstruction L2+LPIPS, fusion linear_sqrt reference9.
+- XEC sifansong, QoS8gpus: train2A800/16CPU/128G/5days plus afterany continuation; evaluation1RTX4090/8CPU/96G/1day afterok continuation. Full source SHA and job IDs live in the run jobs.txt.
+- This transfers our WORD architecture/optimizer budget; it does **not** reproduce PCDD's Swin UNETR,96cubed patch,SGD,batch2,50epochs.
+
+CPU geometry regressions cover small/large native images, edge ROI retention and unchanged legacy behavior. No GPU smoke is requested or run.

@@ -51,6 +51,7 @@ def get_args_parser():
     parser.add_argument("--batch_size", default=8, type=int)
     parser.add_argument("--epochs", default=798, type=int)
     parser.add_argument("--accum_iter", default=12, type=int)
+    parser.add_argument("--body_center", action="store_true")
     parser.add_argument("--input_size", default=448, type=int)
     parser.add_argument("--dimension", choices=("2D", "3D"), default="2D")
     parser.add_argument("--fix_frame", default=4, type=int)
@@ -409,6 +410,7 @@ def _build_dataset(args, csv_path, classes, stage, training, max_samples):
         global_crop_size=args.global_crop_size,
         roi_crop_size=args.roi_crop_size,
         roi_center_jitter=args.roi_center_jitter,
+        body_center=args.body_center,
     )
     transformed = TransformDataset(raw, transform)
     if training and args.organ_roi_aug:
@@ -530,7 +532,10 @@ def main(args):
         )
     if expected_preprocess.get("offline_spatial_matrix") != "native_after_resampling":
         raise ValueError("preprocessing must retain the native resampled matrix")
-    if args.input_size != 448 or args.global_crop_size != 448:
+    required_size = 512 if args.body_center else 448
+    if args.body_center and args.dimension != "2D":
+        raise ValueError("body-center protocol is 2D only")
+    if args.input_size != required_size or args.global_crop_size != required_size:
         raise ValueError("this experiment requires 448 crop and 448 model input")
     if args.dimension == "3D":
         if args.fix_frame < 2:

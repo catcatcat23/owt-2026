@@ -38,6 +38,7 @@ def parse_args():
         choices=("train_calibration", "validation", "test"),
         required=True,
     )
+    parser.add_argument("--body-center", action="store_true")
     parser.add_argument("--input-size", type=int, default=448)
     parser.add_argument("--global-crop-size", type=int, default=448)
     parser.add_argument("--batch-size", type=int, default=4)
@@ -142,7 +143,8 @@ def main():
             raise FileNotFoundError(required)
     if output_dir.exists():
         raise FileExistsError(output_dir)
-    if args.input_size != 448 or args.global_crop_size != 448:
+    required_size = 512 if args.body_center else 448
+    if args.input_size != required_size or args.global_crop_size != required_size:
         raise ValueError("formal WORD evaluation requires deterministic 448 crop")
     if not 0 < args.binary_threshold < 1:
         raise ValueError("binary threshold must lie strictly between 0 and 1")
@@ -208,6 +210,8 @@ def main():
         args.input_size,
         args.fusion_mode,
     )
+    if bool(load_report["body_center"]) != args.body_center:
+        raise ValueError("evaluation crop policy differs from checkpoint")
     model.to(device).eval()
     atomic_json(output_dir / "checkpoint_load.json", load_report)
     dataset = build_dataset(
@@ -215,6 +219,7 @@ def main():
         args.input_size,
         args.global_crop_size,
         max_samples=args.max_samples,
+        body_center=args.body_center,
     )
     loader = DataLoader(
         dataset,

@@ -18,6 +18,7 @@ else:
     c = torch.load(path, map_location='cpu')
     cfg = c['args'] if isinstance(c['args'], dict) else vars(c['args'])
     assert not cfg.get('full_field', False), 'Rejected superseded full-field checkpoint'
+    assert cfg.get('body_center') and cfg.get('input_size') == 512 and cfg.get('global_crop_size') == 512
     assert cfg.get('hsam_supervision') == 'soft_prior_aux'
     assert cfg.get('slot_head_type') == 'arm_f_sam_tail'
     assert cfg.get('max_optimizer_updates') == 118800

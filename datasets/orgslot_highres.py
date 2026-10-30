@@ -108,10 +108,46 @@ def _apply_to_spatial_batch(value, function):
     return restore(function(batch))
 
 
+def body_center_window(image, size=512):
+    """Image-only window on fixed_255 HU[-175,250] CT; no label input."""
+    import cv2
+    import numpy as np
+    if image.ndim != 3:
+        raise ValueError("body-center mode currently supports 2D only")
+    cv2.setNumThreads(1)
+    gray = image[0].detach().cpu().numpy()
+    body = (gray > (25.0 / 425.0)).astype(np.uint8)
+    body = cv2.morphologyEx(body, cv2.MORPH_OPEN,
+                          cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(body, 8)
+    h, w = gray.shape
+    cy, cx = h / 2, w / 2
+    if n > 1:
+        k = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+        body = cv2.morphologyEx((labels == k).astype(np.uint8), cv2.MORPH_CLOSE,
+                               cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))
+        yy, xx = np.where(body)
+        cy, cx = (int(yy.min()) + int(yy.max()) + 1) / 2, (int(xx.min()) + int(xx.max()) + 1) / 2
+    def start(c, n):
+        return max(0, min(int(round(c - size / 2)), n - size)) if n >= size else (n - size) // 2
+    return start(cy, h), start(cx, w), size, size
+
+
+def crop_with_padding(value, top, left, height, width):
+    """Copy pixels unchanged; signed coordinates represent zero padding."""
+    h, w = value.shape[-2:]
+    out = value.new_zeros((*value.shape[:-2], height, width))
+    y0, x0 = max(0, top), max(0, left)
+    y1, x1 = min(h, top + height), min(w, left + width)
+    out[..., y0-top:y1-top, x0-left:x1-left] = value[..., y0:y1, x0:x1]
+    return out
+
+
 class OrganSlotHighResTransform:
     """Paired augmentation followed by global or organ-aware physical crop.
 
-    Global samples use a deterministic centered 448x448 window. ROI samples
+    Default global samples use a deterministic centered 448x448 window.
+    Opt-in body_center uses an image-only 512 window with zero padding. ROI samples
     use a label-guided 384x384 window with bounded center jitter. The label is
     used only inside this training transform and is hidden by the subsequent
     strict visibility wrapper.
@@ -129,7 +165,11 @@ class OrganSlotHighResTransform:
         max_rotation_degrees=15.0,
         gamma_probability=0.5,
         photometric_operations=2,
+        body_center=False,
     ):
+        self.body_center = bool(body_center)
+        if self.body_center and (output_size != 512 or global_crop_size != 512):
+            raise ValueError("body-center protocol requires 512 input and crop")
         self.output_size = int(output_size)
         self.training = bool(training)
         self.global_crop_size = int(global_crop_size)
@@ -297,6 +337,9 @@ class OrganSlotHighResTransform:
         if self.training:
             image, label = self._paired_flip(image, label)
             image, label = self._paired_rotate(image, label)
+        # Locate before intensity augmentation; geometry never depends on GT.
+        body_box = body_center_window(image) if self.body_center else None
+        if self.training:
             image = self._gamma(image)
             image = self._apply_photometric(image)
 
@@ -308,18 +351,23 @@ class OrganSlotHighResTransform:
             top, left, crop_height, crop_width = self._organ_crop(
                 label, focus_class_id, source_height, source_width
             )
+        elif self.body_center:
+            top, left, crop_height, crop_width = body_box
         else:
             top, left, crop_height, crop_width = self._global_crop(
                 source_height, source_width
             )
-        image = image[
-            ..., top : top + crop_height, left : left + crop_width
-        ]
-        label = label[
-            ..., top : top + crop_height, left : left + crop_width
-        ]
-        output["image"] = _resize_image(image, self.output_size)
-        output["label"] = _resize_label(label, self.output_size)
+        if self.body_center:
+            image = crop_with_padding(image, top, left, crop_height, crop_width)
+            label = crop_with_padding(label, top, left, crop_height, crop_width)
+        else:
+            image = image[..., top:top+crop_height, left:left+crop_width]
+            label = label[..., top:top+crop_height, left:left+crop_width]
+        if self.body_center and not roi_applied:
+            output["image"], output["label"] = image, label
+        else:
+            output["image"] = _resize_image(image, self.output_size)
+            output["label"] = _resize_label(label, self.output_size)
         output["crop_box"] = torch.tensor(
             [
                 top,

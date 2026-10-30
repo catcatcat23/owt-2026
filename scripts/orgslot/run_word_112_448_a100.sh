@@ -143,11 +143,11 @@ COMMAND=(
   main_pretrain_orgslot_common8_a100.py
   --batch_size "${MICRO_BATCH}"
   --accum_iter "${ACCUM_ITER}"
-  --input_size 448
+  --input_size "${INPUT_SIZE:-448}"
   --dimension "${DIMENSION}"
   --fix_frame "${FIX_FRAME}"
   --temp_stride "${TEMP_STRIDE}"
-  --global_crop_size 448
+  --global_crop_size "${GLOBAL_CROP_SIZE:-448}"
   --roi_crop_size 384
   --expected_spacing "${SPACING_ARRAY[@]}"
   --roi_center_jitter 0.1
@@ -237,6 +237,7 @@ fi
 if [[ "${NO_DDP_BUFFER_BROADCAST:-0}" == 1 ]]; then
   COMMAND+=(--no_ddp_buffer_broadcast)
 fi
+if [[ "${BODY_CENTER:-0}" == 1 ]]; then COMMAND+=(--body_center); fi
 if [[ "${NO_VALIDATION:-0}" == "1" ]]; then
   COMMAND+=(--no_validation)
 fi

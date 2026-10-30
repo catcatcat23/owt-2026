@@ -5,8 +5,8 @@ test "$(cat SOURCE_COMMIT)" = "${EXPECTED_COMMIT:?}"
 export ARM_F_TARGET=sifan-xec ARM_F_DIMENSION=2D ARM_F_HEAD_TYPE=arm_f_sam_tail
 export ARM_F_MICRO_BATCH=16 ARM_F_ACCUM_ITER=6 BACKGROUND_REDUCTION=topk
 source scripts/orgslot/arm_f_environment.sh
-export PROCESSED_ROOT=${BTCV_ROOT:?} MANIFEST_TAG=native113 EXPECTED_SPACING='1 1 3'
-export TRAIN_CSV=$BTCV_ROOT/csv/BTCV_Training_2D_native113.csv
+export PROCESSED_ROOT=${BTCV_ROOT:?} MANIFEST_TAG=native07072 EXPECTED_SPACING='0.7 0.7 2'
+export TRAIN_CSV=$BTCV_ROOT/csv/BTCV_Training_2D_native07072.csv
 # No held-out validation exists in the 24/6 protocol. Never use test labels in training.
 export VAL_CSV=$TRAIN_CSV
 export ROI_INDEX=$BTCV_ROOT/metadata/small_organ_roi_index.json

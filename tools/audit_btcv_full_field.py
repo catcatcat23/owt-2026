@@ -8,9 +8,14 @@ import numpy as np
 p = argparse.ArgumentParser(__doc__)
 p.add_argument('root', type=Path)
 a = p.parse_args()
+summary = json.loads((a.root/'metadata'/'preprocess_summary.json').read_text())
+assert np.allclose(summary['config']['spacing_mm'], [0.7,0.7,2])
+assert summary['config']['image_interpolation_order'] == 3
+expected = json.loads((Path(__file__).resolve().parents[1]/'configs/orgslot/btcv_offline_seed42.json').read_text())
 report = {}
 for split in ('Training', 'Test'):
-    rows = list(csv.DictReader(open(a.root/'csv'/('BTCV_'+split+'_2D_native113.csv'))))
+    rows = list(csv.DictReader(open(a.root/'csv'/('BTCV_'+split+'_2D_native07072.csv'))))
+    assert sorted({Path(row['image_pth']).parent.name for row in rows}) == sorted(expected['splits'][split])
     stats = {str(c): {'positive_slices': 0, 'lost_positive_slices_after_resize': 0,
                       'max_bbox_extent': 0} for c in range(1, 9)}
     for row in rows:

@@ -115,6 +115,7 @@ def get_args_parser():
     parser.add_argument("--warmup_updates", default=5940, type=int)
 
     parser.add_argument("--data_path", required=True)
+    parser.add_argument("--no_validation", action="store_true", help="Explicit train/test-only protocol; do not build or label a validation set")
     parser.add_argument("--val_data_path", required=True)
     parser.add_argument("--preprocess_summary", required=True)
     parser.add_argument("--output_dir", required=True)
@@ -289,7 +290,7 @@ def _write_provenance(args, output_dir):
     shutil.copyfile(args.preprocess_summary, output_dir / "preprocess_summary.json")
     checksums = {
         "train": _sha256(args.data_path),
-        "validation": _sha256(args.val_data_path),
+        "validation": None if args.no_validation else _sha256(args.val_data_path),
         "preprocess_summary": _sha256(args.preprocess_summary),
     }
     if args.roi_index is not None:
@@ -573,17 +574,21 @@ def main(args):
         training=True,
         max_samples=args.max_train_samples,
     )
-    val_raw, _ = _build_dataset(
-        args,
-        args.val_data_path,
-        classes,
-        stage,
-        training=False,
-        max_samples=args.max_val_samples,
-    )
-    assert_case_splits_disjoint(
-        {"train": train_raw.case_ids, "validation": val_raw.case_ids}
-    )
+    if args.no_validation:
+        if Path(args.val_data_path).resolve() != Path(args.data_path).resolve():
+            raise ValueError("no_validation requires the unused val path to equal training path")
+    else:
+        val_raw, _ = _build_dataset(
+            args,
+            args.val_data_path,
+            classes,
+            stage,
+            training=False,
+            max_samples=args.max_val_samples,
+        )
+        assert_case_splits_disjoint(
+            {"train": train_raw.case_ids, "validation": val_raw.case_ids}
+        )
     if args.positive_roi_loss_weight < 0:
         raise ValueError("positive_roi_loss_weight must be non-negative")
     if args.training_scope == "head_only" and args.positive_roi_loss_weight > 0:

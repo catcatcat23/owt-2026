@@ -17,7 +17,8 @@ else:
     path = max(paths, key=lambda v: int(v.stem.split('-')[-1]))
     c = torch.load(path, map_location='cpu')
     cfg = c['args'] if isinstance(c['args'], dict) else vars(c['args'])
-    assert cfg.get('full_field') and cfg.get('hsam_supervision') == 'soft_prior_aux'
+    assert not cfg.get('full_field', False), 'Rejected superseded full-field checkpoint'
+    assert cfg.get('hsam_supervision') == 'soft_prior_aux'
     assert cfg.get('slot_head_type') == 'arm_f_sam_tail'
     assert cfg.get('max_optimizer_updates') == 118800
     assert 'BTCV_Training' in cfg['data_path']

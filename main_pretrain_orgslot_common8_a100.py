@@ -49,7 +49,6 @@ def get_args_parser():
         "OrganSlotBank Common8 configurable-spacing pre-training", add_help=False
     )
     parser.add_argument("--batch_size", default=8, type=int)
-    parser.add_argument("--full_field", action="store_true", help="Preserve full XY field with square padding and resize; no center crop")
     parser.add_argument("--epochs", default=798, type=int)
     parser.add_argument("--accum_iter", default=12, type=int)
     parser.add_argument("--input_size", default=448, type=int)
@@ -410,7 +409,6 @@ def _build_dataset(args, csv_path, classes, stage, training, max_samples):
         global_crop_size=args.global_crop_size,
         roi_crop_size=args.roi_crop_size,
         roi_center_jitter=args.roi_center_jitter,
-        full_field=args.full_field,
     )
     transformed = TransformDataset(raw, transform)
     if training and args.organ_roi_aug:

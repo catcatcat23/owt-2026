@@ -54,7 +54,6 @@ def parse_args():
         "--class-map", default="configs/orgslot/common8_offline.json"
     )
     parser.add_argument("--input-size", type=int, default=448)
-    parser.add_argument("--full-field", action="store_true")
     parser.add_argument("--global-crop-size", type=int, default=448)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--workers", type=int, default=8)
@@ -263,7 +262,6 @@ def build_model(
         "stripped_lpips_tensor_count": len(full_state) - len(state),
         "model_parameter_count": sum(p.numel() for p in model.parameters()),
         "input_size": int(input_size),
-        "full_field": bool(checkpoint_value(checkpoint, "full_field", False)),
         "method": method,
         "fusion_mode": fusion_mode if method == "orgslot" else None,
         "checkpoint_fusion_mode": saved_fusion,
@@ -282,7 +280,7 @@ def build_model(
     return model, report
 
 
-def build_dataset(test_csv, input_size, global_crop_size, max_samples=None, full_field=False):
+def build_dataset(test_csv, input_size, global_crop_size, max_samples=None):
     raw = OrganSlotManifestDataset(
         test_csv,
         dataset_type="2D",
@@ -294,9 +292,8 @@ def build_dataset(test_csv, input_size, global_crop_size, max_samples=None, full
         output_size=input_size,
         training=False,
         global_crop_size=global_crop_size,
-        roi_crop_size=384 if full_field else global_crop_size,
+        roi_crop_size=global_crop_size,
         roi_center_jitter=0.0,
-        full_field=full_field,
     )
     return EvaluationVisibilityDataset(TransformDataset(raw, transform))
 
@@ -573,7 +570,7 @@ def main():
             "primary_mode": PRIMARY_MODE,
             "threshold_policy": "fixed legacy OWT value; not selected on WORD test",
             "ground_truth_policy": (
-                "semantic label after full-field pad/resize" if args.full_field else "unmodified semantic label after deterministic center crop"
+                "unmodified semantic label after deterministic center crop"
             ),
         }
     )
@@ -594,8 +591,6 @@ def main():
         args.fusion_mode,
         allow_fusion_override=args.allow_fusion_override,
     )
-    if bool(load_report.get("full_field", False)) != args.full_field:
-        raise ValueError("checkpoint and evaluation full-field geometry differ")
     model.to(device).eval()
     atomic_json(output_dir / "checkpoint_load.json", load_report)
     dataset = build_dataset(
@@ -603,7 +598,6 @@ def main():
         args.input_size,
         args.global_crop_size,
         max_samples=args.max_samples,
-        full_field=args.full_field,
     )
     loader = DataLoader(
         dataset,

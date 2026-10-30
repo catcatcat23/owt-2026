@@ -1,3 +1,7 @@
+## 2026-10-30 — BTCV full-field run withdrawn
+
+User requires exact WORD preprocessing. Cancelled sifansong/XEC182515 (train),182516 (continuation),182517 (evaluation). Removed the newly added full-field scaling path; restored original WORD geometry. No replacement submitted. Audit: img0004 is435x435 (size error);8other cases lose GT under center448, including test img0033 (390spleen voxels). `tools/audit_btcv_fixed_crop.py` writes the evidence and blocks submission. Records below describe the superseded run, not an active or valid baseline.
+
 ## 2026-10-30 23:07 CST — BTCV Offline submitted
 
 - SAM-tail soft prior + aux, AutoPET MAE encoder only, eight foreground organs + background; all modules train.

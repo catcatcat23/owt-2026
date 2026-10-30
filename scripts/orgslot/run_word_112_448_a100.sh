@@ -240,9 +240,6 @@ fi
 if [[ "${NO_VALIDATION:-0}" == "1" ]]; then
   COMMAND+=(--no_validation)
 fi
-if [[ "${FULL_FIELD:-0}" == "1" ]]; then
-  COMMAND+=(--full_field)
-fi
 if [[ "${NO_SAVE}" == "1" ]]; then
   COMMAND+=(--no_save)
 fi

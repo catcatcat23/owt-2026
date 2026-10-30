@@ -2,6 +2,7 @@
 set -euo pipefail
 cd "${EXPERIMENT_WORKDIR:?}"
 test "$(cat SOURCE_COMMIT)" = "${EXPECTED_COMMIT:?}"
+/usr/bin/python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["compatible"], "BTCV fixed crop blocked by coverage audit"' "$BTCV_ROOT/metadata/fixed_crop_audit.json"
 export ARM_F_TARGET=sifan-xec ARM_F_DIMENSION=2D ARM_F_HEAD_TYPE=arm_f_sam_tail
 export ARM_F_MICRO_BATCH=16 ARM_F_ACCUM_ITER=6 BACKGROUND_REDUCTION=topk
 source scripts/orgslot/arm_f_environment.sh
@@ -11,7 +12,7 @@ export TRAIN_CSV=$BTCV_ROOT/csv/BTCV_Training_2D_native07072.csv
 export VAL_CSV=$TRAIN_CSV NO_VALIDATION=1
 export ROI_INDEX=$BTCV_ROOT/metadata/small_organ_roi_index.json
 export PREPROCESS_SUMMARY=$BTCV_ROOT/metadata/preprocess_summary.json
-export FULL_FIELD=1 HSAM_SUPERVISION=soft_prior_aux MAE_INIT_SCOPE=encoder
+export HSAM_SUPERVISION=soft_prior_aux MAE_INIT_SCOPE=encoder
 export N_GPU=2 ACCUM_ITER=6 MICRO_BATCH=16 SAVE_FREQ=500
 export OMP_NUM_THREADS=1 PYTHONUNBUFFERED=1
 mkdir -p "$RUN_ROOT"

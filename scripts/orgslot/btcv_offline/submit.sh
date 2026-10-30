@@ -4,7 +4,8 @@ set -euo pipefail
 [[ "$(id -un)" == sifansong ]]
 cd "$EXPERIMENT_WORKDIR"
 test "$(cat SOURCE_COMMIT)" = "$EXPECTED_COMMIT"
-test -s "$BTCV_ROOT/metadata/full_field_audit.json"
+/usr/bin/python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["compatible"], "BTCV fixed crop blocked by coverage audit"' "$BTCV_ROOT/metadata/fixed_crop_audit.json"
+test -s "$BTCV_ROOT/metadata/fixed_crop_audit.json"
 test -s "$BTCV_ROOT/metadata/small_organ_roi_index.json"
 mkdir -p "$RUN_ROOT"
 set -o noclobber

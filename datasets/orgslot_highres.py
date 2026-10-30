@@ -129,9 +129,7 @@ class OrganSlotHighResTransform:
         max_rotation_degrees=15.0,
         gamma_probability=0.5,
         photometric_operations=2,
-        full_field=False,
     ):
-        self.full_field = bool(full_field)
         self.output_size = int(output_size)
         self.training = bool(training)
         self.global_crop_size = int(global_crop_size)
@@ -181,7 +179,6 @@ class OrganSlotHighResTransform:
             lambda batch: vision_f.rotate(
                 batch,
                 angle,
-                expand=self.full_field,
                 interpolation=InterpolationMode.BILINEAR,
                 fill=0.0,
             ),
@@ -191,7 +188,6 @@ class OrganSlotHighResTransform:
             lambda batch: vision_f.rotate(
                 batch,
                 angle,
-                expand=self.full_field,
                 interpolation=InterpolationMode.NEAREST,
                 fill=0.0,
             ),
@@ -304,18 +300,6 @@ class OrganSlotHighResTransform:
             image = self._gamma(image)
             image = self._apply_photometric(image)
 
-        # BTCV opt-in: preserve the complete augmented field, pad to a square.
-        # Legacy WORD fixed-window behavior remains unchanged.
-        if self.full_field:
-            source_height, source_width = image.shape[-2:]
-            side = max(source_height, source_width, self.roi_crop_size)
-            left = (side - source_width) // 2
-            top = (side - source_height) // 2
-            padding = (left, side - source_width - left, top, side - source_height - top)
-            image = F.pad(image, padding)
-            label = F.pad(label, padding)
-            source_height = source_width = side
-
         focus_class_id = int(output.get("focus_class_id", -1))
         roi_applied = bool(output.get("roi_applied", False))
         if roi_applied:
@@ -324,8 +308,6 @@ class OrganSlotHighResTransform:
             top, left, crop_height, crop_width = self._organ_crop(
                 label, focus_class_id, source_height, source_width
             )
-        elif self.full_field:
-            top, left, crop_height, crop_width = 0, 0, source_height, source_width
         else:
             top, left, crop_height, crop_width = self._global_crop(
                 source_height, source_width

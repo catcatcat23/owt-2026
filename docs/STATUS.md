@@ -1,3 +1,12 @@
+## 2026-10-31 00:17 CST — BTCV body-center512 submitted
+
+- Approved replacement: image-only body center → fixed512×512 crop/pad, no global resize; spacing0.7×0.7×2mm unchanged; physical ROI384 retained (ROI-only384→512 augmentation). 2D SAM-tail soft prior+aux, AutoPET MAE encoder, full Common8 Offline24/6, seed42 split/model seed0.
+- sifansong/XEC/account sifansong/QoS8gpus: **182668** training (PENDING Priority at submission), **182669** continuation afterany:182668, **182670** head+reconstruction evaluation afterok:182669. Train/continuation each2A800,16CPU,128GiB,5days; eval1RTX4090,8CPU,96GiB,1day. Per-GPU batch16, accumulation6, effective192,118800updates. Continuation exits if budget already complete; evaluation requires a verified completed checkpoint.
+- Pinned source `b8779a78d61d6c3b1e9b478ac88d92100d4bfd13`; local immutable worktree passed `tools/check_experiment_revision.sh` against origin/feature/orgslot before submission. Remote immutable runtime `/gpfs/work/aac/sifansong/worktrees/btcv_body512_b8779a78`; archive SHA256 `5dc761011c093cbf498bd7c643651ba16b88771879e9a3babb689ec510cf5c69` verified remotely.
+- Run root `/gpfs/work/aac/sifansong/artifacts/btcv_body512_20261031`: `launch.sh`, `jobs.txt`, `body_center_audit.json`, `train_JOB`, `evaluation`. Reuses native data `/gpfs/work/aac/sifansong/artifacts/btcv_offline_20261030/data/BTCV`, never resumes withdrawn182515.
+- CPU checks: local AND remote production geometry audit30cases/6775slices, zero clipped GT; MAE encoder strict load77 tensors;512 target position embeddings regenerated; label-independent crop and pixel-preserving padding checks passed. No GPU smoke; no training metric or GPU-memory claim yet. Existing random rotation/ROI augmentation can change coverage; the audit covers deterministic global evaluation only.
+- Complete protocol and launch parameters: [CONFIGURATION.md](CONFIGURATION.md#btcv-body-center512-replacement-2026-10-31).
+
 ## 2026-10-30 — BTCV full-field run withdrawn
 
 User requires exact WORD preprocessing. Cancelled sifansong/XEC182515 (train),182516 (continuation),182517 (evaluation). Removed the newly added full-field scaling path; restored original WORD geometry. No replacement submitted. Audit: img0004 is435x435 (size error);8other cases lose GT under center448, including test img0033 (390spleen voxels). `tools/audit_btcv_fixed_crop.py` writes the evidence and blocks submission. Records below describe the superseded run, not an active or valid baseline.

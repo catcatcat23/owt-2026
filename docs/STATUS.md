@@ -1,3 +1,11 @@
+## 2026-11-01 16:32 CST — SAM new-tail continuation
+
+- Original sifansong/XEC `174375` reached TIMEOUT after5days, epoch765 partial. CPU-loaded `stage2_separation_174375/checkpoint-760.pth`: epoch760,112628 optimizer updates, model tensors finite, optimizer/scaler present;6172 updates remain to118800. Resume from epoch761; no GPU smoke.
+- Submitted **185801** (2RTX4090,12CPU,192GiB,5days,QoS8gpus; initially PENDING Priority). Same batch16×2×accum6=192, same new4 pixel decoder and new4 tail/slot-private interaction, same data/loss/freeze policy.
+- Replacement evaluation **185802**,1RTX4090/10CPU/128GiB/1day, `afterok:185801`; points to `stage2_separation_185801`, includes validation calibration/test/head/reconstruction. Cancelled obsolete `174376` only after both replacement jobs existed.
+- Existing experiment retains immutable runtime `/gpfs/work/aac/sifansong/worktrees/inc44_newtail_ea8780a`, source `ea8780adb46e2f6aa682dd0169a1277c4e3b4406`; verified SOURCE_COMMIT and nine critical source/script SHA256 values against Git. No model code changes. Submission wrapper committed/pushed as `cfb063cf` before sbatch: `scripts/orgslot/resume_newtail_20261101.sh`.
+- Evidence: `/gpfs/work/aac/sifansong/artifacts/inc44_newtail_20261027/{resume_20261101.sh,resume_source_hashes.json,resume_20261101_jobs.txt,185801.out,185802.out}`. Remaining training estimated6–7hours after allocation from prior throughput, excludes queue and evaluation.
+
 ## 2026-10-31 00:17 CST — BTCV body-center512 submitted
 
 - Approved replacement: image-only body center → fixed512×512 crop/pad, no global resize; spacing0.7×0.7×2mm unchanged; physical ROI384 retained (ROI-only384→512 augmentation). 2D SAM-tail soft prior+aux, AutoPET MAE encoder, full Common8 Offline24/6, seed42 split/model seed0.

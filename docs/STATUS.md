@@ -106,3 +106,18 @@ SAM私有交互156538/156539的81.84结果已归档到 [增量专项](INCREMENTA
 
 历史完整状态、CPU/GPU边界、源SHA及提交记录已保存在
 [旧STATUS](archive/HISTORY.md#merge-status)；禁止把该归档当今日队列。
+
+## 2026-11-02: 2+2+2+2 ROI-controlled rerun
+
+At user request, stopped anteng/XEC Stage2 180499 (checkpoint-200 retained),
+held 180500–180507. Existing runtime and outputs remain unchanged.
+New opt-in `roi_focus_policy=current` includes every newly supervised organ
+in that stage's ROI pools; historical default `small` remains unchanged.
+First controlled rerun: Stage1 spleen/right kidney, same MAE encoder, official96
+split, seed0, 118800 updates, 4 GPUs × batch16 × accumulation3, 448 input,
+384 ROI, 20% ROI probability (uniform target choice), retained-slot loss.
+This does not guarantee the ROI target is retained for segmentation supervision.
+Only Stage1, continuation, and evaluation are submitted before deciding later stages.
+Evaluation protocol is unchanged. New root: anteng/XEC
+`/gpfs/work/aac/antengcai23/artifacts/inc2222_roi_20261102`.
+Job IDs and pinned source are recorded in its `runs/jobs.txt`.

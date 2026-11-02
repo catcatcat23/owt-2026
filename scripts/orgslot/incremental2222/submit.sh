@@ -14,8 +14,10 @@ set -o noclobber
 exec 3> "$RUN_ROOT/jobs.txt"
 printf 'commit=%s runtime=%s account=sifansong user=antengcai23 cluster=XEC qos=8gpus\n' "$EXPECTED_COMMIT" "$EXPERIMENT_WORKDIR" >&3
 common=(--parsable --account=sifansong --qos=8gpus --nodes=1 --ntasks=1 --chdir="$EXPERIMENT_WORKDIR" --export=ALL --output="$RUN_ROOT/%j.out" --error="$RUN_ROOT/%j.err")
+final_stage=${FINAL_STAGE:-4}
+[[ "$final_stage" =~ ^[1-4]$ ]] || { echo 'FINAL_STAGE must be 1..4'; exit 2; }
 previous=''
-for stage in 1 2 3 4; do
+for ((stage=1; stage<=final_stage; stage++)); do
  dependency=()
  [[ -z "$previous" ]] || dependency=(--dependency="afterok:$previous")
  train=$(sbatch "${common[@]}" "${dependency[@]}" --partition=gpua800,gpua8001t --gres=gpu:a800:4 --cpus-per-task=24 --mem=192G --time=5-00:00:00 --job-name="SAM2222_S${stage}" scripts/orgslot/incremental2222/train.sh "$stage")

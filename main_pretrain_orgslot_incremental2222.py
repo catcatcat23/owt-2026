@@ -39,6 +39,8 @@ def parser():
             action.required = False
     p.add_argument("--stage_index", type=int, choices=(1, 2, 3, 4), required=True)
     p.add_argument("--previous_checkpoint", default="")
+    p.add_argument("--roi_focus_policy", choices=("small", "current"), default="small",
+                   help="ROI pools: historical small organs or all newly supervised organs")
     p.set_defaults(visibility_config="configs/orgslot/common8_incremental2222.json",
                    slot_head_type="arm_f_sam_tail", query_refinement="none",
                    hsam_supervision="soft_prior_aux", incremental_protocol="2222")
@@ -81,7 +83,9 @@ def main(args):
     random.seed(args.seed + misc.get_rank())
     np.random.seed(args.seed + misc.get_rank())
     args.fusion_reference_count = args.fusion_reference_count or 9
-    args.focus_class_ids = ",".join(str(NAMES.index(n) + 1) for n in GROUPS[args.stage_index - 1] if n in ("gallbladder", "esophagus", "pancreas"))
+    args.focus_class_ids = ",".join(str(NAMES.index(n) + 1) for n in GROUPS[args.stage_index - 1] if args.roi_focus_policy == "current" or n in ("gallbladder", "esophagus", "pancreas"))
+    if args.roi_focus_policy == "current":
+        args.organ_roi_aug = True
     if not args.focus_class_ids:
         args.organ_roi_aug = False
     if args.batch_size * args.accum_iter * misc.get_world_size() != 192:
@@ -147,6 +151,8 @@ def main(args):
         args.stage1_checkpoint_sha256 = _sha256(args.previous_checkpoint)
         checkpoint = torch.load(args.previous_checkpoint, map_location="cpu")
         saved = validate_complete(checkpoint, args.stage_index - 1)
+        if saved.get("roi_focus_policy", "small") != args.roi_focus_policy:
+            raise ValueError("Previous stage ROI focus policy mismatch")
         for key in ("train_manifest_sha256", "validation_manifest_sha256", "test_manifest_sha256",
                     "input_size", "token_factor", "slot_tg_depth", "slot_head_type",
                     "slot_head_channels", "query_refinement", "pixel_pe", "fusion_mode",
@@ -189,6 +195,8 @@ def main(args):
             raise ValueError("Resume protocol mismatch: stage2_shared_segmentation")
         if saved.get("hsam_supervision", "none") != args.hsam_supervision:
             raise ValueError("Resume protocol mismatch: hsam_supervision")
+        if saved.get("roi_focus_policy", "small") != args.roi_focus_policy:
+            raise ValueError("Resume ROI focus policy mismatch")
         for key in ("incremental_stage", "slot_head_type", "background_policy", "train_manifest_sha256", "validation_manifest_sha256", "test_manifest_sha256", "stage1_checkpoint_sha256", "batch_size", "accum_iter", "max_optimizer_updates", "warmup_updates", "lr", "weight_decay", "lambda_seg", "lambda_background", "background_preserve_weight", "background_lr_scale", "teacher_low", "teacher_high", "seg_supervision", "fusion_mode", "fusion_reference_count", "query_refinement", "pixel_pe", "seed", "organ_roi_probability", "organ_roi_aug", "focus_class_ids"):
             if saved.get(key) != getattr(args, key, None):
                 raise ValueError("Resume protocol mismatch: " + key)

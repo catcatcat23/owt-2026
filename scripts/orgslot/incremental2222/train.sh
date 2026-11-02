@@ -15,7 +15,7 @@ if [[ -s "$output/final_checkpoint.txt" ]]; then
  "$PYTHON" -c 'import sys; from util.orgslot_incremental2222 import final_checkpoint; print(final_checkpoint(sys.argv[1], int(sys.argv[2])))' "$output" "$stage"
  exit 0
 fi
-args=(--stage_index "$stage" --output_dir "$output" --save_freq 10)
+args=(--roi_focus_policy "${ROI_FOCUS_POLICY:-small}" --stage_index "$stage" --output_dir "$output" --save_freq 10)
 if [[ "$stage" == 1 ]]; then
  printf '0b3571a3e79095686a0b12649735a298aaeb8a0b3bb93a47f3484439ac4a1ec6  %s\n' "$MAE_CHECKPOINT" | sha256sum -c -
  args+=(--mae_init_checkpoint "$MAE_CHECKPOINT" --lpips_state "$LPIPS_STATE")
@@ -33,7 +33,7 @@ if [[ -n "$resume" ]]; then args+=(--resume "$resume"); fi
  --val_data_path "$WORD_ROOT/csv/WORD_Validation_2D_native07072.csv" \
  --test_data_path "$WORD_ROOT/csv/WORD_Test_2D_native07072.csv" \
  --preprocess_summary "$WORD_ROOT/metadata/preprocess_summary.json" \
- --roi_index "$WORD_ROOT/metadata/small_organ_roi_index.json"
+ --roi_index "${ROI_INDEX:-$WORD_ROOT/metadata/small_organ_roi_index.json}"
 
 "$PYTHON" tools/incremental2222_checkpoint.py "$output" "$stage" > "$output/final_checkpoint.txt.tmp"
 mv "$output/final_checkpoint.txt.tmp" "$output/final_checkpoint.txt"

@@ -3,7 +3,7 @@
 文档导航：[docs/README](docs/README.md)；完整正负结果：[消融台账](docs/RESULTS.md)。
 
 开发中的 E cross / SAM-tail 编码器对照：[nnU-Net ResEnc / MedNeXt-B 2D](docs/CONFIGURATION.md#cnn编码器与autopet迁移)。
-仅替换 backbone，CPU验证已通过；2026-10-13已提交两条AutoPET预训练及四条SAM-tail迁移训练依赖链，尚无分割成绩，不计入下方正式指标。
+ResEnc＋编码器原生跳接＋SAM缩小GT已完成：固定0.5 Dice **85.80%**，校准后 **86.42%**；下文CNN backbone对照给出逐器官结果、比较限制和原始JSON。
 
 共享ViT＋器官独立tokens＋共享空间分支的分割/重建框架。后续仅保留以下三个2D主线配置。
 架构图为按代码绘制的AI生成示意图，PNG供GitHub预览，PDF供下载；不是SAM/H-SAM官方复刻。
@@ -237,6 +237,50 @@ soft prior＋aux相对E主要改善胆囊，胰腺并未全面改善。核验来
 验证集校准85.64%，7315测试切片，训练2998655。不混入上表。
 PCDD Offline85.47%、4–4增量83.42%只是不同协议的外部参考，不是同病例、同预处理的复现比较。
 完整历史见[RESULTS](docs/RESULTS.md)。
+
+### CNN backbone对照：ResEnc新结果（2026-11-02）
+
+ResEnc风格2D编码器经AutoPET masked reconstruction预训练，encoder-only迁移；
+S16接OrganSlot，编码器S8/S4直接接入pixel decoder跳接，保留SAM-tail两阶段缩小GT监督。
+这是OrganSlot编码器/空间特征来源对照，**不是完整nnU-Net**；与ViT比较同时涉及编码器、
+预训练实现及跳接来源，不能把收益全部归因于CNN或某一个改动。
+
+旧24例、6990切片，checkpoint-802；训练集前6000切片校准，测试集不调阈值。
+八类按病例Dice再平均，以下固定/校准值均包含后处理，单次训练结果。
+
+| 配置 | 固定0.5 | 校准后 | 训练 → 评估 |
+|---|---:|---:|---|
+| ViT＋SAM缩小GT | 84.41 | 85.23 | 2998657（训练） |
+| **ResEnc＋SAM缩小GT** | **85.80** | **86.42** | **3052383 → 3052384** |
+| ViT＋SAM soft prior＋aux（另一head配置参考） | 84.86 | 85.55 | 150971 |
+
+ResEnc相对对应ViT缩小GT基线：固定阈值 **+1.39**、校准后 **+1.19** 个百分点。
+
+| 器官 | 固定0.5＋后处理 | 校准＋后处理 |
+|---|---:|---:|
+| 脾脏 | 94.55 | 94.92 |
+| 右肾 | 93.80 | 94.61 |
+| 左肾 | 93.74 | 94.34 |
+| 胆囊 | 62.95 | 63.70 |
+| 食管 | 76.23 | 78.05 |
+| 胰腺 | 79.25 | 79.74 |
+| 肝脏 | 95.79 | 95.79 |
+| 胃 | 90.09 | 90.21 |
+| **平均** | **85.80** | **86.42** |
+
+收益主要见于胃、胰腺；胆囊仍是短板，食管并未超过ViT缩小GT的78.50。
+重建Direct后处理 **81.18%**；Indirect后处理 **4.82%**，仍存在严重异常，
+不能将“评估完成”写成重建两条路径均正常。head无后处理：固定85.7873%、校准86.4193%。
+
+训练/评估账号bolinren19/SIP，评估于2026-11-02 18:56完成。
+固定运行版本`6f9a8541ba2b99cef06d0b5b01da553471c669a1`，
+AutoPET预训练100,000更新、下游118,800更新；其余启动参数见配置文档。
+同批ResEnc soft prior＋aux（3052381→3052382）20:12仍训练epoch390，尚无最终成绩；
+MedNeXt结果本次未重新核验，不据此宣称无结果或作排名。
+精确结果见[head测试JSON](artifacts/backbone_resenc_20261102/heads_test.json)、
+[训练集校准JSON](artifacts/backbone_resenc_20261102/heads_train_calibration.json)、
+[重建JSON](artifacts/backbone_resenc_20261102/reconstruction.json)。
+启动与架构配置见[配置文档](docs/CONFIGURATION.md#cnn编码器与autopet迁移)。
 
 ## 三张架构图与差异
 

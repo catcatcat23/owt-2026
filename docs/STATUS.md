@@ -1,3 +1,10 @@
+## 2026-11-02 20:13 CST：CNN结果更新
+
+ResEnc缩小GT 3052383/3052384均COMPLETED；head固定85.8013%、校准86.4217%，
+recon direct_post81.1808%、indirect_post4.8190%。完整八类和证据见[结果台账](RESULTS.md#8-cnn编码器与原生跳接对照)。
+ResEnc soft prior＋aux 3052381仍RUNNING（epoch390），3052382等待依赖。
+以下较早状态为历史快照，不能覆盖本节已完成状态。
+
 ## 2026-11-01 16:32 CST — SAM new-tail continuation
 
 - Original sifansong/XEC `174375` reached TIMEOUT after5days, epoch765 partial. CPU-loaded `stage2_separation_174375/checkpoint-760.pth`: epoch760,112628 optimizer updates, model tensors finite, optimizer/scaler present;6172 updates remain to118800. Resume from epoch761; no GPU smoke.

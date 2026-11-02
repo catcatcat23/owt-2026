@@ -124,7 +124,7 @@ A–D恢复标签为 `archive/20260927/abcd-before-retirement`；归档不等于
 | SAM-tail无引导 | 83.99 | 84.94 | 2984833 | 单纯加tail未明显超过E |
 | SAM全部八类分割监督 | 84.27 | 84.81 | 149295 | 固定升、校准降；不是两分支梯度隔离 |
 | SAM soft prior无aux | 84.28 | 84.68 | 150615 | 固定升、校准降，不能声称全面有效/无效 |
-| SAM soft prior+aux | **84.86** | **85.55** | 150971 | 相比无aux固定+0.58、校准+0.87；当前旧划分主线最好 |
+| SAM soft prior+aux | **84.86** | **85.55** | 150971 | 相比无aux固定+0.58、校准+0.87；当时旧划分ViT主线最好；最新CNN见第8节 |
 | SAM两阶段缩小GT | 84.41 | 85.23 | 2998657 | 比无引导改善，保留主线 |
 | SAM两阶段放大logits | 84.26 | 85.30 | 150173 | 校准略高于缩小GT，差异不证明稳定优势 |
 | SAM M0–M3硬mask | 84.68 | 84.84 | 150175 | 固定有收益、校准未胜无引导；还改变总监督强度 |
@@ -227,14 +227,53 @@ SAM最新与E早期同时改变架构/预算，不能把40→81全部归因于�
 旧参数hash一致、旧binary分数不变、互斥mask不变是三个不同主张。
 SAM direct recon75.28、indirect6.10；不能用低重建loss证明解耦成功。
 
-## 8. CNN最新路线与证据缺口
+## 8. CNN编码器与原生跳接对照
 
-ResEnc风格/MedNeXt-B 2D输出S16替换ViT，保留原Collector和SAM解码；
-不是完整nnU-Net/MedNeXt；2026-10-14将跳接来源由独立浅层CNN替换为编码器S8/S4，
-预训练结构/权重接口保持，旧S16-only实现记录保留在历史档案。本配置尚无Dice。
-AutoPET masked reconstruction预训练 → encoder-only迁移 → SAM soft_aux/downsample两组。
-CPU实现核验不等于GPU性能，当前无Dice。精确接口、参数量、100k预训练预算、
-迁移key和提交链见 [配置](CONFIGURATION.md)；当前任务见 [状态](STATUS.md)。
+### ResEnc：2026-11-02完成结果
+
+ResEnc风格2D编码器经AutoPET masked reconstruction预训练，encoder-only迁移；
+S16接OrganSlot，编码器S8/S4直接接入pixel decoder跳接，保留SAM-tail两阶段缩小GT监督。
+这是OrganSlot编码器/空间特征来源对照，**不是完整nnU-Net**；与ViT比较同时涉及编码器、
+预训练实现及跳接来源，不能把收益全部归因于CNN或某一个改动。
+
+旧24例、6990切片，checkpoint-802；训练集前6000切片校准，测试集不调阈值。
+八类按病例Dice再平均，以下固定/校准值均包含后处理，单次训练结果。
+
+| 配置 | 固定0.5 | 校准后 | 训练 → 评估 |
+|---|---:|---:|---|
+| ViT＋SAM缩小GT | 84.41 | 85.23 | 2998657（训练） |
+| **ResEnc＋SAM缩小GT** | **85.80** | **86.42** | **3052383 → 3052384** |
+| ViT＋SAM soft prior＋aux（另一head配置参考） | 84.86 | 85.55 | 150971 |
+
+ResEnc相对对应ViT缩小GT基线：固定阈值 **+1.39**、校准后 **+1.19** 个百分点。
+
+| 器官 | 固定0.5＋后处理 | 校准＋后处理 |
+|---|---:|---:|
+| 脾脏 | 94.55 | 94.92 |
+| 右肾 | 93.80 | 94.61 |
+| 左肾 | 93.74 | 94.34 |
+| 胆囊 | 62.95 | 63.70 |
+| 食管 | 76.23 | 78.05 |
+| 胰腺 | 79.25 | 79.74 |
+| 肝脏 | 95.79 | 95.79 |
+| 胃 | 90.09 | 90.21 |
+| **平均** | **85.80** | **86.42** |
+
+收益主要见于胃、胰腺；胆囊仍是短板，食管并未超过ViT缩小GT的78.50。
+重建Direct后处理 **81.18%**；Indirect后处理 **4.82%**，仍存在严重异常，
+不能将“评估完成”写成重建两条路径均正常。head无后处理：固定85.7873%、校准86.4193%。
+
+训练/评估账号bolinren19/SIP，评估于2026-11-02 18:56完成。
+固定运行版本`6f9a8541ba2b99cef06d0b5b01da553471c669a1`，
+AutoPET预训练100,000更新、下游118,800更新；其余启动参数见配置文档。
+同批ResEnc soft prior＋aux（3052381→3052382）20:12仍训练epoch390，尚无最终成绩；
+MedNeXt结果本次未重新核验，不据此宣称无结果或作排名。
+精确结果见[head测试JSON](../artifacts/backbone_resenc_20261102/heads_test.json)、
+[训练集校准JSON](../artifacts/backbone_resenc_20261102/heads_train_calibration.json)、
+[重建JSON](../artifacts/backbone_resenc_20261102/reconstruction.json)。
+启动与架构配置见[配置文档](CONFIGURATION.md#cnn编码器与autopet迁移)。
+
+原始运行目录：`bolinren19/SIP:.worktrees/cnn_skips_6f9a854/Results/OrganSlotBank/evaluation/Common8/WORD_2D/CNN_ResEnc_native_downsample_gt_ckpt802_{heads_test,heads_train_calibration,reconstruction_fixedthr002}/results.json`。远端可读JSON副本见上方链接；未复制模型或预测缓存。
 
 仍需核验而非擅自定论：A与C/D阈值、F dot/P2/PE/Collector完整结果、
 LossBalance-v2独立最终表、探针最终数值、替换病例探索结果、旧E只slot完整指标、

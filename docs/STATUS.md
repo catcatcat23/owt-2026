@@ -1,3 +1,10 @@
+## 2026-11-02：MedNeXt历史续训结果补录
+
+已核验sifansong/XEC 174304/174305均COMPLETED（10月28日），并非新完成任务。
+MedNeXt缩小GT：head固定85.2983%、校准86.2684%；recon direct_post82.1326%、
+indirect_post7.4181%（异常）。README与RESULTS已补齐ViT/ResEnc/MedNeXt对照。
+MedNeXt soft prior＋aux原163398超时、166492取消，本次未找到最终评估证据。
+
 ## 2026-11-02 20:13 CST：CNN结果更新
 
 ResEnc缩小GT 3052383/3052384均COMPLETED；head固定85.8013%、校准86.4217%，

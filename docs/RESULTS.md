@@ -267,13 +267,57 @@ ResEnc相对对应ViT缩小GT基线：固定阈值 **+1.39**、校准后 **+1.19
 固定运行版本`6f9a8541ba2b99cef06d0b5b01da553471c669a1`，
 AutoPET预训练100,000更新、下游118,800更新；其余启动参数见配置文档。
 同批ResEnc soft prior＋aux（3052381→3052382）20:12仍训练epoch390，尚无最终成绩；
-MedNeXt结果本次未重新核验，不据此宣称无结果或作排名。
+MedNeXt缩小GT已核验完成，见下方MedNeXt对照；soft prior＋aux最终结果尚未核验。
 精确结果见[head测试JSON](../artifacts/backbone_resenc_20261102/heads_test.json)、
 [训练集校准JSON](../artifacts/backbone_resenc_20261102/heads_train_calibration.json)、
 [重建JSON](../artifacts/backbone_resenc_20261102/reconstruction.json)。
 启动与架构配置见[配置文档](CONFIGURATION.md#cnn编码器与autopet迁移)。
 
 原始运行目录：`bolinren19/SIP:.worktrees/cnn_skips_6f9a854/Results/OrganSlotBank/evaluation/Common8/WORD_2D/CNN_ResEnc_native_downsample_gt_ckpt802_{heads_test,heads_train_calibration,reconstruction_fixedthr002}/results.json`。远端可读JSON副本见上方链接；未复制模型或预测缓存。
+
+### MedNeXt-B原生跳接对照（2026-11-02补录）
+
+MedNeXt-v1 B风格**2D编码器**（不是完整MedNeXt分割网络），AutoPET masked
+reconstruction预训练、encoder-only迁移，S16接OrganSlot、S8/S4接pixel decoder，
+SAM-tail使用两阶段缩小GT监督。与上方ResEnc使用相同旧24例/6990切片、
+训练集前6000切片校准、checkpoint-802、固定/校准后处理口径。
+
+| Backbone＋SAM缩小GT | 固定0.5＋后处理 | 校准＋后处理 | Recon Direct＋后处理 |
+|---|---:|---:|---:|
+| ViT＋MAE encoder | 84.41 | 85.23 | —（本次未复核） |
+| ResEnc＋AutoPET MIM encoder | **85.80** | **86.42** | 81.18 |
+| MedNeXt-B＋AutoPET MIM encoder | 85.30 | 86.27 | **82.13** |
+
+MedNeXt相对ViT：固定 **+0.89**、校准 **+1.04** 个百分点。
+相对ResEnc：固定−0.50、校准−0.15，但食管、胰腺和重建Direct更高。
+单次结果不能证明0.15个百分点差距稳定；ViT与CNN还涉及跳接及预训练实现差异。
+
+| 器官（校准＋后处理） | ViT缩小GT | ResEnc缩小GT | MedNeXt缩小GT |
+|---|---:|---:|---:|
+| 脾脏 | 94.83 | 94.92 | **95.00** |
+| 右肾 | **94.66** | 94.61 | 94.25 |
+| 左肾 | **94.47** | 94.34 | 93.85 |
+| 胆囊 | 61.59 | **63.70** | 62.61 |
+| 食管 | 78.50 | 78.05 | **78.69** |
+| 胰腺 | 76.73 | 79.74 | **80.35** |
+| 肝脏 | 95.32 | **95.79** | 95.45 |
+| 胃 | 85.77 | **90.21** | 89.96 |
+| **平均** | **85.23** | **86.42** | **86.27** |
+
+MedNeXt固定/校准无后处理分别85.2768%/86.2547%；Indirect重建后处理7.4181%，
+仍异常，不作为正常分割成绩。精确结果及每类固定阈值指标：
+[head测试JSON](../artifacts/backbone_mednext_20261102/heads_test.json)、
+[训练集校准JSON](../artifacts/backbone_mednext_20261102/heads_train_calibration.json)、
+[重建JSON](../artifacts/backbone_mednext_20261102/reconstruction.json)。
+
+训练链sifansong/XEC：原163400超时 → **174304续训完成 → 174305评估完成**，
+评估完成时间2026-10-28 22:23 CST。原训练运行版本
+`6f9a8541ba2b99cef06d0b5b01da553471c669a1`，续训/评估固定版本
+`9c0131f868112c6f1323001d6d6d9b40e7948ad4`；最终checkpoint-802。
+原始结果位于`sifansong/XEC:/gpfs/work/aac/sifansong/worktrees/continuations_9c0131f/Results/OrganSlotBank/evaluation/Common8/WORD_2D/CNN_MedNeXt_downGT_continue_174304_ckpt802_{heads_test,heads_train_calibration,reconstruction_fixedthr002}/results.json`。
+
+**MedNeXt soft prior＋aux另列**：原训练163398为TIMEOUT，替代评估166492已取消；
+本次未找到可核验的最终评估，不填入成绩表，也不据此认定该方法无效。
 
 仍需核验而非擅自定论：A与C/D阈值、F dot/P2/PE/Collector完整结果、
 LossBalance-v2独立最终表、探针最终数值、替换病例探索结果、旧E只slot完整指标、

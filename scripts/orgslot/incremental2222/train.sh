@@ -33,7 +33,7 @@ if [[ -n "$resume" ]]; then args+=(--resume "$resume"); fi
  --val_data_path "$WORD_ROOT/csv/WORD_Validation_2D_native07072.csv" \
  --test_data_path "$WORD_ROOT/csv/WORD_Test_2D_native07072.csv" \
  --preprocess_summary "$WORD_ROOT/metadata/preprocess_summary.json" \
- --roi_index "${ROI_INDEX:-$WORD_ROOT/metadata/small_organ_roi_index.json}"
+ --roi_index "${INCREMENTAL_ROI_INDEX:-$WORD_ROOT/metadata/small_organ_roi_index.json}"
 
 "$PYTHON" tools/incremental2222_checkpoint.py "$output" "$stage" > "$output/final_checkpoint.txt.tmp"
 mv "$output/final_checkpoint.txt.tmp" "$output/final_checkpoint.txt"

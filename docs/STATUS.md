@@ -121,3 +121,16 @@ Only Stage1, continuation, and evaluation are submitted before deciding later st
 Evaluation protocol is unchanged. New root: anteng/XEC
 `/gpfs/work/aac/antengcai23/artifacts/inc2222_roi_20261102`.
 Job IDs and pinned source are recorded in its `runs/jobs.txt`.
+
+Submitted 2026-11-02 18:38 CST, antengcai23/XEC, Slurm account sifansong,
+QoS 8gpus: train **190004** (Priority), continuation **190005**
+(afterany:190004), evaluation **190006** (afterok:190005).
+Pinned source `744355de85fb359f3000f1b66f7d340ab6621663`, runtime
+`/gpfs/work/aac/antengcai23/worktrees/inc2222_roi_744355de`.
+Source tar SHA256 `349a53c2465c451c652747676b776a5abbd187f2a974246872c970039764af36` verified remotely.
+Training/continuation: 4 A800, 24 CPU, 192 GiB, 5 days each;
+evaluation: 1 RTX4090, 10 CPU, 128 GiB, 1 day.
+CPU checks: Python parse, shell syntax, revision guard, data manifest validation,
+and Stage1 ROI geometry passed. Positive pools: spleen 4455, right kidney 4887;
+maximum bounding-box diagonals 311.23 and 197.71 pixels (both below 384).
+GPU smoke was not run; formal training was pending at submission.

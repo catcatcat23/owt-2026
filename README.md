@@ -528,3 +528,10 @@ PSEM-v3主要改善WORD Indirect而非跨数据集全面提升。
 `/gpfs/work/aac/sifansong/worktrees/inc44_newtail_ea8780a`；产物
 `/gpfs/work/aac/sifansong/artifacts/inc44_newtail_20261027/`。
 CPU新tail梯度/共享性、旧类输出不变、原配置兼容及严格评估加载检查通过；未运行GPU冒烟。
+
+### 后续增量实验与报告约定（2026-11-03）
+
+按[增量执行清单](docs/INCREMENTAL_READOUT_ABLATION.md)逐项补齐WORD/BTCV主表设置。
+每次结果必须列出逐器官当前值、对应八类Offline及差值，最终阶段同时列PCDD Old/New/All及差值。
+PCDD未核验的逐器官值不填造；跨病例划分的Offline只作为单独参考。
+当前ROI Stage1和BTCV Offline是前置任务，清单不表示全部已提交。

@@ -108,9 +108,9 @@ def parse_class_configuration(path, stage_name="base"):
         if item.name in stage.visible_slots
     }
     config = json.loads(Path(path).read_text())
-    if config.get("incremental_protocol") == "2222":
+    if config.get("incremental_protocol") in ("2222", "pcdd_44", "pcdd_422", "pcdd_41111", "pcdd_71", "pcdd_offline"):
         from util.orgslot_incremental2222 import seen
-        names = seen(int(config["stage_index"]))
+        names = seen(int(config["stage_index"]), config["incremental_protocol"])
         if tuple(stage.visible_slots) != names:
             raise ValueError("2222 evaluation class order mismatch")
         expected_ids = list(range(len(names)))
@@ -242,9 +242,9 @@ def build_model(
             raise ValueError("New4 tail requires new4 pixels")
         from util.orgslot_incremental44 import install_stage_tail
         install_stage_tail(model)
-    if checkpoint_value(checkpoint, "incremental_protocol") == "2222":
+    if checkpoint_value(checkpoint, "incremental_protocol") in ("2222", "pcdd_44", "pcdd_422", "pcdd_41111", "pcdd_71", "pcdd_offline"):
         from util.orgslot_incremental2222 import restore_groups
-        restore_groups(model, int(checkpoint_value(checkpoint, "stage_index")))
+        restore_groups(model, int(checkpoint_value(checkpoint, "stage_index")), checkpoint_value(checkpoint, "incremental_protocol"))
     full_state = checkpoint["model"]
     state = {
         key: value

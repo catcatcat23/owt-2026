@@ -13,14 +13,30 @@ GROUPS = (("spleen", "right_kidney"), ("left_kidney", "gallbladder"),
 NAMES = sum(GROUPS, ())
 
 
-def seen(stage):
-    if stage not in range(1, 5):
+PROTOCOL_SIZES = {"2222": (2, 2, 2, 2), "pcdd_44": (4, 4),
+                  "pcdd_422": (4, 2, 2), "pcdd_41111": (4, 1, 1, 1, 1),
+                  "pcdd_71": (7, 1), "pcdd_offline": (8,)}
+
+
+def protocol_groups(protocol="2222"):
+    sizes = PROTOCOL_SIZES[protocol]
+    offset, result = 0, []
+    for size in sizes:
+        result.append(NAMES[offset:offset + size])
+        offset += size
+    return tuple(result)
+
+
+def seen(stage, protocol="2222"):
+    groups = protocol_groups(protocol)
+    if stage not in range(1, len(groups) + 1):
         raise ValueError("Stage must be 1..4")
-    return ("background",) + sum(GROUPS[:stage], ())
+    return ("background",) + sum(groups[:stage], ())
 
 
-def install_group(model, stage):
-    if stage not in (2, 3, 4):
+def install_group(model, stage, protocol="2222"):
+    groups = protocol_groups(protocol)
+    if stage not in range(2, len(groups) + 1):
         raise ValueError("Only incremental stages have private pixels")
     if model.pixel_query_decoder.readout != "sam_tail":
         raise ValueError("2222 requires SAM-tail")
@@ -37,26 +53,27 @@ def install_group(model, stage):
     model.stage_pixel_decoders[key] = pixels
     # Same trained base interaction for all later groups; no previous-group overwrite.
     interaction = SlotTokenInteraction(model.pixel_query_decoder)
-    for name in GROUPS[stage - 1]:
+    for name in groups[stage - 1]:
         model.slot_bank.get_slot(name).interaction = interaction
         model.slot_pixel_groups[name] = key
 
 
-def restore_groups(model, stage):
-    if tuple(model.slot_names) != seen(stage):
+def restore_groups(model, stage, protocol="2222"):
+    if tuple(model.slot_names) != seen(stage, protocol):
         raise ValueError("Checkpoint slot order mismatch")
     for index in range(2, stage + 1):
-        install_group(model, index)
+        install_group(model, index, protocol)
 
 
-def configure_group(model, stage, background_policy="separation"):
+def configure_group(model, stage, background_policy="separation", protocol="2222"):
+    groups = protocol_groups(protocol)
     if background_policy != "separation":
         raise ValueError("2222 pins background separation")
     model.requires_grad_(False)
     model.current_pixel_group = "stage" + str(stage)
     model.stage_pixel_decoders[model.current_pixel_group].requires_grad_(True)
-    model.incremental_old_names = sum(GROUPS[:stage - 1], ())
-    model.incremental_new_names = GROUPS[stage - 1]
+    model.incremental_old_names = sum(groups[:stage - 1], ())
+    model.incremental_new_names = groups[stage - 1]
     for name in model.incremental_new_names:
         slot = model.slot_bank.get_slot(name)
         slot.requires_grad_(True)
@@ -67,10 +84,10 @@ def configure_group(model, stage, background_policy="separation"):
         getattr(background, name).requires_grad_(True)
 
 
-def validate_complete(checkpoint, stage):
+def validate_complete(checkpoint, stage, protocol="2222"):
     saved = checkpoint["args"]
     saved = saved if isinstance(saved, dict) else vars(saved)
-    if (saved.get("incremental_protocol") != "2222" or
+    if (saved.get("incremental_protocol") != protocol or
             saved.get("stage_index") != stage or saved.get("max_optimizer_updates") != 118800):
         raise ValueError("Require preceding 2222 stage with 118800 updates")
     steps = [float(v['step']) for v in checkpoint.get('optimizer', {}).get('state', {}).values() if 'step' in v]
@@ -79,7 +96,7 @@ def validate_complete(checkpoint, stage):
     return saved
 
 
-def final_checkpoint(run, stage):
+def final_checkpoint(run, stage, protocol="2222"):
     run = Path(run)
     records = [json.loads(s) for s in (run / 'log.txt').read_text().splitlines() if s.strip()]
     if not records or records[-1].get('optimizer_updates') != 118800:
@@ -89,7 +106,7 @@ def final_checkpoint(run, stage):
         raise ValueError("Non-finite final log")
     path = run / ('checkpoint-%s.pth' % last['epoch'])
     checkpoint = torch.load(path, map_location='cpu')
-    validate_complete(checkpoint, stage)
+    validate_complete(checkpoint, stage, protocol)
     if checkpoint['epoch'] != last['epoch']:
         raise ValueError("Checkpoint/log mismatch")
     for name, value in checkpoint['model'].items():

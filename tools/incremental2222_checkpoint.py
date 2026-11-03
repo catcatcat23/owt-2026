@@ -10,7 +10,7 @@ if __package__ in (None, ''):
 from util.orgslot_incremental2222 import final_checkpoint
 
 
-def resume_checkpoint(run, stage):
+def resume_checkpoint(run, stage, protocol="2222"):
     paths = list(Path(run).glob('checkpoint-*.pth'))
     if not paths:
         if (Path(run)/'log.txt').exists():
@@ -19,7 +19,7 @@ def resume_checkpoint(run, stage):
     path = max(paths, key=lambda p: int(p.stem.split('-')[-1]))
     ckpt = torch.load(path, map_location='cpu')
     args = ckpt['args'] if isinstance(ckpt['args'], dict) else vars(ckpt['args'])
-    if args.get('incremental_protocol') != '2222' or args.get('stage_index') != stage:
+    if args.get('incremental_protocol') != protocol or args.get('stage_index') != stage:
         raise ValueError('Resume protocol mismatch')
     steps = [float(v['step']) for v in ckpt.get('optimizer', {}).get('state', {}).values() if 'step' in v]
     if not steps or not all(math.isfinite(v) for v in steps) or not 0 < max(steps) <= 118800:
@@ -33,7 +33,8 @@ def resume_checkpoint(run, stage):
 if __name__ == '__main__':
     p = argparse.ArgumentParser(__doc__)
     p.add_argument('run', type=Path)
-    p.add_argument('stage', type=int, choices=range(1,5))
+    p.add_argument('stage', type=int, choices=range(1,6))
     p.add_argument('--resume', action='store_true')
+    p.add_argument('--protocol', default='2222')
     a = p.parse_args()
-    print(resume_checkpoint(a.run, a.stage) if a.resume else final_checkpoint(a.run, a.stage))
+    print(resume_checkpoint(a.run, a.stage, a.protocol) if a.resume else final_checkpoint(a.run, a.stage, a.protocol))

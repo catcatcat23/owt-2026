@@ -148,3 +148,12 @@ CPU checks: Python parse, shell syntax, revision guard, data manifest validation
 and Stage1 ROI geometry passed. Positive pools: spleen 4455, right kidney 4887;
 maximum bounding-box diagonals 311.23 and 197.71 pixels (both below 384).
 GPU smoke was not run; formal training was pending at submission.
+
+## 2026-11-03：补齐任务准备
+
+PCDD suite已实现可变分组；拟排WORD Offline/4+2+2/7+1，BTCV4+4/4+2+2/4+1+1+1+1/7+1。
+保留原WORD4+4已完成结果和BTCV Offline在训链，不重复启动。
+当前ROI Stage1的后续全ROI阶段单独设置决策hold，不擅自释放此前暂停的旧任务链。
+提交回执由各账号`artifacts/pcdd_suite_20261103/{WORD,BTCV}/PROTOCOL/jobs.txt`保存。
+CPU回归：旧2+2+2+2两项通过；新分组可见标签、单新类梯度/旧logits保持及strict reload两项通过。
+未运行GPU smoke，正式训练状态以Slurm为准。

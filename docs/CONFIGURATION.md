@@ -674,3 +674,27 @@ User-approved replacement for the withdrawn full-field resize run and blocked im
 - Original body-window audit: all30cases/6775slices retain all eight-class GT; image-center512 still truncates img0005 liver. Evidence: local `artifacts/btcv_body_center512_20261031/{summary.json,per_slice.jsonl,runtime_audit.json}`. No performance result yet.
 
 CPU verification on2026-10-31: production helper audited30cases/6775slices with zero clipped GT cases; strict MAE encoder transfer loaded77 tensors and regenerated position embeddings of shape[1,1025,768]. Checked signed-padding pixel identity and label-independent window choice. No GPU smoke was run; GPU memory/startup remain unverified until formal training starts.
+
+## PCDD suite：可变阶段与任务链（2026-11-03）
+
+复用`main_pretrain_orgslot_incremental2222.py`，新增`--protocol`：
+`pcdd_44/pcdd_422/pcdd_41111/pcdd_71/pcdd_offline`，默认`2222`不变。
+`--dataset_protocol WORD|BTCV`强制核对病例集合；WORD official96/26/24与448中心裁剪，
+BTCV24/6与身体中心512，无独立验证，训练集校准。各数据集ROI384、spacing0.7/0.7/2。
+Stage1从同一AutoPET MAE encoder开始，严禁Offline八类权重初始化增量Stage1。
+后续阶段新建该阶段pixel decoder与组共享token交互，训练新slot及背景分离模块；
+旧slot、ViT、旧空间分支、SAM-tail和重建decoder冻结。每阶段118800更新，
+4GPU×batch16×accum3=192，lr7.5e-5，warmup5940，BF16，clip1。
+历史small ROI只强化当前可见的胆囊/食管/胰腺；全器官ROI另列消融。
+
+入口`scripts/orgslot/pcdd_suite/submit.sh`，必需环境变量：
+`EXPERIMENT_WORKDIR EXPECTED_COMMIT SUITE_ROOT DATA_ROOT DATASET PROTOCOL ARM_F_TARGET MAE_CHECKPOINT`。
+可选`PREDECESSOR_JOB`设置前置评估，`OFFLINE_RESULT`指定匹配的基准，
+`FIRST_STAGE`用于已有Stage1后的接续，`HOLD_FIRST=1`暂挂尚需决策的链。
+提交记录在`SUITE_ROOT/DATASET/PROTOCOL/jobs.txt`，最终依赖写`last_job.txt`。
+每阶段训练→afterany续训→afterok评估→下一阶段；续训无有效checkpoint则停止，不从头重跑。
+XEC 4A800/24CPU/192G/5天，评估1RTX4090/10CPU/128G/1天。
+报告`comparison.json`包含四种head口径、逐器官Offline差值和PCDD分组参考差值。
+PCDD逐器官缺失值保留null；同病例只是比较必要条件，训练/初始化/采样还需对照本记录。
+原始评估器dataset字段历史写死WORD，BTCV报告以suite的DATASET和manifest来源为准，
+不能单看旧JSON的dataset字段推断数据集。

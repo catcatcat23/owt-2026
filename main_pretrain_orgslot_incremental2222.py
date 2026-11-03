@@ -29,7 +29,7 @@ import timm.optim.optim_factory as optim_factory
 
 
 from main_pretrain_orgslot_incremental44 import parser as base_parser, train_stage2
-from util.orgslot_incremental2222 import GROUPS, NAMES, seen, restore_groups, install_group, configure_group, validate_complete
+from util.orgslot_incremental2222 import GROUPS, NAMES, seen, restore_groups, install_group, configure_group, validate_complete, protocol_groups, PROTOCOL_SIZES
 
 
 def parser():
@@ -37,8 +37,10 @@ def parser():
     for action in p._actions:
         if action.dest == "incremental_stage":
             action.required = False
-    p.add_argument("--stage_index", type=int, choices=(1, 2, 3, 4), required=True)
+    p.add_argument("--stage_index", type=int, choices=(1, 2, 3, 4, 5), required=True)
     p.add_argument("--previous_checkpoint", default="")
+    p.add_argument("--protocol", choices=tuple(PROTOCOL_SIZES), default="2222")
+    p.add_argument("--dataset_protocol", choices=("WORD", "BTCV"), default="WORD")
     p.add_argument("--roi_focus_policy", choices=("small", "current"), default="small",
                    help="ROI pools: historical small organs or all newly supervised organs")
     p.set_defaults(visibility_config="configs/orgslot/common8_incremental2222.json",
@@ -48,6 +50,10 @@ def parser():
 
 
 def main(args):
+    args.incremental_protocol = args.protocol
+    groups = protocol_groups(args.protocol)
+    if not 1 <= args.stage_index <= len(groups):
+        raise ValueError("Stage outside protocol")
     args.incremental_stage = "stage" + str(args.stage_index)
     if (args.slot_head_type != "arm_f_sam_tail" or args.query_refinement != "none" or
             args.hsam_supervision != "soft_prior_aux" or args.dimension != "2D"):
@@ -83,7 +89,7 @@ def main(args):
     random.seed(args.seed + misc.get_rank())
     np.random.seed(args.seed + misc.get_rank())
     args.fusion_reference_count = args.fusion_reference_count or 9
-    args.focus_class_ids = ",".join(str(NAMES.index(n) + 1) for n in GROUPS[args.stage_index - 1] if args.roi_focus_policy == "current" or n in ("gallbladder", "esophagus", "pancreas"))
+    args.focus_class_ids = ",".join(str(NAMES.index(n) + 1) for n in groups[args.stage_index - 1] if args.roi_focus_policy == "current" or n in ("gallbladder", "esophagus", "pancreas"))
     if args.roi_focus_policy == "current":
         args.organ_roi_aug = True
     if not args.focus_class_ids:
@@ -96,27 +102,39 @@ def main(args):
     preprocess = json.loads(Path(args.preprocess_summary).read_text())["config"]
     if not np.allclose(preprocess["spacing_mm"], args.expected_spacing, rtol=0, atol=1e-6) or preprocess.get("offline_spatial_matrix") != "native_after_resampling":
         raise ValueError("Require native 0.7/0.7/2 resampling")
-    if args.input_size != 448 or args.global_crop_size != 448 or args.roi_crop_size != 384:
-        raise ValueError("Require 448 input/global crop and 384 ROI")
+    required_size = 512 if args.dataset_protocol == "BTCV" else 448
+    if (args.input_size != required_size or args.global_crop_size != required_size or args.roi_crop_size != 384
+            or args.body_center != (args.dataset_protocol == "BTCV")):
+        raise ValueError("Require WORD center448 / BTCV body512 and ROI384")
     if args.organ_roi_aug:
         roi = json.loads(Path(args.roi_index).read_text())
         if roi["manifest_sha256"] != args.train_manifest_sha256:
             raise ValueError("ROI index/manifest mismatch")
     classes, stages = load_visibility_config(args.visibility_config)
-    for index in range(1, 5):
-        expected = seen(1) if index == 1 else GROUPS[index - 1]
+    for index in range(1, len(groups) + 1):
+        expected = seen(1, args.protocol) if index == 1 else groups[index - 1]
         if stages["stage" + str(index)].visible_slots != expected:
             raise ValueError("Unexpected 2222 class order")
     raw, dataset = _build_dataset(args, args.data_path, classes, stages[args.incremental_stage], True, None)
-    val_raw, _ = _build_dataset(args, args.val_data_path, classes, stages[args.incremental_stage], False, None)
     test_raw, _ = _build_dataset(args, args.test_data_path, classes, stages[args.incremental_stage], False, None)
-    assert_case_splits_disjoint({"train": raw.case_ids, "validation": val_raw.case_ids, "test": test_raw.case_ids})
-    split_path = Path(__file__).resolve().parent / "configs/orgslot/word_official96_seed42.json"
+    cohorts = {"Training": raw.case_ids, "Test": test_raw.case_ids}
+    if args.dataset_protocol == "BTCV":
+        if not args.no_validation or args.val_data_path != args.data_path:
+            raise ValueError("BTCV uses explicit train/test-only calibration")
+        args.validation_manifest_sha256 = None
+        split_path = Path(__file__).resolve().parent / "configs/orgslot/btcv_offline_seed42.json"
+    else:
+        if args.no_validation:
+            raise ValueError("WORD requires held-out validation")
+        val_raw, _ = _build_dataset(args, args.val_data_path, classes, stages[args.incremental_stage], False, None)
+        cohorts["Validation"] = val_raw.case_ids
+        split_path = Path(__file__).resolve().parent / "configs/orgslot/word_official96_seed42.json"
+    assert_case_splits_disjoint(cohorts)
     expected_splits = json.loads(split_path.read_text())["splits"]
-    for split_name, case_ids in (("Training", raw.case_ids), ("Validation", val_raw.case_ids), ("Test", test_raw.case_ids)):
-        expected_ids = {item["case_id"] for item in expected_splits[split_name]}
+    for split_name, case_ids in cohorts.items():
+        expected_ids = {item["case_id"] if isinstance(item, dict) else item for item in expected_splits[split_name]}
         if set(case_ids) != expected_ids:
-            raise ValueError("Require the pinned official-pool split: " + split_name)
+            raise ValueError("Require pinned split: " + split_name)
     args.split_plan_sha256 = _sha256(split_path)
     sampler = DistributedSampler(dataset, num_replicas=misc.get_world_size(), rank=misc.get_rank(), shuffle=True, seed=args.seed)
     loader = DataLoader(dataset, sampler=sampler, batch_size=args.batch_size, num_workers=args.num_workers,
@@ -125,7 +143,7 @@ def main(args):
     if not per_epoch or args.max_optimizer_updates <= 0:
         raise ValueError("Insufficient batches/update budget")
     build_stage = max(1, args.stage_index - 1)
-    specs = [{"name": n, "raw_class_id": i} for i, n in enumerate(seen(build_stage))]
+    specs = [{"name": n, "raw_class_id": i} for i, n in enumerate(seen(build_stage, args.protocol))]
     net = mae_vit_base_patch16(img_size=args.input_size, norm_pix_loss=False,
         model_args=_model_args(args, len(specs)), slot_specs=specs, slot_tg_depth=args.slot_tg_depth,
         fusion_mode=args.fusion_mode, fusion_reference_count=args.fusion_reference_count,
@@ -143,29 +161,29 @@ def main(args):
             net.perceptual_loss = LPIPS(vgg_pretrained=False).eval()
             net.perceptual_loss.load_state_dict(torch.load(args.lpips_state, map_location="cpu"), strict=True)
             net.perceptual_loss.requires_grad_(False)
-        args.roi_class_weights = [0.0, 1.0, 1.0]
+        args.roi_class_weights = [0.0] + [1.0] * len(groups[0])
         model = net
     else:
         if not args.previous_checkpoint or args.mae_init_checkpoint:
             raise ValueError("Later stages require the preceding 2222 checkpoint only")
         args.stage1_checkpoint_sha256 = _sha256(args.previous_checkpoint)
         checkpoint = torch.load(args.previous_checkpoint, map_location="cpu")
-        saved = validate_complete(checkpoint, args.stage_index - 1)
+        saved = validate_complete(checkpoint, args.stage_index - 1, args.protocol)
         if saved.get("roi_focus_policy", "small") != args.roi_focus_policy:
             raise ValueError("Previous stage ROI focus policy mismatch")
         for key in ("train_manifest_sha256", "validation_manifest_sha256", "test_manifest_sha256",
                     "input_size", "token_factor", "slot_tg_depth", "slot_head_type",
                     "slot_head_channels", "query_refinement", "pixel_pe", "fusion_mode",
-                    "fusion_reference_count", "seed", "hsam_supervision"):
+                    "fusion_reference_count", "seed", "hsam_supervision", "body_center", "no_validation", "organ_roi_probability"):
             if saved.get(key) != getattr(args, key):
                 raise ValueError("Previous stage protocol mismatch: " + key)
-        restore_groups(net, args.stage_index - 1)
+        restore_groups(net, args.stage_index - 1, args.protocol)
         net.load_state_dict({k: v for k, v in checkpoint["model"].items() if not k.startswith("perceptual_loss.")}, strict=True)
         teacher = copy.deepcopy(net).requires_grad_(False).eval().to(device)
-        for name in GROUPS[args.stage_index - 1]:
+        for name in groups[args.stage_index - 1]:
             net.append_slot(name, NAMES.index(name) + 1, init_from="background")
-        install_group(net, args.stage_index)
-        configure_group(net, args.stage_index, args.background_policy)
+        install_group(net, args.stage_index, args.protocol)
+        configure_group(net, args.stage_index, args.background_policy, args.protocol)
         model = Incremental44Objective(net, args)
     model.to(device)
     groups = optim_factory.add_weight_decay(net, args.weight_decay)
@@ -183,7 +201,7 @@ def main(args):
     if args.resume:
         checkpoint = torch.load(args.resume, map_location="cpu")
         saved = checkpoint["args"] if isinstance(checkpoint["args"], dict) else vars(checkpoint["args"])
-        if saved.get("incremental_protocol") != "2222" or saved.get("stage_index") != args.stage_index:
+        if saved.get("incremental_protocol") != args.protocol or saved.get("stage_index") != args.stage_index:
             raise ValueError("Resume stage mismatch")
         if saved.get("stage2_tail", "shared") != args.stage2_tail:
             raise ValueError("Resume protocol mismatch: stage2_tail")
@@ -197,7 +215,7 @@ def main(args):
             raise ValueError("Resume protocol mismatch: hsam_supervision")
         if saved.get("roi_focus_policy", "small") != args.roi_focus_policy:
             raise ValueError("Resume ROI focus policy mismatch")
-        for key in ("incremental_stage", "slot_head_type", "background_policy", "train_manifest_sha256", "validation_manifest_sha256", "test_manifest_sha256", "stage1_checkpoint_sha256", "batch_size", "accum_iter", "max_optimizer_updates", "warmup_updates", "lr", "weight_decay", "lambda_seg", "lambda_background", "background_preserve_weight", "background_lr_scale", "teacher_low", "teacher_high", "seg_supervision", "fusion_mode", "fusion_reference_count", "query_refinement", "pixel_pe", "seed", "organ_roi_probability", "organ_roi_aug", "focus_class_ids"):
+        for key in ("incremental_stage", "slot_head_type", "background_policy", "train_manifest_sha256", "validation_manifest_sha256", "test_manifest_sha256", "stage1_checkpoint_sha256", "batch_size", "accum_iter", "max_optimizer_updates", "warmup_updates", "lr", "weight_decay", "lambda_seg", "lambda_background", "background_preserve_weight", "background_lr_scale", "teacher_low", "teacher_high", "seg_supervision", "fusion_mode", "fusion_reference_count", "query_refinement", "pixel_pe", "seed", "organ_roi_probability", "organ_roi_aug", "focus_class_ids", "body_center", "no_validation"):
             if saved.get(key) != getattr(args, key, None):
                 raise ValueError("Resume protocol mismatch: " + key)
         misc.load_model(args, net, optimizer, scaler)

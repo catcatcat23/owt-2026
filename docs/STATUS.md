@@ -162,3 +162,27 @@ CPU回归：旧2+2+2+2两项通过；新分组可见标签、单新类梯度/旧
 本次初始等待任务191465–191482将由新队列替换；不改变运行任务或历史hold任务。
 后续阶段已配置但尚无Job ID，必须区分“自动接续计划”与“已进入Slurm”。
 CPU模拟调度测试覆盖三任务依赖、hold/release和重复提交拒绝；无GPU smoke。
+
+### 2026-11-03 17:18 CST：新队列提交回执
+
+| 账号/集群 | 已提交训练→续训→评估 | 前置评估 | 后续自动接续（尚无Job ID） |
+|---|---|---|---|
+| antengcai23/XEC | WORD Offline `191497→191498→191499` | `190006` | WORD 4+2+2三阶段→7+1两阶段 |
+| sifansong/XEC | BTCV 4+4 Stage1 `191500→191501→191502` | `182670` | 4+4 Stage2→4+2+2三阶段→4+1+1+1+1五阶段→7+1两阶段 |
+
+首批6个任务均PENDING依赖等待，训练4×A800/24 CPU/192 GiB/5天，
+评估1×4090/10 CPU/128 GiB/1天；每卡batch16、累积3、有效batch192。
+所有阶段118800 updates；现有BTCV Offline的2卡任务保持原资源。
+原始失败批量提交的191465–191482均在PENDING时取消，未启动训练。
+历史180500–180507的hold链及现有运行任务保持不变。
+
+固定源提交 `9b9815136efa48a3532ae730c807aff7e70a67a5`，两个账号运行路径
+`/gpfs/work/aac/{antengcai23,sifansong}/worktrees/pcdd_queue_9b981513`；
+归档SHA256 `48feefde5277bacd16a2ce5e2b180a9263f57694165e9732c4e85603819070a4`，两端均校验通过。
+提交入口 `scripts/orgslot/pcdd_suite/queue.sh`；完整计划、launch、日志、逐阶段回执保存在
+两账号的 `artifacts/pcdd_queue_20261103/{plan.txt,launch.sh,submission.log,receipts/}`。
+每个阶段评估输出 `stageN_evaluation/comparison.json`，包含逐器官Offline差值及最终阶段PCDD论文分组参考。
+论文没有已核验逐器官值的格子保持null，不能用组均值代替；病例协议未完全对齐，PCDD仅为外部参考。
+
+全当前器官ROI的2+2+2+2仍是单独消融：Stage1在训，后续ROI索引已生成；
+后续几何覆盖和Stage1效果待核验，不混入本次small-organ ROI正式对照队列。

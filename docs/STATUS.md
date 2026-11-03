@@ -157,3 +157,8 @@ PCDD suite已实现可变分组；拟排WORD Offline/4+2+2/7+1，BTCV4+4/4+2+2/4
 提交回执由各账号`artifacts/pcdd_suite_20261103/{WORD,BTCV}/PROTOCOL/jobs.txt`保存。
 CPU回归：旧2+2+2+2两项通过；新分组可见标签、单新类梯度/旧logits保持及strict reload两项通过。
 未运行GPU smoke，正式训练状态以Slurm为准。
+
+批量提交触发QoS `MaxSubmitPU=16`，改为`queue.sh`有界自动接续。
+本次初始等待任务191465–191482将由新队列替换；不改变运行任务或历史hold任务。
+后续阶段已配置但尚无Job ID，必须区分“自动接续计划”与“已进入Slurm”。
+CPU模拟调度测试覆盖三任务依赖、hold/release和重复提交拒绝；无GPU smoke。

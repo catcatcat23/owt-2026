@@ -698,3 +698,12 @@ XEC 4A800/24CPU/192G/5天，评估1RTX4090/10CPU/128G/1天。
 PCDD逐器官缺失值保留null；同病例只是比较必要条件，训练/初始化/采样还需对照本记录。
 原始评估器dataset字段历史写死WORD，BTCV报告以suite的DATASET和manifest来源为准，
 不能单看旧JSON的dataset字段推断数据集。
+
+### 有界接续排队（XEC每用户16任务上限）
+
+`scripts/orgslot/pcdd_suite/queue.sh` 使用 `SUITE_PLAN`（按序空格分隔的 `protocol:stage`）
+和 `SUITE_INDEX`（从0开始）。仅提交当前阶段的训练、afterany续训、afterok评估三个任务。
+每个阶段的评估与报告全部成功后，再提交下一阶段，依赖当前评估afterok；因此后续阶段暂时没有Job ID。
+首个训练先hold，三个任务齐备后才release。回执逐次写入 `SUITE_ROOT/receipts/INDEX.txt`，
+重复提交会拒绝；部分提交失败时保留hold及回执，需人工核查，不可删除回执后盲目重提。
+如果额度在接续时被其他任务占满，评估末尾的提交会失败，已产出的指标仍保留，需要补齐链路。

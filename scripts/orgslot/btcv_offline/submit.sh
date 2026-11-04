@@ -12,7 +12,7 @@ set -o noclobber
 exec 3> "$RUN_ROOT/jobs.txt"
 printf 'commit=%s runtime=%s user=sifansong account=sifansong cluster=XEC qos=8gpus\n' "$EXPECTED_COMMIT" "$EXPERIMENT_WORKDIR" >&3
 common=(--parsable --account=sifansong --qos=8gpus --nodes=1 --ntasks=1 --chdir="$EXPERIMENT_WORKDIR" --export=ALL --output="$RUN_ROOT/%j.out" --error="$RUN_ROOT/%j.err")
-resources=(--partition=gpua800,gpua8001t --gres=gpu:a800:2 --cpus-per-task=16 --mem=128G --time=5-00:00:00)
+resources=(--partition=gpua800,gpua8001t --gres=gpu:a800:4 --cpus-per-task=24 --mem=192G --time=5-00:00:00)
 train=$(sbatch "${common[@]}" "${resources[@]}" --job-name=BTCV512_SAM_softaux scripts/orgslot/btcv_offline/train.sh initial)
 printf 'train=%s script=scripts/orgslot/btcv_offline/train.sh\n' "$train" >&3
 resume=$(sbatch "${common[@]}" "${resources[@]}" --dependency="afterany:$train" --job-name=BTCV512_SAM_resume scripts/orgslot/btcv_offline/train.sh resume)

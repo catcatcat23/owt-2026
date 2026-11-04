@@ -156,7 +156,7 @@ def train_one_epoch(
     if updates_per_epoch < 1:
         raise ValueError("data loader is shorter than one accumulation cycle")
     usable_microsteps = updates_per_epoch * args.accum_iter
-    completed_updates = epoch * updates_per_epoch
+    completed_updates = epoch * updates_per_epoch + getattr(args, "resume_update_offset", 0)
 
     for data_iter_step, batch in enumerate(
         metric_logger.log_every(data_loader, args.print_freq, header)

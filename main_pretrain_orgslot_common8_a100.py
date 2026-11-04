@@ -787,6 +787,19 @@ def main(args):
         loss_scaler=loss_scaler,
     )
 
+    # Resume by actual Adam updates when world size / accumulation changes.
+    args.resume_update_offset = 0
+    if args.resume:
+        completed_updates = max(
+            (int(state["step"]) for state in optimizer.state.values() if "step" in state),
+            default=0,
+        )
+        args.resume_update_offset = completed_updates - args.start_epoch * updates_per_epoch
+        remaining_updates = max(0, args.max_optimizer_updates - completed_updates)
+        args.epochs = args.start_epoch + math.ceil(remaining_updates / updates_per_epoch)
+        print("Resume budget: completed={} remaining={} updates_per_epoch={}".format(
+            completed_updates, remaining_updates, updates_per_epoch))
+
     output_dir = Path(args.output_dir)
     _write_provenance(args, output_dir)
     if misc.is_main_process():

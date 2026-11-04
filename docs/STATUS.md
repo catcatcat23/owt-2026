@@ -186,3 +186,19 @@ CPU模拟调度测试覆盖三任务依赖、hold/release和重复提交拒绝�
 
 全当前器官ROI的2+2+2+2仍是单独消融：Stage1在训，后续ROI索引已生成；
 后续几何覆盖和Stage1效果待核验，不混入本次small-organ ROI正式对照队列。
+
+## 2026-11-04 16:27 CST：BTCV续训改为4×A800
+
+按用户要求将等待中的2卡续训182669替换为 **194188**（sifansong/XEC，account=sifansong，QoS8gpus）。
+配置4×A800、24 CPU、192 GiB、5天，每卡batch16、accum3、有效batch192。
+当前182668保持原快照运行；新续训依赖afterany:182668，动态选择最新有效checkpoint，恢复模型、Adam和scaler。
+评估182670已改为afterok:194188；后续191500仍依赖afterok:182670。旧182669已取消。
+固定源 `fed23c5791ac2ed61cd059edda11de334e48543b`，runtime
+`/gpfs/work/aac/sifansong/worktrees/btcv_resume4_fed23c57`；源tar SHA256
+`d2fa856b949acc77df0b10343ff705a2e10d951ae80f4f553d3b940e8da4b3c4`两端一致。
+回执 `artifacts/btcv_body512_20261031/resume4_jobs.txt`，提交入口 `resume4_launch.sh`。
+同时修正改变world size后按epoch推算更新数的问题：恢复后从Adam实际step计算偏移和剩余epoch，
+保持118800更新及按更新数的学习率计划。每epoch取整、数据排列和随机器官组合会随并行布局变化，
+因此有效batch相同不代表逐步轨迹完全相同。
+CPU：Python语法、shell语法、2→4卡更新预算算术与revision guard通过；未运行GPU smoke。
+新续训尚PENDING，GPU恢复与加速效果待启动后核验。

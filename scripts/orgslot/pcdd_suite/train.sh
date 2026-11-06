@@ -18,6 +18,9 @@ args=(--protocol "$PROTOCOL" --dataset_protocol "$DATASET" --visibility_config "
  --data_path "$TRAIN_CSV" --val_data_path "$VAL_CSV" --test_data_path "$TEST_CSV"
  --roi_index "${SUITE_ROI_INDEX:-$DATA_ROOT/metadata/small_organ_roi_index.json}"
  --preprocess_summary "$DATA_ROOT/metadata/preprocess_summary.json" --batch_size 16 --accum_iter 3)
+if [[ "${ROI_FOCUS_POLICY:-small}" == current ]]; then
+ args+=(--roi_fit_target)
+fi
 if [[ "$stage" == 1 ]]; then
  printf '0b3571a3e79095686a0b12649735a298aaeb8a0b3bb93a47f3484439ac4a1ec6  %s\n' "$MAE_CHECKPOINT" | sha256sum -c -
  args+=(--mae_init_checkpoint "$MAE_CHECKPOINT" --lpips_state "$LPIPS_STATE")

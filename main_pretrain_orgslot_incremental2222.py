@@ -215,6 +215,8 @@ def main(args):
             raise ValueError("Resume protocol mismatch: hsam_supervision")
         if saved.get("roi_focus_policy", "small") != args.roi_focus_policy:
             raise ValueError("Resume ROI focus policy mismatch")
+        if saved.get("roi_fit_target", False) != args.roi_fit_target:
+            raise ValueError("Resume ROI geometry policy mismatch")
         for key in ("incremental_stage", "slot_head_type", "background_policy", "train_manifest_sha256", "validation_manifest_sha256", "test_manifest_sha256", "stage1_checkpoint_sha256", "batch_size", "accum_iter", "max_optimizer_updates", "warmup_updates", "lr", "weight_decay", "lambda_seg", "lambda_background", "background_preserve_weight", "background_lr_scale", "teacher_low", "teacher_high", "seg_supervision", "fusion_mode", "fusion_reference_count", "query_refinement", "pixel_pe", "seed", "organ_roi_probability", "organ_roi_aug", "focus_class_ids", "body_center", "no_validation"):
             if saved.get(key) != getattr(args, key, None):
                 raise ValueError("Resume protocol mismatch: " + key)

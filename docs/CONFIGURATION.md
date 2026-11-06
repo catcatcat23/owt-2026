@@ -707,3 +707,30 @@ PCDD逐器官缺失值保留null；同病例只是比较必要条件，训练/�
 首个训练先hold，三个任务齐备后才release。回执逐次写入 `SUITE_ROOT/receipts/INDEX.txt`，
 重复提交会拒绝；部分提交失败时保留hold及回执，需人工核查，不可删除回执后盲目重提。
 如果额度在接续时被其他任务占满，评估末尾的提交会失败，已产出的指标仍保留，需要补齐链路。
+
+## 全当前组 ROI 增量套件（2026-11-06）
+
+入口 `scripts/orgslot/pcdd_suite/all_roi.sh`，在独立 SUITE_ROOT 下调用现有 queue/train/eval。
+`ROI_FOCUS_POLICY=current`：20% ROI 抽样、80% 原全图路径；ROI 在当前训练组前景器官间均匀选择，
+不是全部切片都裁 ROI，也不是后续阶段读取全部八类 GT。Stage1 为初始组，后续为本阶段新增组；背景不进入 ROI 池。
+保留 retained-slot 分割监督与随机器官保留策略；本次没有额外保证 ROI 目标被保留。
+每阶段118800 optimizer updates，4×A800，每卡16、累积3、有效batch192；训练5天，续训afterany，4090评估1天。
+初始化、冻结矩阵、损失与阈值协议沿用 pcdd_suite；Stage1 MAE encoder，后续新组独立pixel decoder及共享新组交互。
+
+新增显式 `--roi_fit_target`：默认384正方形ROI；仅当增强后的目标包围框超过384时扩大至能完整容纳，
+必要时padding，再沿用原ROI的resize到模型输入。全图重采样/窗口不变。只保证裁ROI这一步不截掉增强后目标，
+不保证其他器官完整，也不能修复更早预处理/旋转已丢失的信息。旧配置默认关闭，不改变既有实验。
+因此相对于历史small ROI，这是一项“采样类别扩展＋大目标窗口保护”的组合变更，不能把全部收益归给单一因素。
+WORD训练集已发现胃bbox长416；肝脏等亦需覆盖检查。索引geometry_audit中的over384是bbox对角线超384，
+用于保守旋转风险检查，不等于实际被裁掉的切片数。
+
+WORD顺序：复用190004→190005→190006的全当前组ROI Stage1，继续2222的Stage2–4，
+然后全ROI Offline、4+4、4+2+2、7+1。BTCV顺序：现有Offline评估182670完成后，4+4、4+2+2、4+1+1+1+1、7+1，最后补全ROI Offline。
+WORD 2222保留自有对照标记；不得将其无条件描述为与PCDD完全同协议。
+各阶段结果同时保存fixed/selected、raw/post、head/recon；WORD验证集校准、BTCV训练集校准。
+对应全ROI Offline未完成前，comparison.json的Offline差值为空；完成后需要重生成此前阶段的比较报告。
+PCDD仍为外部论文参考。旧small ROI结果保留，不混合排序。
+
+运行前导出EXPERIMENT_WORKDIR、EXPECTED_COMMIT、SUITE_ROOT、DATA_ROOT、DATASET、ARM_F_TARGET、
+MAE_CHECKPOINT、SUITE_ROI_INDEX；WORD需将已完成Stage1链接到SUITE_ROOT/WORD/2222/stage1。
+新套件使用新输出目录和固定快照，不能原地更新旧运行目录；每个阶段回执在receipts/中，禁止重复提交同一索引。

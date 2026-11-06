@@ -166,7 +166,9 @@ class OrganSlotHighResTransform:
         gamma_probability=0.5,
         photometric_operations=2,
         body_center=False,
+        roi_fit_target=False,
     ):
+        self.roi_fit_target = bool(roi_fit_target)
         self.body_center = bool(body_center)
         if self.body_center and (output_size != 512 or global_crop_size != 512):
             raise ValueError("body-center protocol requires 512 input and crop")
@@ -305,6 +307,8 @@ class OrganSlotHighResTransform:
         y_max = int(coordinates[:, 0].max())
         x_min = int(coordinates[:, 1].min())
         x_max = int(coordinates[:, 1].max())
+        if self.roi_fit_target:
+            crop_size = max(crop_size, y_max - y_min + 1, x_max - x_min + 1)
         if y_max - y_min + 1 > crop_size or x_max - x_min + 1 > crop_size:
             raise ValueError("focus-organ bounding box exceeds ROI crop")
 
@@ -313,6 +317,11 @@ class OrganSlotHighResTransform:
         jitter_x = int(torch.randint(-jitter, jitter + 1, ()).item()) if jitter else 0
         desired_top = int(round((y_min + y_max + 1 - crop_size) / 2)) + jitter_y
         desired_left = int(round((x_min + x_max + 1 - crop_size) / 2)) + jitter_x
+
+        if self.roi_fit_target and crop_size > min(source_height, source_width):
+            # Centered padded window retains the target without clipping at native edges.
+            return (int((y_min + y_max + 1 - crop_size) // 2),
+                    int((x_min + x_max + 1 - crop_size) // 2), crop_size, crop_size)
 
         top_lower = max(0, y_max - crop_size + 1)
         top_upper = min(y_min, source_height - crop_size)
@@ -357,7 +366,7 @@ class OrganSlotHighResTransform:
             top, left, crop_height, crop_width = self._global_crop(
                 source_height, source_width
             )
-        if self.body_center:
+        if self.body_center or (roi_applied and self.roi_fit_target):
             image = crop_with_padding(image, top, left, crop_height, crop_width)
             label = crop_with_padding(label, top, left, crop_height, crop_width)
         else:

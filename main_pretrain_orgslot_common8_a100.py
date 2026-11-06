@@ -140,6 +140,8 @@ def get_args_parser():
     parser.add_argument("--organ_roi_probability", default=0.2, type=float)
     parser.add_argument("--global_crop_size", default=448, type=int)
     parser.add_argument("--roi_crop_size", default=384, type=int)
+    parser.add_argument("--roi_fit_target", action="store_true",
+                        help="Enlarge a training ROI only when the target exceeds its window")
     parser.add_argument("--roi_center_jitter", default=0.1, type=float)
     parser.add_argument("--focus_class_ids", default="4,5,6")
     parser.add_argument("--roi_index", default=None)
@@ -409,6 +411,7 @@ def _build_dataset(args, csv_path, classes, stage, training, max_samples):
         training=training and not args.disable_train_augmentation,
         global_crop_size=args.global_crop_size,
         roi_crop_size=args.roi_crop_size,
+        roi_fit_target=getattr(args, "roi_fit_target", False),
         roi_center_jitter=args.roi_center_jitter,
         body_center=args.body_center,
     )

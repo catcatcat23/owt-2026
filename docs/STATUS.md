@@ -202,3 +202,11 @@ CPU模拟调度测试覆盖三任务依赖、hold/release和重复提交拒绝�
 因此有效batch相同不代表逐步轨迹完全相同。
 CPU：Python语法、shell语法、2→4卡更新预算算术与revision guard通过；未运行GPU smoke。
 新续训尚PENDING，GPU恢复与加速效果待启动后核验。
+
+## 2026-11-06：全当前组ROI补齐增量实验
+
+用户要求后续增量统一采用全当前组ROI；此前11-03的small ROI计划已被本计划替代。
+WORD全ROI Stage1（190004→190005→190006）已完成：脾脏/右肾固定0.5平均93.0142%，校准后93.5372%。
+复用checkpoint-802接续，不重复训练Stage1。详见CONFIGURATION中的全当前组ROI套件。
+新索引为两账号artifacts/allroi_20261106.json，覆盖各自完整训练manifest的八类阳性池。
+旧任务替换及新任务回执将在提交核验后补记；运行中的BTCV 194188及其评估182670保留。

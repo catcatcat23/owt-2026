@@ -210,3 +210,27 @@ WORD全ROI Stage1（190004→190005→190006）已完成：脾脏/右肾固定0.
 复用checkpoint-802接续，不重复训练Stage1。详见CONFIGURATION中的全当前组ROI套件。
 新索引为两账号artifacts/allroi_20261106.json，覆盖各自完整训练manifest的八类阳性池。
 旧任务替换及新任务回执将在提交核验后补记；运行中的BTCV 194188及其评估182670保留。
+
+提交核验（11-06 10:54 CST）：
+
+| 用户/集群 | 首个阶段 | 训练→续训→评估 | 前置条件 |
+|---|---|---|---|
+| antengcai23/XEC | WORD 2222 Stage2（左肾、胆囊） | 196932→196933→196934 | 复用完成的全ROI Stage1；无排队依赖 |
+| sifansong/XEC | BTCV 4+4 Stage1 | 196929→196930→196931 | afterok:182670，等待当前Offline评估 |
+
+均为account=sifansong/QoS8gpus；训练4×A800、每卡16/累积3，评估1×4090。
+后续阶段尚未分配Job ID，由每阶段评估成功后自动提交下一个triplet，完整计划见两账号
+`artifacts/allroi_suite_20261106/plan.txt`。本次包含WORD 11个待训练阶段、BTCV 13个待训练阶段（含各一组全ROI Offline）。
+不能把计划中未来阶段写成已进入Slurm队列。
+
+已取消被替代的PENDING任务：anteng 191497–191499及旧hold链180500–180507；sifan 191500–191502。
+取消前逐任务检查PENDING并保存`superseded_jobs.json`，没有取消正在训练的194188或评估182670。
+WORD首次提交因190006已离开调度器活跃记录而被拒绝，未创建训练Job；sacct核实COMPLETED后移除过期依赖重提。
+首个失败回执保留为receipts/0.failed_expired_dependency.txt，重提入口retry_submit.sh。
+
+固定源码 `41790507c57c658216d3b0d45ecc82e3d1eaee69`，两端运行目录
+`/gpfs/work/aac/{antengcai23,sifansong}/worktrees/allroi_suite_41790507`；源tar SHA256
+`ecfea76e588930dbf5b8df5e9415211564b7e4ceb63ba0f216e91ae7b8660b2f`两端通过校验。
+local immutable worktree revision guard通过；数据索引manifest绑定、源码与提交回执保存在allroi_suite_20261106。
+CPU：ROI小目标兼容/大目标补边保留测试通过，pcdd_suite两项分组/恢复测试通过，shell语法通过。
+没有运行GPU smoke；新任务尚未启动，GPU训练验证待运行后核查。

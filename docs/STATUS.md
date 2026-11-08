@@ -248,3 +248,25 @@ SIP使用word_official96_seed42_20260930_v2/WORD；已逐行核对与XEC三个ma
 训练28485、验证7470、测试7315张，全部本地文件存在；复用相同行号ROI池并重新绑定本地manifest哈希。
 新输出和源码快照独立保存；不在原排队快照中修改脚本。重新提交XEC首阶段链并取消旧链，避免旧环境中的SUITE_PLAN继续生成重复任务。
 SIP Offline完成后，XEC的比较报告需要同步该结果与per_case.csv，再重新计算差值；缺失时明确pending。
+
+迁移提交核验（11-08 20:40 CST）：
+
+| 用户/集群 | 计划 | 首批训练→续训→评估 |
+|---|---|---|
+| bolinren19/SIP | Offline→44 S1/S2 | 3155744→3155745→3155746 |
+| antengcai23/XEC | 2222 S2–S4→422 S1–S3→71 S1/S2 | 200334→200335→200336 |
+
+首批训练已解除hold；续训afterany:train，评估afterok:continuation。后续阶段由评估成功后提交。
+旧XEC 196932–196934确认PENDING后取消，旧环境中的完整计划不再执行；BTCV队列未改。
+SIP首次尝试4090评估被分区QoS限制拒绝；对应held训练3155742/3155743已取消，没有启动。
+最终SIP单卡A800评估，1天时限；训练7天。CPU shell语法、torch/cv2导入、数据文件与manifest行序核验通过，没有GPU smoke。
+
+SIP：源b81fdb08e0ec896280fd20d864417d2f395235d7；
+root=/gpfs/work/aac/bolinren19/OD_OWT/artifacts/allroi_sip_20261108_v2，runtime=root/source；
+tar SHA256=1f4700f18eb5ba5a70068a2b924017a1bdc0cccc9ae79cc89cadd2c568efa3cc。
+MAE/ROI存于同级allroi_sip_20261108，MAE SHA256=0b3571a3e79095686a0b12649735a298aaeb8a0b3bb93a47f3484439ac4a1ec6。
+XEC：源226c175040b061f07dab90b5156b29f2460f61e6；
+root=/gpfs/work/aac/antengcai23/artifacts/allroi_split_20261108；runtime=/gpfs/work/aac/antengcai23/worktrees/allroi_split_226c1750；
+tar SHA256=3c5f4ebea5674bc5c7d2992928594aa4b206526b2529e04746fa78f2473807da。
+两次源码在各自提交时均为最新origin/feature/orgslot并通过revision guard，远端归档校验通过；XEC不受后续SIP资源名称修正影响。
+各root包含plan.txt、launch.sh、submission.log、receipts/0.txt及替换旧任务的记录。

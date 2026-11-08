@@ -234,3 +234,17 @@ WORD首次提交因190006已离开调度器活跃记录而被拒绝，未创建�
 local immutable worktree revision guard通过；数据索引manifest绑定、源码与提交回执保存在allroi_suite_20261106。
 CPU：ROI小目标兼容/大目标补边保留测试通过，pcdd_suite两项分组/恢复测试通过，shell语法通过。
 没有运行GPU smoke；新任务尚未启动，GPU训练验证待运行后核查。
+
+## 2026-11-08：将部分WORD全组ROI实验迁至SIP
+
+计划拆分为三条并行队列：
+- bolinren19/SIP：WORD全ROI Offline→4+4 Stage1→Stage2（3阶段）。
+- antengcai23/XEC：WORD2222 Stage2–4→422 Stage1–3→71 Stage1–2（8阶段）。
+- sifansong/XEC：现有BTCV训练及后续全ROI计划保持原快照。
+
+SIP申请account=sifansong、QoS8a800，训练4×A800/24CPU/192G/7天；评估1×RTX4090/10CPU/128G/1天。
+每卡16、累积3、有效192以及118800更新不变。queue.sh按ARM_F_TARGET选择集群资源名称。
+SIP使用word_official96_seed42_20260930_v2/WORD；已逐行核对与XEC三个manifest的病例切片顺序一致，
+训练28485、验证7470、测试7315张，全部本地文件存在；复用相同行号ROI池并重新绑定本地manifest哈希。
+新输出和源码快照独立保存；不在原排队快照中修改脚本。重新提交XEC首阶段链并取消旧链，避免旧环境中的SUITE_PLAN继续生成重复任务。
+SIP Offline完成后，XEC的比较报告需要同步该结果与per_case.csv，再重新计算差值；缺失时明确pending。

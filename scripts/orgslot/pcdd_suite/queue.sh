@@ -6,8 +6,8 @@ set -euo pipefail
 if [[ "${ARM_F_TARGET:-}" == bolin-sip ]]; then
  suite_qos=8a800
  train_partition=gpua800
- eval_partition=gpu4090
- eval_gres=gpu:rtx4090:1
+ eval_partition=gpua800
+ eval_gres=gpu:a800:1
  train_time=7-00:00:00
 else
  suite_qos=8gpus

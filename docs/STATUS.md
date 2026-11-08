@@ -242,7 +242,7 @@ CPU：ROI小目标兼容/大目标补边保留测试通过，pcdd_suite两项分
 - antengcai23/XEC：WORD2222 Stage2–4→422 Stage1–3→71 Stage1–2（8阶段）。
 - sifansong/XEC：现有BTCV训练及后续全ROI计划保持原快照。
 
-SIP申请account=sifansong、QoS8a800，训练4×A800/24CPU/192G/7天；评估1×RTX4090/10CPU/128G/1天。
+SIP申请account=sifansong、QoS8a800，训练4×A800/24CPU/192G/7天；评估1×A800/10CPU/128G/1天（SIP账号8a800 QoS不接受gpu4090分区）。
 每卡16、累积3、有效192以及118800更新不变。queue.sh按ARM_F_TARGET选择集群资源名称。
 SIP使用word_official96_seed42_20260930_v2/WORD；已逐行核对与XEC三个manifest的病例切片顺序一致，
 训练28485、验证7470、测试7315张，全部本地文件存在；复用相同行号ROI池并重新绑定本地manifest哈希。

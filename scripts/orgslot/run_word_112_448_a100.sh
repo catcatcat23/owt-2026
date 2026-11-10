@@ -151,7 +151,7 @@ COMMAND=(
   --roi_crop_size 384
   --expected_spacing "${SPACING_ARRAY[@]}"
   --roi_center_jitter 0.1
-  --focus_class_ids 4,5,6
+  --focus_class_ids "${FOCUS_CLASS_IDS:-4,5,6}"
   --max_optimizer_updates "${MAX_UPDATES}"
   --warmup_updates "${WARMUP_UPDATES}"
   --blr "${BASE_LR}"
@@ -237,6 +237,8 @@ fi
 if [[ "${NO_DDP_BUFFER_BROADCAST:-0}" == 1 ]]; then
   COMMAND+=(--no_ddp_buffer_broadcast)
 fi
+if [[ "${ROI_FIT_TARGET:-0}" == 1 ]]; then COMMAND+=(--roi_fit_target); fi
+if [[ "${ROI_APPEND_FRACTION:-0}" != 0 ]]; then COMMAND+=(--roi_append_fraction "$ROI_APPEND_FRACTION"); fi
 if [[ "${BODY_CENTER:-0}" == 1 ]]; then COMMAND+=(--body_center); fi
 if [[ "${NO_VALIDATION:-0}" == "1" ]]; then
   COMMAND+=(--no_validation)

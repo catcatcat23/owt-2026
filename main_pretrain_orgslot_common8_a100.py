@@ -21,6 +21,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from datasets.orgslot_highres import (
     OrganAwareMixDataset,
+    OrganAwareAppendDataset,
     OrganSlotHighResTransform,
     TransformDataset,
 )
@@ -137,6 +138,7 @@ def get_args_parser():
 
     parser.add_argument("--organ_roi_aug", action="store_true")
     parser.add_argument("--disable_train_augmentation", action="store_true")
+    parser.add_argument("--roi_append_fraction", default=0.0, type=float)
     parser.add_argument("--organ_roi_probability", default=0.2, type=float)
     parser.add_argument("--global_crop_size", default=448, type=int)
     parser.add_argument("--roi_crop_size", default=384, type=int)
@@ -398,6 +400,9 @@ def _seed_worker(worker_id):
 
 
 def _build_dataset(args, csv_path, classes, stage, training, max_samples):
+    fraction = getattr(args, "roi_append_fraction", 0.0)
+    if not np.isfinite(fraction) or fraction < 0:
+        raise ValueError("roi_append_fraction must be finite and nonnegative")
     raw = OrganSlotManifestDataset(
         csv_path,
         dataset_type=args.dimension,
@@ -424,13 +429,17 @@ def _build_dataset(args, csv_path, classes, stage, training, max_samples):
         focus_class_ids = tuple(
             int(value) for value in args.focus_class_ids.split(",") if value
         )
-        transformed = OrganAwareMixDataset(
-            raw,
-            transform,
-            roi_metadata["class_indices"],
-            focus_class_ids=focus_class_ids,
-            roi_probability=args.organ_roi_probability,
-        )
+        if getattr(args, "roi_append_fraction", 0.0) > 0:
+            transformed = OrganAwareAppendDataset(
+                raw, transform, roi_metadata["class_indices"], focus_class_ids,
+                extra_fraction=args.roi_append_fraction,
+            )
+        else:
+            transformed = OrganAwareMixDataset(
+                raw, transform, roi_metadata["class_indices"],
+                focus_class_ids=focus_class_ids,
+                roi_probability=args.organ_roi_probability,
+            )
     return raw, StrictVisibilityDataset(transformed, classes, stage)
 
 

@@ -734,3 +734,18 @@ PCDD仍为外部论文参考。旧small ROI结果保留，不混合排序。
 运行前导出EXPERIMENT_WORKDIR、EXPECTED_COMMIT、SUITE_ROOT、DATA_ROOT、DATASET、ARM_F_TARGET、
 MAE_CHECKPOINT、SUITE_ROI_INDEX；WORD需将已完成Stage1链接到SUITE_ROOT/WORD/2222/stage1。
 新套件使用新输出目录和固定快照，不能原地更新旧运行目录；每个阶段回执在receipts/中，禁止重复提交同一索引。
+
+
+## BTCV Offline fixed seed43 (2026-11-10)
+
+All future BTCV experiments use 24 training cases and six test cases: img0008, img0029, img0034, img0036, img0038, img0040. Split seed43; model seed0. Generate manifests with `scripts/orgslot/btcv_seed43/prepare.py`; preserve old results separately. No badcase-based filtering. Old img0007 is now training data, so this split cannot establish that the previous held-out failure was solved.
+
+| Variant | Encoder initialization | ROI sampling |
+|---|---|---|
+| vit_current | AutoPET ViT MAE encoder, 224 input, 100k updates | Existing replacement probability0.2, classes4/5/6 |
+| vit_append | Same ViT checkpoint | Keep global dataset indices, append25% ROI rows; all8 classes, case-balanced positive draws |
+| resenc_append | AutoPET nnunet_resenc_s16, 224 input, 100k updates | Same appended ROI, native CNN encoder skips |
+
+All use SAM-tail soft prior+aux, native spacing0.7/0.7/2mm, body-centered512 crop without full-field resize, ROI base384 (append variants expand to include target bbox), retained-slot supervision with ROI target retention, BF16, clip1, 118800 optimizer updates, warmup5940, LR7.5e-5, weight decay0.05, effective batch192 (4 GPUs ×16 ×3). Appending retains global index coverage per dataset epoch; distributed sampler/drop-last can omit a few rows. At fixed updates it does not increase total training budget. ROI contrast changes class coverage, replacement/append, case balancing and target-fit together. CNN contrast also changes native skips and parameter count.
+
+Entry: `scripts/orgslot/btcv_seed43/submit.sh` with immutable `EXPERIMENT_WORKDIR`, `EXPECTED_COMMIT`, `RUN_ROOT`, `BTCV_ROOT`, `VARIANT`, `MAE_CHECKPOINT`, `RESENC_CHECKPOINT`. Initial training and afterany continuation each request4×A800,24CPU,192GB,5 days on sifansong/XEC8gpus. Evaluation uses1×4090,8CPU,96GB,1 day, afterok continuation. Eval checks118800 updates; fixed0.5 and training-set threshold calibration are reported separately, followed by reconstruction threshold0.02. No test-set tuning.

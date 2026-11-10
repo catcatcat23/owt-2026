@@ -74,6 +74,41 @@ class OrganAwareMixDataset(Dataset):
         return self.transform(sample)
 
 
+class OrganAwareAppendDataset(OrganAwareMixDataset):
+    """Preserve global indices and append patient-balanced organ ROI draws."""
+
+    def __init__(self, dataset, transform, roi_indices, focus_class_ids, extra_fraction=0.25):
+        super().__init__(dataset, transform, roi_indices, focus_class_ids, 1.0)
+        from datasets.orgslot_manifest import parse_case_and_slice
+        if extra_fraction <= 0:
+            raise ValueError("extra_fraction must be positive")
+        self.extra_count = int(round(len(dataset) * extra_fraction))
+        self.case_pools = {}
+        for class_id, indices in self.roi_indices.items():
+            cases = {}
+            for index in indices:
+                record_index = dataset.sample_record_indices[index]
+                case, _ = parse_case_and_slice(dataset.records[record_index]["image_pth"])
+                cases.setdefault(case, []).append(index)
+            self.case_pools[class_id] = tuple(tuple(v) for v in cases.values())
+
+    def __len__(self):
+        return len(self.dataset) + self.extra_count
+
+    def __getitem__(self, index):
+        if index < len(self.dataset):
+            sample = dict(self.dataset[index])
+            sample.update(focus_class_id=-1, roi_applied=False)
+        else:
+            class_id = self.focus_class_ids[(index - len(self.dataset)) % len(self.focus_class_ids)]
+            pools = self.case_pools[class_id]
+            pool = pools[int(torch.randint(len(pools), ()).item())]
+            source = pool[int(torch.randint(len(pool), ()).item())]
+            sample = dict(self.dataset[source])
+            sample.update(focus_class_id=class_id, roi_applied=True)
+        return self.transform(sample)
+
+
 def _as_spatial_batch(value):
     if value.ndim == 3:  # [C,H,W]
         return value.unsqueeze(0), lambda result: result.squeeze(0)

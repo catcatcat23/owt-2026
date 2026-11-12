@@ -10,6 +10,74 @@ ResEnc＋编码器原生跳接＋SAM缩小GT已完成：固定0.5 Dice **85.80%*
 使用内置image_gen生成（工具未提供image2.5版本选择）；[重绘提示词记录](docs/figures/redraw_prompts.json)。
 采用纯白、柔和配色、英文短标签的扁平矢量风格；文件本身仍是栅格图，PDF非可编辑矢量。
 
+## 最新实验记录（2026-11-12）
+
+### WORD 2+2+2+2：Stage2已完成
+
+antengcai23／XEC：训练 `200334`、备用接续 `200335`、评估 `200336` 均为COMPLETED。
+训练于11月12日00:02完成，评估于00:49完成；checkpoint-802，24个测试病例、7315张切片。
+本阶段已学习四类：旧类为脾脏、右肾，新类为左肾、胆囊。以下为独立二值head的病例平均Dice（%），**不是最终八类成绩，也不是互斥多类输出成绩**。
+
+| 类别／分组 | 固定0.5＋后处理 | 校准后＋后处理 |
+|---|---:|---:|
+| 脾脏 | 93.09 | 93.42 |
+| 右肾 | 92.94 | 93.66 |
+| 左肾 | 92.00 | 92.67 |
+| 胆囊 | 65.05 | 65.01 |
+| Old2 | 93.01 | 93.54 |
+| New2 | 78.53 | 78.84 |
+| 当前All4 | **85.77** | **86.19** |
+
+胆囊24例中6例Dice低于50%、3例低于30%。校准后word_0014／0137／0075分别为8.71／21.96／25.57%，预测/GT体积比分别3.54／1.76／0.88，提示误报与漏报并存，不能归结为阈值偏高。具体空间错误仍需可视化核验。胆囊global Dice为75.27%，与病例平均65.01%口径不同，不混用。
+
+历史SAM soft prior＋aux八类Offline（150971）的对应四类为94.74／94.43／94.45／64.15，四类均值86.94%，八类均值85.55%。**该历史结果划分、校准来源不同，不能以86.19−86.94量化增量损失**；同划分全器官ROI Offline尚在训练。
+
+证据：`antengcai23/XEC:/gpfs/work/aac/antengcai23/artifacts/allroi_split_20261108/WORD/2222/stage2_evaluation/` 下的 `comparison.json`、`test/results.json`、`test/per_case.jsonl`；重建输出另见 `reconstruction/results.json`。校准产物位于 `validation/selected_thresholds.json`，该目录名本身不能替代对校准manifest来源的核验。
+
+### 运行与排队清单
+
+队列状态核验于 **2026-11-12 18:37（北京时间）**；下列epoch为当天16:22日志快照，不是实时页面。
+
+| 实验 | 账号／集群 | 训练 → 备用续训 → 评估 | 状态 |
+|---|---|---|---|
+| WORD八类Offline＋全器官ROI | bolinren19／SIP | 3155744 → 3155745 → 3155746 | 训练中；16:22为epoch323 |
+| WORD 2+2+2+2 Stage3 | antengcai23／XEC | 203606 → 203607 → 203608 | 排队；暂估11月18日01:09 |
+| BTCV seed43 ViT＋原ROI | sifansong／XEC | 202289 → 202290 → 202291 | 训练中；16:22为epoch483 |
+| BTCV seed43 ViT＋全器官追加ROI | sifansong／XEC | 202292 → 202293 → 202294 | 训练中；16:22为epoch192 |
+| BTCV seed43 ResEnc＋全器官追加ROI | sifansong／XEC | 202295 → 202296 → 202297 | 排队；暂估11月13日15:08 |
+
+所有上述训练申请4×A800；接续任务仅在预算未完成时继续，评估等待接续成功。启动时间是调度器估计，不保证兑现。旧BTCV任务196930／196931和旧Stage1评估3001901仍为用户hold。
+
+BTCV三组固定split seed43、model seed0、24训练/6测试；测试病例为 **img0008、img0029、img0034、img0036、img0038、img0040**。原失败病例img0007已随机进入训练，因此新划分高分不能证明旧测试失败已解决。
+
+- 共同配置：SAM-tail＋soft prior＋aux、512身体中心裁剪、spacing0.7×0.7×2mm、每卡batch16×4卡×累积3＝192、118800次更新；ViT加载AutoPET224 MAE encoder。
+- 原ROI：20%概率替换为胆囊／食管／胰腺ROI。
+- 追加ROI：保留全图索引，额外追加25%全器官ROI；同时采用病例均衡抽样和目标包围框覆盖。固定updates，不能解释为增加总训练预算。
+- CNN组：AutoPET224预训练nnU-Net ResEnc及编码器原生多尺度跳接；不是参数量匹配的纯backbone对照。
+- 提交代码 `f53babd8f6c07cdd439dd97d655e98a73556b6c1`；不可变运行快照 `sifansong/XEC:/gpfs/work/aac/sifansong/worktrees/btcv43_f53babd8`。
+- 配置与启动入口：[CONFIGURATION](docs/CONFIGURATION.md#btcv-offline-fixed-seed43-2026-11-10)、[submit.sh](scripts/orgslot/btcv_seed43/submit.sh)。CPU采样/ROI覆盖检查通过；按用户要求未运行GPU冒烟测试。
+
+### PCDD正式对照口径
+
+来源：[PCDD Table1、Table2及评估定义](https://arxiv.org/html/2511.07749v1#S4)。以下为**论文最终阶段**结果（%），仅作外部参考，病例划分、预处理与输出协议未完全对齐。
+
+| 数据集 | 设置 | 最终阶段 | Old | New | All |
+|---|---|---|---:|---:|---:|
+| WORD | 4+4 | Stage2 | 84.09 | 82.75 | 83.42 |
+| WORD | 4+2+2 | Stage3 | 83.95 | 83.04 | 83.50 |
+| WORD | 2+2+2+2 | Stage4 | 90.17 | 65.97 | 72.02 |
+| WORD | 7+1 | Stage2 | 71.51 | 82.59 | 72.89 |
+| BTCV | 4+4 | Stage2 | 92.51 | 88.69 | 90.60 |
+| BTCV | 4+2+2 | Stage3 | 92.45 | 88.48 | 90.46 |
+| BTCV | 4+1+1+1+1 | Stage5 | 92.27 | 88.83 | 90.55 |
+| BTCV | 7+1 | Stage2 | 90.15 | 93.37 | 90.55 |
+
+PCDD论文八类Offline：WORD85.47%、BTCV90.75%。类别顺序固定为脾／右肾／左肾／胆囊／食管／胰腺／肝／胃。
+Old指Stage1类别，New指其后**所有累计新增类别**，不是仅最后一阶段。例如2+2+2+2最终为Old2/New6/All8，All=(2×Old+6×New)/8。
+
+当前WORD Stage2的Old2/New2/All4仅作过程诊断，不与PCDD最终Old2/New6/All8直接排名。没有找到WORD中间Stage2左肾＋胆囊的独立公开数值；附录Figure4为BTCV各阶段平均曲线，不能替代WORD对照。
+后续逐阶段记录每器官Dice、初始旧类/累计新类/全部已见类；最终与PCDD同分组对照，并与本项目同划分Offline逐器官计算差值。固定输出、校准后处理、二值head、互斥多类和reconstruction分开报告。PCDD未提供逐器官数值时标记未报告，不推算。
+
 ## 三个配置的正式指标
 
 ### 当前4＋4增量架构与消融（2026-10-26）

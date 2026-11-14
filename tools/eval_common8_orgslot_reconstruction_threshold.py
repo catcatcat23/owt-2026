@@ -18,6 +18,7 @@ import numpy as np
 from scipy import ndimage
 import torch
 from torch.utils.data import DataLoader
+from tools.evaluation_resume import EvaluationResume
 
 from datasets.orgslot_highres import OrganSlotHighResTransform, TransformDataset
 from datasets.orgslot_manifest import OrganSlotManifestDataset
@@ -47,6 +48,7 @@ def parse_args():
         default=None,
         metavar=("SX", "SY", "SZ"),
     )
+    parser.add_argument("--resume-evaluation", action="store_true")
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--test-csv", required=True)
     parser.add_argument("--output-dir", required=True)
@@ -522,7 +524,7 @@ def main():
     for required in required_paths:
         if not required.is_file():
             raise FileNotFoundError(required)
-    if output_dir.exists():
+    if output_dir.exists() and not args.resume_evaluation:
         raise FileExistsError(output_dir)
     if args.input_size <= 0 or args.input_size % 16 != 0:
         raise ValueError("input-size must be positive and divisible by patch size 16")
@@ -557,7 +559,7 @@ def main():
     if not args.device.startswith("cuda") or not torch.cuda.is_available():
         raise RuntimeError("formal evaluation requires CUDA")
 
-    output_dir.mkdir(parents=True, exist_ok=False)
+    output_dir.mkdir(parents=True, exist_ok=args.resume_evaluation)
     config = vars(args).copy()
     config.update(
         {
@@ -583,6 +585,12 @@ def main():
         config["preprocess_spacing_mm"] = preprocess.get("config", {}).get(
             "spacing_mm"
         )
+    resume = EvaluationResume(output_dir, config, args.resume_evaluation)
+    if args.resume_evaluation and (output_dir / "results.json").is_file():
+        if not resume.state:
+            raise ValueError("Completed output has no matching resume state")
+        print("Already complete: {}".format(output_dir), flush=True)
+        return
     atomic_json(output_dir / "resolved_config.json", config)
 
     device = torch.device(args.device)
@@ -609,6 +617,7 @@ def main():
         dataset,
         batch_size=args.batch_size,
         shuffle=False,
+        sampler=range(resume.offset, len(dataset)),
         num_workers=args.workers,
         pin_memory=True,
         drop_last=False,
@@ -621,8 +630,10 @@ def main():
     id_to_slot_index = {
         int(spec["raw_class_id"]): index for index, spec in enumerate(slot_specs)
     }
+    if resume.state:
+        counters = resume.state["counters"]
     started = time.time()
-    processed = 0
+    processed = resume.offset
     amp_enabled = not args.no_amp
     with torch.inference_mode():
         for batch_index, batch in enumerate(loader):
@@ -697,8 +708,10 @@ def main():
                         )
                         update_counter(counter, prediction, target)
             processed += batch_size
+            resume.yield_if_due(processed, len(dataset), counters)
             if batch_index % args.print_freq == 0 or processed == len(dataset):
-                elapsed = time.time() - started
+                resume.save(processed, counters)
+                elapsed = resume.previous_elapsed + time.time() - resume.started
                 rate = processed / max(elapsed, 1e-8)
                 progress = {
                     "processed": processed,
@@ -716,6 +729,7 @@ def main():
         if args.method == "owt"
         else "OrganSlotBank reconstruction threshold"
     )
+    resume.save(processed, counters)
     metrics, rows, records = summarize(
         counters, class_ids, class_names, method_name
     )

@@ -10,6 +10,7 @@ import time
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
+from tools.evaluation_resume import EvaluationResume
 
 from OWT_models_orgslot import FUSION_MODES
 from tools.eval_common8_orgslot_reconstruction_threshold import (
@@ -27,6 +28,7 @@ from tools.eval_common8_orgslot_reconstruction_threshold import (
 
 def parse_args():
     parser = argparse.ArgumentParser("Common8/WORD OrganSlot head evaluation")
+    parser.add_argument("--resume-evaluation", action="store_true")
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--data-csv", required=True)
     parser.add_argument("--output-dir", required=True)
@@ -141,7 +143,7 @@ def main():
     for required in (checkpoint, data_csv, class_map):
         if not required.is_file():
             raise FileNotFoundError(required)
-    if output_dir.exists():
+    if output_dir.exists() and not args.resume_evaluation:
         raise FileExistsError(output_dir)
     required_size = 512 if args.body_center else 448
     if args.input_size != required_size or args.global_crop_size != required_size:
@@ -183,7 +185,7 @@ def main():
                 args.class_thresholds, class_ids
             )
 
-    output_dir.mkdir(parents=True, exist_ok=False)
+    output_dir.mkdir(parents=True, exist_ok=args.resume_evaluation)
     config = vars(args).copy()
     config.update({
         "checkpoint": str(checkpoint),
@@ -200,6 +202,12 @@ def main():
             "non-test calibration case Dice only" if sweep else "fixed before this split"
         ),
     })
+    resume = EvaluationResume(output_dir, config, args.resume_evaluation)
+    if args.resume_evaluation and (output_dir / "results.json").is_file():
+        if not resume.state:
+            raise ValueError("Completed output has no matching resume state")
+        print("Already complete: {}".format(output_dir), flush=True)
+        return
     atomic_json(output_dir / "resolved_config.json", config)
 
     device = torch.device(args.device)
@@ -225,6 +233,7 @@ def main():
         dataset,
         batch_size=args.batch_size,
         shuffle=False,
+        sampler=range(resume.offset, len(dataset)),
         num_workers=args.workers,
         pin_memory=True,
         drop_last=False,
@@ -242,8 +251,11 @@ def main():
     id_to_name = {
         int(spec["raw_class_id"]): spec["name"] for spec in slot_specs
     }
+    if resume.state:
+        counters = resume.state["counters"]
+        background_counters = resume.state["background"]
     started = time.time()
-    processed = 0
+    processed = resume.offset
     with torch.inference_mode():
         for batch_index, batch in enumerate(loader):
             image = batch["image"].to(device, non_blocking=True)
@@ -295,8 +307,10 @@ def main():
                         counter = background_counters[mode][0].setdefault(str(case_id), new_counter())
                         update_counter(counter, prediction, target)
             processed += image.shape[0]
+            resume.yield_if_due(processed, len(dataset), counters, background_counters)
             if batch_index % args.print_freq == 0 or processed == len(dataset):
-                elapsed = time.time() - started
+                resume.save(processed, counters, background_counters)
+                elapsed = resume.previous_elapsed + time.time() - resume.started
                 rate = processed / max(elapsed, 1e-8)
                 progress = {
                     "processed": processed,
@@ -309,6 +323,7 @@ def main():
                 atomic_json(output_dir / "progress.json", progress)
                 print(json.dumps(progress, sort_keys=True), flush=True)
 
+    resume.save(processed, counters, background_counters)
     metrics, rows, records = summarize(
         counters, class_ids, class_names, "OrganSlotBank binary heads"
     )

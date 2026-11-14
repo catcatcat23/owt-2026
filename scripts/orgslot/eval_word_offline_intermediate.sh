@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "${EXPERIMENT_WORKDIR:?}"
 test "$(cat SOURCE_COMMIT)" = "${EXPECTED_COMMIT:?}"
-export ARM_F_TARGET=bolin-sip ARM_F_DIMENSION=2D
+export ARM_F_TARGET=${ARM_F_TARGET:-bolin-sip} ARM_F_DIMENSION=2D
 source scripts/orgslot/arm_f_environment.sh
 export OMP_NUM_THREADS=1 PYTHONUNBUFFERED=1
 if [[ "${RESUMABLE_EVALUATION:-0}" == 1 ]]; then

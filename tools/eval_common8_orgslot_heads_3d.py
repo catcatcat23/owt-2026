@@ -156,7 +156,7 @@ def build_3d_model(checkpoint_path, slot_specs, input_size, fusion_mode, fix_fra
     return model, report
 
 
-def build_3d_dataset(test_csv, input_size, global_crop_size, fix_frame):
+def build_3d_dataset(test_csv, input_size, global_crop_size, fix_frame, body_center=False):
     raw = OrganSlotManifestDataset(
         test_csv,
         dataset_type="3D",
@@ -170,8 +170,10 @@ def build_3d_dataset(test_csv, input_size, global_crop_size, fix_frame):
         global_crop_size=global_crop_size,
         roi_crop_size=global_crop_size,
         roi_center_jitter=0.0,
+        body_center=body_center,
     )
-    dataset = EvaluationVisibilityDataset(TransformDataset(raw, transform))
+    dataset = (NativeSlabDataset(raw, transform) if body_center else
+               EvaluationVisibilityDataset(TransformDataset(raw, transform)))
     case_to_dataset_indices = {}
     case_to_slices = {}
     for dataset_index, record_index in enumerate(raw.sample_record_indices):
@@ -571,3 +573,32 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+class NativeSlabDataset(torch.utils.data.Dataset):
+    """Keep native GT and crop coordinates for BTCV slab restoration."""
+    def __init__(self, raw, transform):
+        self.raw, self.transform = raw, transform
+
+    def __len__(self):
+        return len(self.raw)
+
+    def __getitem__(self, index):
+        sample = self.raw[index]
+        full_label = sample['label']
+        result = self.transform(sample)
+        result['full_label'] = full_label
+        return result
+
+
+def accumulate_native_slab(sums, counts, targets, positions, indices, values, labels, box):
+    top, left, height, width, h, w = map(int, box)
+    y0, x0 = max(0, top), max(0, left)
+    y1, x1 = min(h, top + height), min(w, left + width)
+    for t, index in enumerate(indices):
+        pos = positions[int(index)]
+        sums[:, pos, y0:y1, x0:x1] += values[:, t, y0-top:y1-top, x0-left:x1-left]
+        counts[pos, y0:y1, x0:x1] += 1
+        if targets[pos] is not None and not np.array_equal(targets[pos], labels[t]):
+            raise ValueError('inconsistent native GT across overlapping slabs')
+        targets[pos] = labels[t]

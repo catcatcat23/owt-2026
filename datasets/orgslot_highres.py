@@ -147,8 +147,11 @@ def body_center_window(image, size=512):
     """Image-only window on fixed_255 HU[-175,250] CT; no label input."""
     import cv2
     import numpy as np
+    if image.ndim == 4:
+        # One image-only window shared by all slices preserves slab alignment.
+        image = image.mean(dim=1)
     if image.ndim != 3:
-        raise ValueError("body-center mode currently supports 2D only")
+        raise ValueError("body-center expects C,H,W or C,T,H,W")
     cv2.setNumThreads(1)
     gray = image[0].detach().cpu().numpy()
     body = (gray > (25.0 / 425.0)).astype(np.uint8)

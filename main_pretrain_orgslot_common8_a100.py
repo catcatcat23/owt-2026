@@ -545,8 +545,6 @@ def main(args):
     if expected_preprocess.get("offline_spatial_matrix") != "native_after_resampling":
         raise ValueError("preprocessing must retain the native resampled matrix")
     required_size = 512 if args.body_center else 448
-    if args.body_center and args.dimension != "2D":
-        raise ValueError("body-center protocol is 2D only")
     if args.input_size != required_size or args.global_crop_size != required_size:
         raise ValueError("this experiment requires 448 crop and 448 model input")
     if args.dimension == "3D":

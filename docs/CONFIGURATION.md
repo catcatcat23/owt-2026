@@ -749,3 +749,19 @@ All future BTCV experiments use 24 training cases and six test cases: img0008, i
 All use SAM-tail soft prior+aux, native spacing0.7/0.7/2mm, body-centered512 crop without full-field resize, ROI base384 (append variants expand to include target bbox), retained-slot supervision with ROI target retention, BF16, clip1, 118800 optimizer updates, warmup5940, LR7.5e-5, weight decay0.05, effective batch192 (4 GPUs ×16 ×3). Appending retains global index coverage per dataset epoch; distributed sampler/drop-last can omit a few rows. At fixed updates it does not increase total training budget. ROI contrast changes class coverage, replacement/append, case balancing and target-fit together. CNN contrast also changes native skips and parameter count.
 
 Entry: `scripts/orgslot/btcv_seed43/submit.sh` with immutable `EXPERIMENT_WORKDIR`, `EXPECTED_COMMIT`, `RUN_ROOT`, `BTCV_ROOT`, `VARIANT`, `MAE_CHECKPOINT`, `RESENC_CHECKPOINT`. Initial training and afterany continuation each request4×A800,24CPU,192GB,5 days on sifansong/XEC8gpus. Evaluation uses1×4090,8CPU,96GB,1 day, afterok continuation. Eval checks118800 updates; fixed0.5 and training-set threshold calibration are reported separately, followed by reconstruction threshold0.02. No test-set tuning.
+
+## BTCV seed43 3D short-slab comparison (2026-11-20)
+
+New controlled follow-up to 2D ViT append ROI: same24/6 split, model seed0,
+0.7/0.7/2mm,512 body window,ROI384 target-fit,append0.25 all8,
+SAM-tail soft prior+aux,118800 updates,LR7.5e-5,wd0.05.
+Consumes four adjacent slices (temporal stride1), slice-wise segmentation.
+Loads AutoPET3D MAE F4 TS1 224 U100K encoder, not the2D weights.
+4xA800,per-GPU6,accumulation8,effective192 slabs; this is192 slabs rather
+than192 single slices, so pixel exposure/compute and pretraining differ.
+An image-only mean-slab body mask selects one shared512 window.
+Evaluation restores probabilities to native coordinates, averages overlapping
+slabs per covered pixel, retains full GT (uncovered predictions zero),
+then applies identical0.5/calibrated thresholds and2D postprocessing.
+Train calibration uses all5342 slices, test1433. Direct/Indirect recon0.02.
+Entries: scripts/orgslot/btcv_3d/train.sh and eval.sh. Existing2D unchanged.

@@ -15,7 +15,7 @@ from tools.eval_common8_orgslot_heads import (
     select_thresholds, threshold_label,
 )
 from tools.eval_common8_orgslot_heads_3d import (
-    accumulate_slab, build_3d_dataset, build_3d_model,
+    accumulate_slab, accumulate_native_slab, build_3d_dataset, build_3d_model,
 )
 from tools.eval_common8_orgslot_reconstruction_threshold import (
     atomic_json, new_counter, parse_class_configuration, postprocess_slice,
@@ -36,6 +36,8 @@ def parse_args():
     parser.add_argument('--threshold-sweep', default='0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9')
     parser.add_argument('--calibration-samples', type=int, default=6000)
     parser.add_argument('--expected-cases', type=int, required=True)
+    parser.add_argument('--input-size', type=int, default=448)
+    parser.add_argument('--body-center', action='store_true')
     parser.add_argument('--batch-size', type=int, default=1)
     parser.add_argument('--workers', type=int, default=4)
     return parser.parse_args()
@@ -124,12 +126,12 @@ def main():
     prefixes = ('direct', 'indirect') if args.mode == 'reconstruction' else tuple(threshold_sets)
     counters = {prefix + '_' + suffix: {class_id: {} for class_id in class_ids}
                 for prefix in prefixes for suffix in ('raw', 'post')}
-    dataset, case_indices, case_slices = build_3d_dataset(args.data_csv, 448, 448, 4)
+    dataset, case_indices, case_slices = build_3d_dataset(args.data_csv, args.input_size, args.input_size, 4, body_center=args.body_center)
     if set(data_keys) != {(case, index) for case, indices in case_slices.items() for index in indices}:
         raise ValueError('3D dataset does not cover the manifest exactly')
     if not torch.cuda.is_available():
         raise RuntimeError('formal inference requires allocated CUDA')
-    model, load_report = build_3d_model(args.checkpoint, specs, 448, 'linear_sqrt', 4, 1)
+    model, load_report = build_3d_model(args.checkpoint, specs, args.input_size, 'linear_sqrt', 4, 1)
     model.cuda().eval()
     id_to_name = {int(spec['raw_class_id']): spec['name'] for spec in specs}
     id_to_index = {int(spec['raw_class_id']): index for index, spec in enumerate(specs)}
@@ -137,7 +139,7 @@ def main():
     out.mkdir(parents=True)
     config = dict(vars(args), checkpoint_sha256=checkpoint_hash, test_reference_sha256=test_hash,
                   data_csv_sha256=sha256(Path(args.data_csv)), scoring_slices=len(selected_keys),
-                  scoring_cases=cases, geometry='448 deterministic center crop',
+                  scoring_cases=cases, geometry=('shared slab body-center crop restored to native grid' if args.body_center else str(args.input_size) + ' deterministic center crop'),
                   slab_fusion='mean scores per original slice before thresholding',
                   postprocess='2D postprocess_slice: min_size=20, opening_radius=1',
                   reconstruction='Direct mean channels; Indirect clamp_min(input-complement,0) then mean channels; threshold=0.02',
@@ -151,10 +153,11 @@ def main():
         for case_number, case in enumerate(cases, 1):
             indices = case_slices[case]
             positions = {value: index for index, value in enumerate(indices)}
-            shape = (len(class_ids), len(indices), 448, 448)
+            hw = tuple(dataset[case_indices[case][0]]['full_label'].shape[-2:]) if args.body_center else (args.input_size, args.input_size)
+            shape = (len(class_ids), len(indices), *hw)
             sources = ('direct', 'indirect') if args.mode == 'reconstruction' else ('head',)
             sums = {source: np.zeros(shape, np.float32) for source in sources}
-            counts = {source: np.zeros(len(indices), np.uint16) for source in sources}
+            counts = {source: np.zeros((len(indices), *hw) if args.body_center else len(indices), np.uint16) for source in sources}
             targets = [None] * len(indices)
             loader = DataLoader(Subset(dataset, case_indices[case]), batch_size=args.batch_size,
                                 shuffle=False, num_workers=args.workers, pin_memory=True)
@@ -175,12 +178,23 @@ def main():
                         raise FloatingPointError('nonfinite ' + source)
                     values = values.float().cpu().numpy()
                     for sample in range(len(image)):
-                        accumulate_slab(sums[source], counts[source], targets, positions,
-                            batch['slice_indices'][sample].numpy(), values[sample], batch['full_label'][sample, 0].numpy())
+                        if args.body_center:
+                            accumulate_native_slab(sums[source], counts[source], targets, positions,
+                                batch['slice_indices'][sample].numpy(), values[sample],
+                                batch['full_label'][sample, 0].numpy(), batch['crop_box'][sample].numpy())
+                        else:
+                            accumulate_slab(sums[source], counts[source], targets, positions,
+                                batch['slice_indices'][sample].numpy(), values[sample], batch['full_label'][sample, 0].numpy())
             for source in sources:
-                if np.any(counts[source] == 0):
-                    raise ValueError('uncovered original slices')
-                sums[source] /= counts[source][None, :, None, None]
+                if args.body_center:
+                    if any(t is None for t in targets):
+                        raise ValueError('uncovered original slices')
+                    # Pixels outside all windows remain zero, retaining missed GT in scoring.
+                    sums[source] /= np.maximum(counts[source], 1)[None]
+                else:
+                    if np.any(counts[source] == 0):
+                        raise ValueError('uncovered original slices')
+                    sums[source] /= counts[source][None, :, None, None]
             for position, slice_index in enumerate(indices):
                 if (case, slice_index) not in selected_keys:
                     continue

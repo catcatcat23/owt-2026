@@ -765,3 +765,6 @@ slabs per covered pixel, retains full GT (uncovered predictions zero),
 then applies identical0.5/calibrated thresholds and2D postprocessing.
 Train calibration uses all5342 slices, test1433. Direct/Indirect recon0.02.
 Entries: scripts/orgslot/btcv_3d/train.sh and eval.sh. Existing2D unchanged.
+
+### BTCV 3D OOM recovery (2026-11-21)
+Initial 211035 failed during epoch0 coarse mask BCE (GPU allocation 75.66 GiB); no checkpoint was saved. Use a fresh run directory with 4 A800, microbatch3, accumulation16, effective192 slabs. Architecture, input512, four frames, MAE and 118800 updates unchanged. This changes microbatch-level random organ-mask grouping, so effective-batch equality is not bitwise training equivalence. Completion chain now rejects empty/nonexistent recovery paths before sbatch. CPU shell regression checked; no GPU smoke test, memory feasibility awaits training.

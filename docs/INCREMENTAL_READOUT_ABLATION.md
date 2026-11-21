@@ -427,3 +427,37 @@ anteng/XEC任务目录：`/gpfs/work/aac/antengcai23/artifacts/inc2222_20261029`
 
 续训afterany对应训练；评估afterok对应续训，后续阶段afterok上一阶段续训。
 回执：`/gpfs/work/aac/antengcai23/artifacts/inc2222_20261029/runs/jobs.txt`。
+
+## WORD 2-2 (four steps): final evaluation, 2026-11-21
+
+Organ order: spleen, right kidney / left kidney, gallbladder / esophagus, pancreas / liver, stomach. Old = initial two classes; New = all six later classes. Values are DSC (%). Paper reference: [PCDD Table 2](https://arxiv.org/html/2511.07749v1#S4).
+
+| Method | Old (2) | New (6) | All (8) | Source / protocol |
+|---|---:|---:|---:|---|
+| Offline (PCDD paper) | 94.43 | 82.49 | 85.47 | Paper reference |
+| LwF | 0.00 | 43.01 | 32.25 | Paper reference |
+| ILT | 0.04 | 15.54 | 11.66 | Paper reference |
+| MiB | 91.79 | 64.26 | 71.14 | Paper reference |
+| PLOP | 73.23 | 29.88 | 40.72 | Paper reference |
+| SDR | 92.29 | 57.73 | 66.37 | Paper reference |
+| REMINDER | 27.91 | 23.75 | 24.79 | Paper reference |
+| CoNuSeg | 43.16 | 47.12 | 46.13 | Paper reference |
+| InSeg | 80.98 | 40.59 | 50.69 | Paper reference |
+| PCDD | 90.17 | 65.97 | 72.02 | Paper reference |
+| OrganSlot binary_post | 93.01 | 80.32 | 83.49 | Our split and postprocessing |
+| OrganSlot selected_post | 93.54 | 80.66 | 83.88 | Our split and postprocessing |
+
+Our full test: 24 cases / 7315 slices; official-pool seed42. Each stage has 118800 updates (475200 total). Stage4 train/resume/eval = antengcai23/XEC 206321/206322/206323, all completed. Calibration uses validation, not test. These are independent organ binary masks with postprocessing; no claim of matched splits, compute, pretraining or exclusive multiclass evaluation against PCDD. Paper rows are external references, not reproduced baselines.
+
+| Organ | Fixed 0.5 + post | Calibrated + post |
+|---|---:|---:|
+| spleen | 93.09 | 93.42 |
+| right_kidney | 92.94 | 93.66 |
+| left_kidney | 92.00 | 92.67 |
+| gallbladder | 65.05 | 65.01 |
+| esophagus | 69.98 | 71.04 |
+| pancreas | 75.25 | 75.41 |
+| liver | 95.39 | 95.39 |
+| stomach | 84.24 | 84.46 |
+
+Evidence: `antengcai23/XEC:/gpfs/work/aac/antengcai23/artifacts/allroi_split_20261108/WORD/2222/stage4_evaluation/test/results.json`; reconstruction direct-post 73.02%, indirect-post 6.12%, reported separately.

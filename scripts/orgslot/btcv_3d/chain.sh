@@ -12,7 +12,8 @@ if "$PYTHON" tools/btcv_offline_checkpoint.py "$RUN_ROOT" --final > "$RUN_ROOT/f
 else
  # Require a valid recovery checkpoint before allocating another GPU job.
  "$PYTHON" tools/btcv_offline_checkpoint.py "$RUN_ROOT" --resume > "$RUN_ROOT/resume_checkpoint.txt"
- test -s "$RUN_ROOT/resume_checkpoint.txt"
+ checkpoint=$(cat "$RUN_ROOT/resume_checkpoint.txt")
+ [[ -n "$checkpoint" && -f "$checkpoint" ]] || { echo "No recovery checkpoint; stop chain without allocating GPUs"; exit 2; }
  [[ ${CHAIN_ATTEMPT:-1} -lt 4 ]] || { echo 'Four allocations exhausted; inspect before continuing'; exit 2; }
  export CHAIN_ATTEMPT=$(( ${CHAIN_ATTEMPT:-1} + 1 ))
  job=$(sbatch --parsable --export=ALL --account=sifansong --qos=4gpus --partition=gpua800,gpua8001t --gres=gpu:a800:4 --cpus-per-task=24 --mem=192G --time=7-00:00:00 --job-name=BTCV3D_resume --output="$RUN_ROOT/%j.out" --error="$RUN_ROOT/%j.err" scripts/orgslot/btcv_3d/train.sh resume)

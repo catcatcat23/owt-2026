@@ -249,6 +249,9 @@ fi
 if [[ -n "${RESUME_CHECKPOINT}" ]]; then
   COMMAND+=(--resume "${RESUME_CHECKPOINT}" --mae_init_scope "${MAE_INIT_SCOPE}")
 fi
+if [[ -n "${WORD_2D_INIT_CHECKPOINT:-}" ]]; then
+  COMMAND+=(--word_2d_init_checkpoint "$WORD_2D_INIT_CHECKPOINT")
+fi
 if [[ -n "${ACTUAL_LR}" ]]; then
   COMMAND+=(--lr "${ACTUAL_LR}")
 fi

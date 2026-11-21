@@ -91,6 +91,7 @@ def get_args_parser():
         default="reconstruction",
     )
     parser.add_argument("--init_checkpoint", default="")
+    parser.add_argument("--word_2d_init_checkpoint", default="")
     parser.add_argument("--mae_init_checkpoint", default="")
     parser.add_argument("--cnn_init_checkpoint", default="")
     parser.add_argument(
@@ -500,6 +501,13 @@ def main(args):
             raise ValueError("head_only requires --lambda_lpips 0")
         if args.lambda_seg <= 0:
             raise ValueError("head_only requires --lambda_seg > 0")
+    if args.word_2d_init_checkpoint:
+        if args.dimension != "3D" or args.backbone != "vit" or args.training_scope == "head_only":
+            raise ValueError("WORD 2D transfer requires full 3D ViT training")
+        if any((args.init_checkpoint, args.mae_init_checkpoint, args.cnn_init_checkpoint, args.resume)):
+            raise ValueError("WORD transfer is exclusive with other initialization/resume")
+        if not Path(args.word_2d_init_checkpoint).is_file():
+            raise FileNotFoundError(args.word_2d_init_checkpoint)
     if args.init_checkpoint and args.mae_init_checkpoint:
         raise ValueError(
             "--init_checkpoint and --mae_init_checkpoint are mutually exclusive"
@@ -676,7 +684,10 @@ def main(args):
     if args.cnn_init_checkpoint:
         from models_cnn_mim import load_cnn_encoder_checkpoint
         cnn_checkpoint_report = load_cnn_encoder_checkpoint(model, args.cnn_init_checkpoint)
-    if args.init_checkpoint:
+    if args.word_2d_init_checkpoint:
+        from util.word_2d_transfer import load_word_2d_transfer
+        initial_checkpoint_report = load_word_2d_transfer(model, args.word_2d_init_checkpoint, args)
+    elif args.init_checkpoint:
         initial_checkpoint_report = _load_initial_checkpoint(
             model, args.init_checkpoint, args
         )

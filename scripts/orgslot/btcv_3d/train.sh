@@ -12,11 +12,14 @@ export INPUT_SIZE=512 GLOBAL_CROP_SIZE=512 BODY_CENTER=1 N_GPU=4 MICRO_BATCH=3 A
 export OMP_NUM_THREADS=1 PYTHONUNBUFFERED=1
 export ROI_APPEND_FRACTION=0.25 ROI_FIT_TARGET=1 FOCUS_CLASS_IDS=1,2,3,4,5,6,7,8
 export BACKBONE=vit CNN_INIT_CHECKPOINT= MAE_INIT_CHECKPOINT=$MAE_CHECKPOINT FIX_FRAME=4 TEMP_STRIDE=1
+if [[ -n "${WORD_2D_CHECKPOINT:-}" ]]; then
+ export WORD_2D_INIT_CHECKPOINT=$WORD_2D_CHECKPOINT MAE_INIT_CHECKPOINT=
+fi
 mkdir -p "$RUN_ROOT"
 checkpoint=$("$PYTHON" tools/btcv_offline_checkpoint.py "$RUN_ROOT" --resume)
 if [[ -n "$checkpoint" ]]; then
  if "$PYTHON" tools/btcv_offline_checkpoint.py "$RUN_ROOT" --final > "$RUN_ROOT/final_checkpoint.txt"; then exit 0; fi
- export RESUME_CHECKPOINT=$checkpoint MAE_INIT_CHECKPOINT= CNN_INIT_CHECKPOINT=
+ export RESUME_CHECKPOINT=$checkpoint MAE_INIT_CHECKPOINT= CNN_INIT_CHECKPOINT= WORD_2D_INIT_CHECKPOINT=
 else
  [[ "${1:-initial}" == initial ]] || { echo 'No checkpoint: refusing scratch continuation'; exit 2; }
  export RESUME_CHECKPOINT=
